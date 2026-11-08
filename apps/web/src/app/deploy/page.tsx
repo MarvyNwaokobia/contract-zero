@@ -212,7 +212,7 @@ function Deploy() {
                 <button
                   key={id}
                   onClick={() => setGun(id)}
-                  className={`rounded border px-4 py-3 text-left ${gun === id ? 'border-amber bg-amber/10' : 'border-slate-800 hover:bg-slate-900'}`}
+                  className={`border px-4 py-3 text-left ${gun === id ? 'border-amber bg-amber/10' : 'border-line hover:bg-panel-2'}`}
                 >
                   <div className="font-semibold text-slate-100">{g.name}</div>
                   <div className="text-xs text-slate-500">damage {g.damage} · {g.fireRate} rpm · mag {g.magazine} · {Math.round(gunDps(g))} dps</div>
@@ -221,7 +221,7 @@ function Deploy() {
             })}
             <p className="text-xs text-slate-500">Standard issue. Owned gear arrives with the Exchange.</p>
           </div>
-          <div className="h-56 rounded border border-slate-800 bg-slate-950"><GunTurntable gunId={gun} className="h-full w-full" /></div>
+          <div className="h-56 border border-line" style={{ background: 'radial-gradient(ellipse at 50% 55%, #23272e 0%, #0e1013 70%)' }}><GunTurntable gunId={gun} className="h-full w-full" /></div>
         </div>
       </Panel>
       {phase.kind === 'error' && <p className="mt-4 text-sm text-rose-400">Could not deploy: {phase.message}</p>}

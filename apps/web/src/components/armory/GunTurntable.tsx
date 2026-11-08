@@ -1,7 +1,8 @@
 'use client'
 
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { Canvas } from '@react-three/fiber'
+import { Canvas, useThree } from '@react-three/fiber'
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { useGLTF } from '@react-three/drei'
 import * as THREE from 'three'
 import type { GunId } from '@/engine/combat/GunStats'
@@ -44,9 +45,12 @@ function normalise(src: THREE.Object3D): THREE.Group {
   const center = new THREE.Vector3()
   box.getSize(size)
   box.getCenter(center)
-  inner.position.sub(center)
   const longest = Math.max(size.x, size.y, size.z) || 1
-  inner.scale.setScalar(1.15 / longest) // fill the small frame rather than float in it
+  const k = 0.95 / longest // fill the frame with room to sway, never clip
+  inner.scale.setScalar(k)
+  // The offset is in the parent's units, so it scales with the model: an unscaled
+  // offset pushed large models (authored in centimetres) right out of frame.
+  inner.position.copy(center).multiplyScalar(-k)
   const g = new THREE.Group()
   g.add(inner)
   return g
@@ -63,18 +67,33 @@ function ProcGun({ id }: { id: ProceduralGunId }) {
   return <primitive object={model} />
 }
 
+/** A soft studio to reflect: metal with nothing to reflect renders black. Built
+ *  locally (no HDR download), once per canvas. */
+function Studio() {
+  const { gl, scene } = useThree()
+  useEffect(() => {
+    const pmrem = new THREE.PMREMGenerator(gl)
+    const env = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+    scene.environment = env
+    return () => { scene.environment = null; env.dispose(); pmrem.dispose() }
+  }, [gl, scene])
+  return null
+}
+
 function Spin({ children }: { children: React.ReactNode }) {
   const ref = useRef<THREE.Group>(null)
   useEffect(() => {
     let raf = 0
     const tick = () => {
-      if (ref.current) ref.current.rotation.y += 0.012
+      // Sway around a three-quarter side view instead of spinning: a gun read
+      // end-on is a stick, and the profile is what sells it.
+      if (ref.current) ref.current.rotation.y = -0.45 + Math.sin(performance.now() / 1600) * 0.55
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
   }, [])
-  return <group ref={ref} rotation={[0.22, 0.6, 0]}>{children}</group>
+  return <group ref={ref} rotation={[0.12, -0.45, 0]}>{children}</group>
 }
 
 export default function GunTurntable({ gunId, className }: { gunId: GunId; className?: string }) {
@@ -102,9 +121,11 @@ export default function GunTurntable({ gunId, className }: { gunId: GunId; class
           gl={{ antialias: true, powerPreference: 'low-power' }}
           style={{ width: '100%', height: '100%' }}
         >
-          <hemisphereLight args={['#b8c6d6', '#15161c', 0.7]} />
-          <directionalLight position={[2, 3, 2]} intensity={2.6} color="#fff3e0" />
-          <directionalLight position={[-2, 0.5, -1.5]} intensity={1.2} color="#7fb0ff" />
+          <Studio />
+          <hemisphereLight args={['#c8d2de', '#1a1c22', 0.9]} />
+          <directionalLight position={[2, 3, 2]} intensity={2.4} color="#fff3e0" />
+          <directionalLight position={[-2, 0.5, -1.5]} intensity={1.4} color="#ffc372" />
+          <directionalLight position={[0, -1, 2]} intensity={0.6} color="#9fc3e0" />
           <Suspense fallback={null}>
             <Spin>
               {isProc ? <ProcGun id={gunId as ProceduralGunId} /> : url ? <GlbGun url={url} /> : null}

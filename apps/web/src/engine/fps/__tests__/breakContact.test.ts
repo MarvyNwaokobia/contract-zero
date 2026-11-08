@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { FpsSim, FPS_TUNING, type CoverBox, type FpsInput, type Vec3 } from '../FpsSim';
+import { mulberry32 } from '../endless';
 
 /**
  * You can hide.
@@ -21,11 +22,14 @@ const E = FPS_TUNING.ENEMY;
 const WALL: CoverBox = { x: 0, z: 0, w: 14, d: 0.6, h: 3 };
 
 /** Enemy posted south of the wall, player starts north of it in the open. */
+// Seeded: the AI's search wander is random, and an unseeded run occasionally
+// wandered past the stale point and failed the hunt assertion.
 function sim(): FpsSim {
   const s = new FpsSim({
     enemies: [{ pos: [0, -6], room: 1 }],
     cover: [WALL],
     respawnEnabled: false,
+    rng: mulberry32(7),
   });
   return s;
 }

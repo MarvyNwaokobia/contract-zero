@@ -89,3 +89,35 @@ Every proposed action is validated by the engine like any other command; a rejec
 | **Vex merchant** | set strategy, post bounties | Suspends business while insolvent. Otherwise it sponsors raids on Vanguard depots of anything its shelves are short of (40% of the depot's value, within its budget), and widens its margin while any shelf is under half its target |
 
 Each decision is logged with its trigger, the figures it saw, the proposed action, a one-line rationale and the validation result.
+
+
+## Live-world rules (2026-11-08)
+
+A long-running world collapsed or stagnated: with no raids the faction hoarded credits and fuel while the merchant went broke; under raids the merchant ran out of fuel and ammunition for good, because it only ever restocked medicine. These rules apply in the live world (`Market::living`, on in `genesis`, off in the fixed acceptance scenario):
+
+| Rule | Effect |
+|---|---|
+| **Merchant logistics** (every 12 ticks) | A caravan for each shelf below target (counting what is inbound), paid at 90% of production cost and sized to what Vex can afford above its reserve. It arrives 6 ticks later. Surplus beyond twice the target is exported at half cost |
+| **Merchant capital** | Credits above 6,000 are paid out (`Dividend`, destroyed), so trading profit can't pile up while the factions go broke |
+| **Adaptive faction supply** | A faction ships only while stock plus inbound is under twice its requirement |
+| **Garrison upkeep** | Paid daily, scaled to defense level (60 to 640 credits a day) |
+| **War chest** | Treasury beyond reserve + 10 days of income is remitted to command (destroyed) |
+| **Fortify when rich** | The commander adds one level of extra patrols per 4 days of banked income, up to +2 |
+
+All new flows are classified as issuance or destruction, so conservation holds and they mirror on chain as flows.
+
+**Measured** (`cargo run -p cz-economy --example longrun -- 90 <raid every N ticks>`, one player raiding the richest depot and selling the cargo):
+
+| Raids | Board empty | Vanguard treasury | Defense |
+|---|---|---|---|
+| none | 0% | capped at about 12,600 | climbs to 4 |
+| ~1 a day | 0% | 800–1,300 | swings 1–4 |
+| ~2 a day | 0% | lean (~650) | 1 |
+| ~3 a day | 11% | at reserve | 1 |
+
+`tests/living.rs` keeps it that way:
+- a quiet faction is capped and fortifies;
+- under daily raids the board never empties and posture takes at least 3 values;
+- a faction bled for 20 days recovers;
+- a sold-out shelf is restocked by caravan;
+- the acceptance world is unaffected.

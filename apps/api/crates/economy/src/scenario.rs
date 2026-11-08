@@ -45,7 +45,7 @@ fn vex(credit_reserve: i64, shipment: Option<ShipmentPlan>) -> Actor {
 }
 
 fn market() -> Market {
-    Market { merchant: MERCHANT.into(), target: [120, 60, 120], strategy: Strategy { margin_bp: 2_000, spread_bp: 1_000 } }
+    Market { merchant: MERCHANT.into(), target: [120, 60, 120], strategy: Strategy { margin_bp: 2_000, spread_bp: 1_000 }, living: false }
 }
 
 fn build(seed: u64, actors: [Actor; 2], balances: &[(&str, Asset, i64)]) -> World {
@@ -60,11 +60,12 @@ fn build(seed: u64, actors: [Actor; 2], balances: &[(&str, Asset, i64)]) -> Worl
 }
 
 pub fn genesis(seed: u64) -> World {
-    build(
+    let mut w = build(
         seed,
         [
-            vanguard(600, Some(ShipmentPlan { resource: Resource::Fuel, units: 60, every_ticks: 12, transit_ticks: 6, next_dispatch: 0 })),
-            vex(300, Some(ShipmentPlan { resource: Resource::Med, units: 30, every_ticks: 24, transit_ticks: 8, next_dispatch: 3 })),
+            Actor { income_per_day: 1_200, ..vanguard(600, Some(ShipmentPlan { resource: Resource::Fuel, units: 60, every_ticks: 12, transit_ticks: 6, next_dispatch: 0 })) },
+            // Vex restocks every shelf through merchant logistics (Market::living).
+            vex(300, None),
         ],
         &[
             ("faction:vanguard", Asset::Credits, 4_000),
@@ -76,7 +77,9 @@ pub fn genesis(seed: u64) -> World {
             ("merchant:vex", Asset::Res(Resource::Med), 50),
             ("merchant:vex", Asset::Res(Resource::Fuel), 60),
         ],
-    )
+    );
+    w.market.living = true;
+    w
 }
 
 /// The acceptance scenario's exact starting state.

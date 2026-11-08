@@ -154,6 +154,13 @@ pub fn commander(w: &World, id: &str) -> Vec<Decision> {
     let credits = w.balance(&a.account, Asset::Credits);
     let mut level = (BASE_DEFENSE as i64 + raids).min(DEFENSE_MAX as i64) as u8;
     let mut why = if raids > 0 { format!("{raids} raid(s) in the last {RAID_MEMORY_TICKS}h: escorts up.") } else { "Quiet period: standard escorts.".to_string() };
+    // A strong treasury buys extra patrols (and pays their upkeep) before any raid:
+    // one level per four days of income banked above the reserve.
+    let extra = ((credits - a.credit_reserve) / (4 * a.income_per_day).max(1)).clamp(0, 2) as u8;
+    if extra > 0 && level < DEFENSE_MAX {
+        level = (level + extra).min(DEFENSE_MAX);
+        why = format!("{why} Treasury strong ({credits} cr): extra patrols on the depots.");
+    }
     if credits < a.credit_reserve + DEFENSE_COST[level as usize] {
         level = DEFENSE_MIN;
         why = "Treasury below reserve: escorts cut to minimum.".into();

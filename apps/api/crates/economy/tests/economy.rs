@@ -280,12 +280,14 @@ fn a_sponsored_raid_pays_the_bounty_and_an_unclaimed_one_is_refunded() {
     // A second bounty no one claims goes back to its sponsor.
     let plan = raid_plan(&w, VANGUARD, Resource::Ammo).unwrap();
     let amount = plan.manifest * pricing::production_cost(Resource::Ammo) / 2;
-    let before = w.balance("merchant:vex", Asset::Credits);
     w.execute(&Caller::Agent(MERCHANT.into()), &Action::PostBounty { target: VANGUARD.into(), resource: Resource::Ammo, amount }).unwrap();
+    let bounty = *w.bounties.keys().last().unwrap();
     for _ in 0..=BOUNTY_TICKS {
         w.tick();
     }
-    assert!(w.balance("merchant:vex", Asset::Credits) >= before - 1_000, "refunded (allowing for restock costs)");
+    // The escrow came back to the sponsor in full (its other spending is unrelated).
+    let refunded: i64 = w.ledger.iter().filter(|e| e.transfer.reason == (Reason::Refund { bounty }) && e.transfer.to == "merchant:vex").map(|e| e.transfer.qty).sum();
+    assert_eq!(refunded, amount, "refunded in full");
     assert!(w.bounties.values().any(|b| b.status == BountyStatus::Expired));
     assert_conserved(&w);
 }

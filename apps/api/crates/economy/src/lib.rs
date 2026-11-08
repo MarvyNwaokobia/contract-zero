@@ -46,6 +46,23 @@ pub const BOUNTY_MIN_BP: i64 = 2_500;
 pub const BOUNTY_MAX_BP: i64 = 15_000;
 /// How long a posted bounty stays open.
 pub const BOUNTY_TICKS: u64 = 24;
+/// Live-world rules (see [`Market::living`]).
+/// The merchant reviews its shelves this often, and its caravans take this long.
+pub const MERCHANT_RESTOCK_TICKS: u64 = 12;
+pub const MERCHANT_TRANSIT_TICKS: u64 = 6;
+/// What the merchant gets for surplus it exports, relative to production cost.
+pub const EXPORT_PRICE_BP: i64 = 5_000;
+/// What a live-world merchant pays to import, relative to production cost.
+pub const MERCHANT_IMPORT_BP: i64 = 9_000;
+/// Merchant capital beyond this is paid out to its backers (destroyed), so trading
+/// profit cannot pile up forever while the factions it trades with go broke.
+pub const MERCHANT_CAPITAL: i64 = 6_000;
+/// A live-world faction keeps at most this many days of income in its treasury; the
+/// rest is remitted to its command (destroyed), so a quiet faction can't hoard its way
+/// to invulnerability.
+pub const WAR_CHEST_DAYS: i64 = 10;
+/// A faction's daily garrison pay by defense level (index = level).
+pub const UPKEEP_PER_DAY: [i64; 6] = [0, 60, 140, 260, 420, 640];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -130,6 +147,16 @@ pub enum Reason {
     Refund { bounty: u64 },
     BountyPaid { bounty: u64, raid: u64 },
     Raid { raid: u64 },
+    /// A faction's daily garrison pay (destroyed).
+    Upkeep,
+    /// Merchant surplus sold out of the region (goods destroyed)…
+    Export,
+    /// …and the credits it brought in (issued).
+    ExportRevenue,
+    /// Merchant profit paid out of the region (destroyed).
+    Dividend,
+    /// Faction treasury above its war chest, remitted to command (destroyed).
+    Remittance,
     /// The merchant's side of a player quote, held so no one else can buy or spend it.
     QuoteHold { quote: u64 },
     /// A quote that was not accepted in time: the hold goes back to the merchant.
@@ -142,8 +169,8 @@ impl Reason {
     /// Is this a source (issuance) or a sink (destruction), as opposed to a transfer?
     pub fn class(&self) -> &'static str {
         match self {
-            Reason::Genesis | Reason::Income | Reason::Production | Reason::Shipment { .. } => "issuance",
-            Reason::Consumption | Reason::Logistics { .. } | Reason::EscortWages { .. } | Reason::ImportCost { .. } => "destruction",
+            Reason::Genesis | Reason::Income | Reason::Production | Reason::Shipment { .. } | Reason::ExportRevenue => "issuance",
+            Reason::Consumption | Reason::Logistics { .. } | Reason::EscortWages { .. } | Reason::ImportCost { .. } | Reason::Upkeep | Reason::Export | Reason::Dividend | Reason::Remittance => "destruction",
             _ => "transfer",
         }
     }
@@ -214,6 +241,11 @@ pub struct Market {
     pub merchant: String,
     pub target: [i64; 3],
     pub strategy: Strategy,
+    /// Live-world rules: the merchant restocks every shelf by caravan and exports
+    /// surplus, and factions pay daily garrison upkeep. Off in the fixed acceptance
+    /// scenario, where nothing may change unless a test acts.
+    #[serde(default)]
+    pub living: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -344,6 +376,7 @@ pub enum Event {
     ShipmentDispatched { convoy: u64, owner: String, resource: Resource, units: i64, defense: u8 },
     ShipmentArrived { convoy: u64 },
     MerchantSuspended { reason: String },
+    MerchantExported { resource: Resource, units: i64, revenue: i64 },
     BountyPosted { bounty: u64, sponsor: String, target: String, resource: Resource, amount: i64 },
     BountyExpired { bounty: u64 },
     RaidStarted { raid: u64, player: String, target: String, resource: Resource, manifest: i64 },
@@ -805,6 +838,18 @@ impl World {
                     ev.push(Event::Shortage { actor: id.clone(), resource: r, missing: want - used });
                 }
             }
+            // Garrison upkeep: what the faction pays to keep its posture, every day; and
+            // once a day, treasury beyond the war chest goes back to command.
+            if self.market.living && a.kind == ActorKind::Faction {
+                let pay = spread(UPKEEP_PER_DAY[a.defense.min(DEFENSE_MAX) as usize], t).min(self.balance(&a.account, Asset::Credits));
+                if pay > 0 {
+                    ev.extend(self.apply(&[Transfer { from: a.account.clone(), to: WORLD.into(), asset: Asset::Credits, qty: pay, reason: Reason::Upkeep }]).expect("checked"));
+                }
+                let excess = self.balance(&a.account, Asset::Credits) - a.credit_reserve - WAR_CHEST_DAYS * a.income_per_day;
+                if t % TICKS_PER_DAY == TICKS_PER_DAY - 1 && excess > 0 {
+                    ev.extend(self.apply(&[Transfer { from: a.account.clone(), to: WORLD.into(), asset: Asset::Credits, qty: excess, reason: Reason::Remittance }]).expect("checked"));
+                }
+            }
         }
 
         let arriving: Vec<Convoy> = self.convoys.values().filter(|c| c.status == ConvoyStatus::InTransit && c.arrives_at <= t).cloned().collect();
@@ -813,6 +858,10 @@ impl World {
             ev.extend(self.apply(&[Transfer { from: c.account(), to: owner, asset: Asset::Res(c.resource), qty: c.units, reason: Reason::ShipmentArrived { convoy: c.id } }]).expect("convoy holds its cargo"));
             self.convoys.get_mut(&c.id).unwrap().status = ConvoyStatus::Arrived;
             ev.push(Event::ShipmentArrived { convoy: c.id });
+        }
+
+        if self.market.living && t % MERCHANT_RESTOCK_TICKS == 3 {
+            ev.extend(self.merchant_logistics());
         }
 
         let expired: Vec<Bounty> = self.open_bounties().filter(|b| b.expires_at <= t).cloned().collect();
@@ -841,9 +890,74 @@ impl World {
     /// shipment) and pays escort wages at the best defense level it can afford. A
     /// merchant caravan pays import cost, shrinking to what it can afford above its
     /// reserve; an insolvent merchant does not restock.
+    /// Units of `r` in transit to `owner`.
+    pub fn inbound(&self, owner: &str, r: Resource) -> i64 {
+        self.convoys.values().filter(|c| c.owner == owner && c.resource == r && c.status == ConvoyStatus::InTransit).map(|c| c.units).sum()
+    }
+
+    /// The merchant's shelf review (live world): a caravan for each shelf below target
+    /// (counting what is already inbound), paid at import cost and sized to what it can
+    /// afford above its reserve; surplus beyond twice target is exported at half cost.
+    fn merchant_logistics(&mut self) -> Vec<Event> {
+        let m = self.merchant().clone();
+        if self.merchant_insolvent() {
+            return vec![Event::MerchantSuspended { reason: "insolvent: restocking paused".into() }];
+        }
+        let mut ev = Vec::new();
+        for r in Resource::ALL {
+            let stock = self.balance(&m.account, Asset::Res(r));
+            let target = self.market.target[r.idx()];
+            let inbound = self.inbound(&m.id, r);
+            if stock + inbound < target {
+                let unit = pricing::production_cost(r) * MERCHANT_IMPORT_BP / pricing::BP;
+                let afford = (self.balance(&m.account, Asset::Credits) - m.credit_reserve).max(0) / unit.max(1);
+                let units = (target - stock - inbound).min(afford);
+                if units <= 0 {
+                    continue;
+                }
+                let id = self.peek_id();
+                let convoy = Convoy { id, owner: m.id.clone(), resource: r, units, defense: 1, dispatched_at: self.tick, arrives_at: self.tick + MERCHANT_TRANSIT_TICKS, status: ConvoyStatus::InTransit };
+                let mut out = self
+                    .apply(&[
+                        Transfer { from: WORLD.into(), to: convoy.account(), asset: Asset::Res(r), qty: units, reason: Reason::Shipment { convoy: id } },
+                        Transfer { from: m.account.clone(), to: WORLD.into(), asset: Asset::Credits, qty: units * unit, reason: Reason::ImportCost { convoy: id } },
+                    ])
+                    .expect("sized to what the merchant can afford");
+                self.commit_id(id);
+                out.push(Event::ShipmentDispatched { convoy: id, owner: m.id.clone(), resource: r, units, defense: 1 });
+                self.convoys.insert(id, convoy);
+                ev.extend(out);
+            } else if stock > 2 * target {
+                let units = stock - target * 3 / 2;
+                let revenue = units * pricing::production_cost(r) * EXPORT_PRICE_BP / pricing::BP;
+                ev.extend(
+                    self.apply(&[
+                        Transfer { from: m.account.clone(), to: WORLD.into(), asset: Asset::Res(r), qty: units, reason: Reason::Export },
+                        Transfer { from: WORLD.into(), to: m.account.clone(), asset: Asset::Credits, qty: revenue.max(1), reason: Reason::ExportRevenue },
+                    ])
+                    .expect("the merchant holds the surplus"),
+                );
+                ev.push(Event::MerchantExported { resource: r, units, revenue });
+            }
+        }
+        let excess = self.balance(&m.account, Asset::Credits) - MERCHANT_CAPITAL;
+        if excess > 0 {
+            ev.extend(self.apply(&[Transfer { from: m.account.clone(), to: WORLD.into(), asset: Asset::Credits, qty: excess, reason: Reason::Dividend }]).expect("checked"));
+        }
+        ev
+    }
+
     fn dispatch(&mut self, actor_id: &str, plan: &ShipmentPlan) -> Vec<Event> {
         let a = self.actors[actor_id].clone();
         let is_faction = a.kind == ActorKind::Faction;
+        // Live world: a faction ships only what it needs (stock plus inbound under
+        // twice its requirement), so supply follows consumption instead of piling up.
+        if self.market.living && is_faction {
+            let need = 2 * a.requirement(plan.resource);
+            if need > 0 && self.balance(&a.account, Asset::Res(plan.resource)) + self.inbound(actor_id, plan.resource) >= need {
+                return vec![];
+            }
+        }
         if !is_faction && self.merchant_insolvent() {
             return vec![Event::MerchantSuspended { reason: "insolvent: restocking paused".into() }];
         }

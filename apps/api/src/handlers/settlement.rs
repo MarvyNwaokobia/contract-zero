@@ -76,3 +76,16 @@ pub async fn admin_advance(state: web::Data<AppState>, req: actix_web::HttpReque
         Err(e) => HttpResponse::InternalServerError().json(json!({ "error": e.to_string() })),
     }
 }
+
+/// Operator-only: realign the chain with the economy (see `settlement::align`).
+pub async fn admin_realign(state: web::Data<AppState>, req: actix_web::HttpRequest) -> HttpResponse {
+    let Ok(token) = std::env::var("ADMIN_TOKEN") else { return HttpResponse::NotFound().finish() };
+    let given = req.headers().get("x-admin-token").and_then(|v| v.to_str().ok()).unwrap_or_default();
+    if token.is_empty() || given != token {
+        return HttpResponse::Unauthorized().json(json!({ "error": "admin token required" }));
+    }
+    match crate::services::settlement::align(&state, true).await {
+        Ok(v) => HttpResponse::Ok().json(v),
+        Err(e) => HttpResponse::Conflict().json(json!({ "error": e })),
+    }
+}

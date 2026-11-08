@@ -210,9 +210,46 @@ pub async fn queue_operation(w: &World, db: &PgPool, near: &NearClient, raid: u6
 /// nothing about (a fresh economy against an existing contract): mint or burn the
 /// difference per actor, then start the cursor at the current ledger.
 pub async fn bootstrap(state: &AppState) -> Result<(), String> {
-    let Some(near) = state.near.clone() else { return Ok(()) };
-    if cursor(state.world.db(), &near.contract.to_string()).await.map_err(|e| e.to_string())? > 0 {
-        return Ok(());
+    align(state, false).await.map(|_| ())
+}
+
+/// Bring the chain to the economy's current balances in one batch per actor/token
+/// difference. At startup (`force = false`) only on a fresh cursor. Forced (admin), it
+/// repairs a mirror that went out of order: the stranded flow batches it replaces
+/// are marked `superseded`. Refuses while any trade, raid or operation is still open,
+/// since those settle against the balances being aligned.
+pub async fn align(state: &AppState, force: bool) -> Result<Value, String> {
+    let Some(near) = state.near.clone() else { return Ok(json!({ "enabled": false })) };
+    let contract = near.contract.to_string();
+    if !force && cursor(state.world.db(), &contract).await.map_err(|e| e.to_string())? > 0 {
+        return Ok(json!({ "aligned": false, "reason": "cursor already set" }));
+    }
+    let db = state.world.db();
+    // Trades still queued are already in the economy but not yet on chain; align to
+    // the economy MINUS their effect, so that once they settle (after this batch:
+    // alignment runs first) the chain ends exactly at the economy.
+    let mut pending: BTreeMap<(String, String), i64> = BTreeMap::new();
+    if force {
+        let (busy,): (i64,) = sqlx::query_as("SELECT count(*) FROM settlements WHERE contract = $1 AND status IN ('pending', 'submitted') AND kind IN ('raid', 'operation')")
+            .bind(&contract).fetch_one(db).await.map_err(|e| e.to_string())?;
+        if busy > 0 {
+            return Err(format!("{busy} raid/operation settlement(s) still open; retry when they land"));
+        }
+        let rows: Vec<(String, Value)> = sqlx::query_as("SELECT kind, payload FROM settlements WHERE contract = $1 AND status IN ('pending', 'submitted') AND kind IN ('trade', 'sell')")
+            .bind(&contract).fetch_all(db).await.map_err(|e| e.to_string())?;
+        let vex = near.account(Role::Vex).to_string();
+        for (kind, p) in rows {
+            let party = p["party"].as_str().unwrap_or_default().to_string();
+            let token = p["token_id"].as_str().unwrap_or_default().to_string();
+            let qty: i64 = p["amount"].as_str().and_then(|v| v.parse().ok()).unwrap_or(0);
+            let total: i64 = p["total"].as_str().and_then(|v| v.parse().ok()).unwrap_or(0);
+            // A purchase moves goods merchant → party and credits party → merchant; a sale the reverse.
+            let s = if kind == "trade" { 1 } else { -1 };
+            *pending.entry((party.clone(), token.clone())).or_default() += s * qty;
+            *pending.entry((vex.clone(), token)).or_default() -= s * qty;
+            *pending.entry((party, "credits".into())).or_default() -= s * total;
+            *pending.entry((vex.clone(), "credits".into())).or_default() += s * total;
+        }
     }
     // Read the chain first (no lock held across RPC), then align under the lock.
     let mut chain: BTreeMap<String, BTreeMap<String, i64>> = BTreeMap::new();
@@ -223,14 +260,24 @@ pub async fn bootstrap(state: &AppState) -> Result<(), String> {
     state
         .world
         .transact(async move |w, db| {
+            if force {
+                sqlx::query("UPDATE settlements SET status = 'superseded', error = 'replaced by a realignment batch' WHERE contract = $1 AND status IN ('pending', 'submitted', 'failed') AND kind IN ('flows', 'genesis')")
+                    .bind(near.contract.to_string()).execute(db).await?;
+            }
             let (mut mints, mut burns) = (Flows::new(), Flows::new());
             for a in w.actors.values() {
                 let Some(acct) = chain_account(&near, &a.account) else { continue };
                 for asset in [Asset::Credits, Asset::Res(cz_economy::Resource::Ammo), Asset::Res(cz_economy::Resource::Med), Asset::Res(cz_economy::Resource::Fuel)] {
+                    // What the actor holds on chain: its balance plus anything the
+                    // economy holds for it off chain (bounty escrow, quote holds).
                     let mut engine = w.balance(&a.account, asset);
                     if asset == Asset::Credits {
                         engine += escrowed_by(w, &a.id);
                     }
+                    if a.id == w.market.merchant {
+                        engine += w.held_for_quotes(asset);
+                    }
+                    engine -= pending.get(&(acct.clone(), asset.name().to_string())).copied().unwrap_or(0);
                     let on_chain = chain.get(&acct).and_then(|m| m.get(asset.name())).copied().unwrap_or(0);
                     match engine - on_chain {
                         d if d > 0 => { mints.insert((a.account.clone(), asset), d); }
@@ -240,12 +287,14 @@ pub async fn bootstrap(state: &AppState) -> Result<(), String> {
                 }
             }
             let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%S");
+            let mut ops = Vec::new();
             for (i, (m, b)) in batches(&near, &mints, &burns).into_iter().enumerate() {
-                let batch_id = format!("baseline-{stamp}-{i}");
-                enqueue(db, &near, "genesis", &format!("flows:{batch_id}"), w.tick, &json!({ "batch_id": batch_id, "mints": m, "burns": b, "note": "align the chain with the economy at startup" })).await?;
+                let batch_id = format!("{}-{stamp}-{i}", if force { "realign" } else { "baseline" });
+                enqueue(db, &near, "genesis", &format!("flows:{batch_id}"), w.tick, &json!({ "batch_id": batch_id, "mints": m, "burns": b, "note": if force { "realign the chain with the economy" } else { "align the chain with the economy at startup" } })).await?;
+                ops.push(format!("flows:{batch_id}"));
             }
             set_cursor(db, &near.contract.to_string(), w.ledger.len() as i64).await?;
-            Ok(())
+            Ok(json!({ "aligned": true, "batches": ops, "mints": mints.len(), "burns": burns.len() }))
         })
         .await
         .map_err(|e| e.to_string())
@@ -259,7 +308,7 @@ pub async fn process_next(state: &AppState) -> Result<bool, String> {
     let db = state.world.db();
     // Only this controller's rows: rows for another contract (e.g. the frozen v1) are
     // never submitted here.
-    let row: Option<Row> = sqlx::query_as("SELECT id, kind, op_id, payload, attempts FROM settlements WHERE status IN ('pending', 'submitted') AND contract = $1 ORDER BY id LIMIT 1")
+    let row: Option<Row> = sqlx::query_as("SELECT id, kind, op_id, payload, attempts FROM settlements WHERE status IN ('pending', 'submitted') AND contract = $1 ORDER BY (kind <> 'genesis'), id LIMIT 1")
         .bind(near.contract.to_string())
         .fetch_optional(db)
         .await

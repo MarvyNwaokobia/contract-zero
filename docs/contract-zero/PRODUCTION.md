@@ -86,3 +86,32 @@ Two infrastructure fixes came out of it:
 - The combat-feedback pass (alert states on the HUD, hit-reaction polish).
 - Redyard as its own level: REDYARD is currently the depot at dusk.
 - Verticality: enemies are ground-only, so catwalks are visual.
+
+### Milestone 3: Mission Director, sabotage and recovery (2026-11-08)
+
+**Missions come from agent decisions:**
+- **Sabotage:** a merchant with a glut pays to knock out a faction's production line of that resource. Success destroys 40% of that stock and halts the line for 36 ticks.
+- **Recovery:** a squeezed faction that can't afford to restock seizes a merchant caravan on the road, and the merchant pays for its return. Success returns the cargo to its owner.
+
+In 30-day simulations, sabotage contracts appear every 2 to 3 days. Seizures, and recovery contracts with them, appear only in raided worlds.
+
+**Each kind plays differently** on both levels:
+
+| Kind | What you do |
+|---|---|
+| Raid | Clear the outer area, load the cargo, walk out |
+| Sabotage | Plant two charges in two parts of the site, no clearing required, get clear |
+| Recovery | Find the cargo at a different spot, secure it under fire, hand it over at a different exit |
+
+**Built:**
+- The board shows the kind, what you do, what it changes, the reward and the guards.
+- The server checks a minimum time per kind.
+- Sabotage and recovery settle on chain through a new `settle_operation`.
+
+**Verified:**
+- 5 economy tests, 5 contract tests, and level tests that the three kinds differ and every point is reachable.
+- A live sabotage on testnet (`NEAR.md`).
+
+**Not yet:**
+- A live recovery on testnet.
+- The other mission families: convoy interception, escort, defense, high-value target, blacksite infiltration.

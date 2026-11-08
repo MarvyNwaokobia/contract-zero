@@ -13,7 +13,7 @@ The first version, a single contract (**CZ World v1**, `world.contract-zero.test
 |---|---|
 | `contract-zero.testnet` | Parent, and owner of `assets` and `world2` |
 | **`assets.contract-zero.testnet`** | **cz-assets**: NEP-245 ledger. Code `5o8uRxxLcHzC7vqYMRRDhr5AHSEcwCLsfbRD6EW2LU3L` |
-| **`world2.contract-zero.testnet`** | **cz-world v2**: the game controller, and the only controller of `assets`. Code `2mxwU9PEbYbDuvsunxkPGBwcXPL88FPkpkgxVYLxUp5W`. Upgraded in place, with state unchanged each time: `6c4sHyPg…` → `8ne76NEq…` (accepting a quote registers a new player's ledger storage) → `2mxwU9PE…` (quick-trade sessions, [`7dkJtkBg…`](https://testnet.nearblocks.io/txns/7dkJtkBgVvwRmAp8QpgXQAVhuzP8Ejyyr9uJzsTHQwwN)) |
+| **`world2.contract-zero.testnet`** | **cz-world v2**: the game controller, and the only controller of `assets`. Code `2ncNvQimwaEetX948nGFHyKy3rpuVobNyEvhK8AqjHUs`. Upgraded in place, with state unchanged each time: `6c4sHyPg…` → `8ne76NEq…` (accepting a quote registers a new player's ledger storage) → `2mxwU9PE…` (quick-trade sessions, [`7dkJtkBg…`](https://testnet.nearblocks.io/txns/7dkJtkBgVvwRmAp8QpgXQAVhuzP8Ejyyr9uJzsTHQwwN)) → `2ncNvQim…` (`settle_operation` for sabotage and recovery, [`8xFWew5s…`](https://testnet.nearblocks.io/txns/8xFWew5sydNAExyXM2DmZtGazr8rRR44nK3hTEfKLC9T)) |
 | `cz-relayer-9abaff.testnet` | Gas relayer for players' signed delegate actions (quick-trade setup and sign-out) and for sponsoring new NEAR Auth accounts. Holds a gas float, no game assets. See [AUTH.md](AUTH.md) |
 | `server.contract-zero.testnet` | The game server: settles raids and applies flows |
 | `vanguard.contract-zero.testnet` | The Vanguard commander (a faction actor) |
@@ -32,7 +32,7 @@ No key is in the repository.
 
 | Account | Function-call key | Allowed methods |
 |---|---|---|
-| server | `ed25519:9hg6yCxYWuejzhwN23pmootDAe3ZyrDXU5bbo4WqMyAB` | `settle_raid`, `apply_flows` |
+| server | `ed25519:2Vp55RZXdz6iJifKDqtVzuFc1X1fJo4HYVQ3MZve5ApC` ([added](https://testnet.nearblocks.io/txns/H2C2k9AcAdGWt23xhowCfjsPYG81MS7BscbHL13h6eps); the previous `9hg6yCxY…` was [deleted](https://testnet.nearblocks.io/txns/9K64CbkJ3QXqhp2TJwxRkzJo9x3XvqDUeeaMr1LTiZWX)) | `settle_raid`, `apply_flows`, `settle_operation` |
 | vanguard | `ed25519:EVB73ozU…` | `accept_offer`, `accept_bid` |
 | vex | `ed25519:7CUkGTCt…` | `post_offer`, `post_bid`, `cancel_quote` |
 | *a player's quick-trade key* | generated in their browser | `accept_offer`, `accept_bid`, `revoke_session`, held to the budgets and expiry the player registered on `world2` ([AUTH.md](AUTH.md)) |
@@ -110,6 +110,32 @@ The player's ledger balance is 120 ammo: 60 migrated from v1 plus 60 from this r
 | Reconciled | Player: engine = chain (90 ammo, 306 cr, 5 med). Vex: no difference. Vanguard differed only by 14 world-clock ledger entries not yet mirrored. After the next flow sync, `GET /reconciliation` was `in_sync: true`, with 0 unsynced entries, 0 open settlements, and no difference for Vanguard or Vex |
 
 **Gas.** An accept burns about 10 TGas. The player attaches 60 TGas, which covers the controller's 50 TGas of follow-up calls. Prepaid gas is reserved from the player's balance up front (about 0.06 NEAR) and mostly refunded.
+
+## Sabotage on testnet (2026-11-08)
+
+`scripts/operations-e2e.mjs` ran against the live API on the `genesis` world.
+- **The contract came from the merchant agent.** Holding 209 ammo against a target of 120 while Vanguard makes its own, Vex posted a 435 cr contract to knock out Vanguard's ammo line.
+- **A signed-in player ran the operation:** two charges, extracted after 36 s (the server's minimum is 35 s).
+
+| Step | Evidence |
+|---|---|
+| Stock destroyed | 75 ammo burned from Vanguard in a flow batch ([`B84YEUpf…`](https://testnet.nearblocks.io/txns/B84YEUpfNpLFqzsMLs9AqoTXwr8uEoNYAy35fjq3MhhQ)) |
+| Fee paid | `settle_operation`: Vex → player, 435 credits ([`3NRa6gCL…`](https://testnet.nearblocks.io/txns/3NRa6gCLDTp5nr75u3qbvJX3BsqXVbTfKoyEkwvxaYLv)), final `Success(true)`. On chain the player went 65 → 500 cr and Vex 2,207 → 1,772 cr |
+| Consequence | Vanguard's ammo production is down for 36 ticks (`disrupted: true` on the board). The next ammo depot fields 7 of 15 guards: "8 stayed home (not enough ammunition)" |
+
+Recovery settles through the same `settle_operation`, with an extra faction → merchant cargo leg. That leg is covered by contract and economy tests, but hasn't run live yet: it needs Vanguard to seize a caravan, which happens only in a squeezed, raided world.
+
+## Repairing an out-of-order mirror
+
+A long RPC outage left 129 flow batches failed. The old worker then skipped past them, so later batches applied first and an earlier one became impossible ("insufficient balance").
+
+The changes:
+- **Sends use `NEAR_RPC_URL`** with patient retries.
+- **Only trades give up;** flows, raids and operations retry with backoff.
+- **Alignment batches run first.**
+- **`POST /admin/realign`** (admin token) replaces stranded flow batches with one exact alignment batch. Its target is the economy minus queued trades, so it lands without double-applying them. It refuses while a raid or operation is open.
+
+This repaired the dev world: `realign` (6 mints, 1 burn), then the queue drained with 0 open settlements.
 
 ## History: CZ World v1 (frozen)
 

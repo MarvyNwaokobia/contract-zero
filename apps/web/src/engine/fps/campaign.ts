@@ -220,7 +220,7 @@ const PROTO = 'legendary' as GunId; // the "ZX-0 Prototype" — the finale weapo
 export const CAMPAIGN: Mission[] = [
   // ── Zone 1 · DUSTLINE (day; boss on op 5) ──
   {
-    id: 'dl-1', zone: 'DUSTLINE', op: 'TRAINING · DUSTLINE', name: 'BREACH & CLEAR', gun: AR, story: 'Every operator starts here. A two-room compound held by Ironveil irregulars. Clear it and reach extract.',
+    id: 'dl-1', zone: 'DUSTLINE', op: 'TRAINING · DUSTLINE', name: 'BREACH & CLEAR', gun: AR, story: 'Every operator starts here. A two-room compound held by Vanguard irregulars. Clear it and reach extract.',
     brief: 'push the compound · clear both rooms · reach extract',
     start: A_START, walls: A_WALLS, cover: A_COVER,
     enemies: [
@@ -269,7 +269,7 @@ export const CAMPAIGN: Mission[] = [
     objectives: twoRoom(A_OBJ),
   },
   {
-    id: 'dl-5', zone: 'DUSTLINE', op: 'TRAINING · DUSTLINE', name: 'THE FOREMAN', gun: AR, story: "The Foreman runs Ironveil's Dustline yards. He is holed up in the last building on the row. Put him down.", boss: true,
+    id: 'dl-5', zone: 'DUSTLINE', op: 'TRAINING · DUSTLINE', name: 'THE FOREMAN', gun: AR, story: "The Foreman runs Vanguard's Dustline yards. He is holed up in the last building on the row. Put him down.", boss: true,
     brief: 'the Foreman is in that room · put him down',
     start: A3_START, walls: A3_WALLS, cover: A3_COVER,
     enemies: [
@@ -281,7 +281,7 @@ export const CAMPAIGN: Mission[] = [
 
   // ── Zone 2 · REDYARD (evening; boss on op 10) ──
   {
-    id: 'ry-1', zone: 'REDYARD', op: 'TRAINING · REDYARD', name: 'THE HALL', gun: DMR, story: 'Redyard is where Ironveil trains its convoy guards. Take the hall, then the vault behind it.', secondary: SMG,
+    id: 'ry-1', zone: 'REDYARD', op: 'TRAINING · REDYARD', name: 'THE HALL', gun: DMR, story: 'Redyard is where Vanguard trains its convoy guards. Take the hall, then the vault behind it.', secondary: SMG,
     brief: 'their guards train here · take the hall, then the vault',
     start: B_START, walls: B_WALLS, cover: B_COVER,
     enemies: [
@@ -304,7 +304,7 @@ export const CAMPAIGN: Mission[] = [
   {
     // ── SIGNATURE (rescue) · pull the informant out of the holding cells ──
     id: 'ry-3', zone: 'REDYARD', op: 'TRAINING · REDYARD', name: 'THE INFORMANT', gun: SMG, secondary: DMR,
-    story: 'An Ironveil logistics clerk wants out, and he knows the convoy routes. He is held in the back cells. Walk him out alive.',
+    story: 'An Vanguard logistics clerk wants out, and he knows the convoy routes. He is held in the back cells. Walk him out alive.',
     brief: 'reach the informant · escort him to extract · keep him alive',
     start: B_START, walls: B_WALLS, cover: B_COVER,
     hostage: [0, -13],
@@ -344,7 +344,7 @@ export const CAMPAIGN: Mission[] = [
 
   // ── Zone 3 · BLACKSITE (night, NVG; boss on op 15) ──
   {
-    id: 'bs-1', zone: 'BLACKSITE', op: 'TRAINING · BLACKSITE', name: 'INTO THE DARK', gun: SMG, story: 'Past Redyard the lights go out. This is the blacksite where Ironveil keeps what it does not log. Push in.', attachments: ['nvg'],
+    id: 'bs-1', zone: 'BLACKSITE', op: 'TRAINING · BLACKSITE', name: 'INTO THE DARK', gun: SMG, story: 'Past Redyard the lights go out. This is the blacksite where Vanguard keeps what it does not log. Push in.', attachments: ['nvg'],
     brief: 'the lights go out here · push through',
     start: C_START, walls: C_WALLS, cover: C_COVER,
     enemies: [

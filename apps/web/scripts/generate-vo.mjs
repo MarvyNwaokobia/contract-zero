@@ -8,7 +8,7 @@
 //   ELEVENLABS_API_KEY=sk_... node scripts/generate-vo.mjs
 //
 // Optional per-speaker voice overrides (browse voices at elevenlabs.io):
-//   VOICE_HANDLER=<voice_id> VOICE_IRONVEIL=<voice_id> VOICE_VEX=<voice_id>
+//   VOICE_HANDLER=<voice_id> VOICE_VANGUARD=<voice_id> VOICE_VEX=<voice_id>
 //
 // Existing files are skipped, so re-running only generates new lines.
 
@@ -30,7 +30,7 @@ if (!API_KEY) {
 // Default voice ids are ElevenLabs premades; override per speaker via env.
 const VOICES = {
   handler: process.env.VOICE_HANDLER ?? 'EXAVITQu4vr4xnSDxMaL',   // "Sarah": calm, close
-  ironveil: process.env.VOICE_IRONVEIL ?? 'onwK4e9ZLuTAKqWW03F9',  // "Daniel": low, unhurried
+  vanguard: process.env.VOICE_VANGUARD ?? 'onwK4e9ZLuTAKqWW03F9',  // "Daniel": low, unhurried
   vex: process.env.VOICE_VEX ?? 'TX3LPaxmHKxFdv7VOQHJ',            // "Liam": a trader's edge
 };
 

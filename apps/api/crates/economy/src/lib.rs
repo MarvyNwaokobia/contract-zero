@@ -5,35 +5,42 @@
 //! committing any of them: either every transfer in a command happens, or none does,
 //! and no account other than [`WORLD`] can ever go negative.
 //!
-//! [`WORLD`] is the single source and sink. Issuance (faction production, income,
-//! convoy cargo arriving from off-map) is a transfer *out of* it; sinks (consumption,
-//! escort wages, import costs) are transfers *into* it. So for every asset the sum of
-//! all balances, `WORLD` included, is always exactly zero, and `WORLD`'s balance is
-//! minus the net amount ever issued. See `docs/contract-zero/ECONOMY.md`.
+//! [`WORLD`] is the single source and sink. Issuance (production, income, supply
+//! shipments) is a transfer *out of* it; destruction (consumption, logistics fuel,
+//! escort wages, import costs) is a transfer *into* it. So for every asset the sum of
+//! all balances, `WORLD` included, is always zero. Issuance and destruction are also
+//! totalled separately from ordinary transfers ([`World::issued`] / [`World::destroyed`]).
 //!
-//! The engine is pure and integer-only: the same seed and the same commands produce the
-//! same world on any machine. Time advances in ticks of one in-game hour.
+//! The engine is pure and integer-only: the same seed and commands produce the same
+//! world on any machine. Time advances in ticks of one in-game hour.
 
+pub mod mission;
 pub mod policy;
 pub mod pricing;
+pub mod scenario;
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+pub use mission::{GuardPlan, RaidPlan};
 pub use pricing::{PriceBreakdown, Side, Strategy};
 
 pub const WORLD: &str = "world";
 pub const TICKS_PER_DAY: u64 = 24;
-/// Escort wages per convoy, by defense level (index = level). Paid to `WORLD` at dispatch.
+/// Escort wages per supply shipment, by defense level (index = level). Destroyed.
 pub const DEFENSE_COST: [i64; 6] = [0, 0, 80, 200, 360, 560];
 pub const DEFENSE_MIN: u8 = 1;
 pub const DEFENSE_MAX: u8 = 5;
+/// Fuel burned to run one supply shipment.
+pub const LOGISTICS_FUEL: i64 = 10;
 /// Merchant caravans buy cargo off-map at this share of production cost.
 pub const IMPORT_COST_BP: i64 = 6_000;
-/// A contract's bounty must sit inside [cargo value / 4, cargo value × 1.5].
+/// A bounty must sit inside [depot value / 4, depot value × 1.5].
 pub const BOUNTY_MIN_BP: i64 = 2_500;
 pub const BOUNTY_MAX_BP: i64 = 15_000;
+/// How long a posted bounty stays open.
+pub const BOUNTY_TICKS: u64 = 24;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -47,6 +54,13 @@ impl Resource {
     pub const ALL: [Resource; 3] = [Resource::Ammo, Resource::Med, Resource::Fuel];
     pub fn idx(self) -> usize {
         self as usize
+    }
+    pub fn name(self) -> &'static str {
+        match self {
+            Resource::Ammo => "ammo",
+            Resource::Med => "med",
+            Resource::Fuel => "fuel",
+        }
     }
 }
 
@@ -62,18 +76,31 @@ pub type AccountId = String;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum Reason {
+    Genesis,
     Income,
     Production,
     Consumption,
+    Logistics { convoy: u64 },
     EscortWages { convoy: u64 },
     ImportCost { convoy: u64 },
-    ConvoyCargo { convoy: u64 },
-    ConvoyArrived { convoy: u64 },
+    Shipment { convoy: u64 },
+    ShipmentArrived { convoy: u64 },
     Trade { trade: u64 },
-    Escrow { contract: u64 },
-    Refund { contract: u64 },
-    Bounty { contract: u64 },
-    Raid { contract: u64 },
+    Escrow { bounty: u64 },
+    Refund { bounty: u64 },
+    BountyPaid { bounty: u64, raid: u64 },
+    Raid { raid: u64 },
+}
+
+impl Reason {
+    /// Is this a source (issuance) or a sink (destruction), as opposed to a transfer?
+    pub fn class(&self) -> &'static str {
+        match self {
+            Reason::Genesis | Reason::Income | Reason::Production | Reason::Shipment { .. } => "issuance",
+            Reason::Consumption | Reason::Logistics { .. } | Reason::EscortWages { .. } | Reason::ImportCost { .. } => "destruction",
+            _ => "transfer",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -103,8 +130,9 @@ pub enum ActorKind {
 /// A per-day amount for each resource, spread evenly over the day's ticks.
 pub type PerDay = [i64; 3];
 
+/// A recurring supply run from off-map: costs fuel and escort wages, brings cargo.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ConvoyPlan {
+pub struct ShipmentPlan {
     pub resource: Resource,
     pub units: i64,
     pub every_ticks: u64,
@@ -123,10 +151,10 @@ pub struct Actor {
     pub consumption: PerDay,
     /// Operational requirement: hold at least this many days of consumption.
     pub reserve_days: i64,
-    /// Credits the actor tries never to spend below.
+    /// Credits the actor never spends below. For the merchant, the insolvency line.
     pub credit_reserve: i64,
     pub defense: u8,
-    pub convoy: Option<ConvoyPlan>,
+    pub shipment: Option<ShipmentPlan>,
 }
 
 impl Actor {
@@ -147,7 +175,6 @@ pub struct Market {
 pub enum ConvoyStatus {
     InTransit,
     Arrived,
-    Raided,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -160,7 +187,6 @@ pub struct Convoy {
     pub dispatched_at: u64,
     pub arrives_at: u64,
     pub status: ConvoyStatus,
-    pub seed: u32,
 }
 
 impl Convoy {
@@ -171,25 +197,44 @@ impl Convoy {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "state")]
-pub enum ContractStatus {
+pub enum RaidStatus {
+    Active,
+    Extracted { units: i64, bounty: i64 },
+    Failed,
+}
+
+/// A deployment against a faction's depot. Its plan is fixed when it starts.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Raid {
+    pub id: u64,
+    pub player: String,
+    pub plan: RaidPlan,
+    pub started_at: u64,
+    pub status: RaidStatus,
+}
+
+/// A sponsor's escrowed bounty on raiding a faction's depot of one resource.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "state")]
+pub enum BountyStatus {
     Open,
-    Accepted { player: String },
-    Completed { player: String },
+    Paid { raid: u64, player: String },
     Expired,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Contract {
+pub struct Bounty {
     pub id: u64,
-    pub issuer: String,
-    pub convoy: u64,
-    pub bounty: i64,
+    pub sponsor: String,
+    pub target: String,
+    pub resource: Resource,
+    pub amount: i64,
     pub posted_at: u64,
     pub expires_at: u64,
-    pub status: ContractStatus,
+    pub status: BountyStatus,
 }
 
-impl Contract {
+impl Bounty {
     pub fn escrow(&self) -> AccountId {
         format!("escrow:{}", self.id)
     }
@@ -222,12 +267,26 @@ pub enum Caller {
 #[serde(rename_all = "snake_case", tag = "action")]
 pub enum Action {
     Trade { resource: Resource, side: Side, qty: i64, limit_total: i64 },
-    PostContract { convoy: u64, bounty: i64 },
+    PostBounty { target: String, resource: Resource, amount: i64 },
     ConfigureDefense { level: u8 },
     SetStrategy { strategy: Strategy },
-    AcceptContract { contract: u64 },
-    AbandonContract { contract: u64 },
-    SettleRaid { contract: u64, player: String },
+    StartRaid { target: String, resource: Resource },
+    SettleRaid { raid: u64, player: String },
+    FailRaid { raid: u64, player: String },
+}
+
+impl Action {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Action::Trade { .. } => "trade",
+            Action::PostBounty { .. } => "post_bounty",
+            Action::ConfigureDefense { .. } => "configure_defense",
+            Action::SetStrategy { .. } => "set_strategy",
+            Action::StartRaid { .. } => "start_raid",
+            Action::SettleRaid { .. } => "settle_raid",
+            Action::FailRaid { .. } => "fail_raid",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -235,13 +294,15 @@ pub enum Action {
 pub enum Event {
     Transfer(LedgerEntry),
     Shortage { actor: String, resource: Resource, missing: i64 },
-    ConvoyDispatched { convoy: u64, owner: String, resource: Resource, units: i64, defense: u8 },
-    ConvoyArrived { convoy: u64 },
-    ConvoyRaided { convoy: u64, contract: u64, player: String },
-    ContractPosted { contract: u64, issuer: String, convoy: u64, bounty: i64 },
-    ContractExpired { contract: u64 },
-    ContractAccepted { contract: u64, player: String },
-    ContractAbandoned { contract: u64, player: String },
+    LogisticsGrounded { actor: String, fuel: i64 },
+    ShipmentDispatched { convoy: u64, owner: String, resource: Resource, units: i64, defense: u8 },
+    ShipmentArrived { convoy: u64 },
+    MerchantSuspended { reason: String },
+    BountyPosted { bounty: u64, sponsor: String, target: String, resource: Resource, amount: i64 },
+    BountyExpired { bounty: u64 },
+    RaidStarted { raid: u64, player: String, target: String, resource: Resource, manifest: i64 },
+    RaidExtracted { raid: u64, player: String, units: i64, bounty: i64 },
+    RaidFailed { raid: u64, player: String },
     Traded(TradeRecord),
     DefenseChanged { actor: String, level: u8 },
     StrategyChanged { strategy: Strategy },
@@ -262,20 +323,22 @@ pub enum EconError {
     PriceMoved { total: i64, limit: i64 },
     #[error("the merchant cannot fill {qty}: holds {stock}")]
     MerchantShort { qty: i64, stock: i64 },
-    #[error("bounty {bounty} outside [{min}, {max}]")]
-    BountyOutOfRange { bounty: i64, min: i64, max: i64 },
+    #[error("the merchant is insolvent and not buying")]
+    MerchantInsolvent,
+    #[error("bounty {amount} outside [{min}, {max}]")]
+    BountyOutOfRange { amount: i64, min: i64, max: i64 },
+    #[error("no raidable {resource:?} depot at {target}")]
+    NoRaidTarget { target: String, resource: Resource },
+    #[error("cannot target yourself")]
+    SelfTarget,
     #[error("unknown {what} {id}")]
     Unknown { what: String, id: String },
-    #[error("convoy {convoy} is not in transit")]
-    ConvoyNotInTransit { convoy: u64 },
-    #[error("convoy {convoy} already has an open contract")]
-    ConvoyAlreadyContracted { convoy: u64 },
-    #[error("cannot post a contract against your own convoy")]
-    OwnConvoy,
-    #[error("contract {contract} is {state}, not {expected}")]
-    ContractState { contract: u64, state: String, expected: String },
-    #[error("contract {contract} was already settled")]
-    AlreadySettled { contract: u64 },
+    #[error("raid {raid} is not active")]
+    RaidNotActive { raid: u64 },
+    #[error("raid {raid} was already settled")]
+    AlreadySettled { raid: u64 },
+    #[error("player already has an active raid")]
+    RaidInProgress,
     #[error("defense level must be {DEFENSE_MIN}…{DEFENSE_MAX}")]
     BadDefense,
 }
@@ -290,7 +353,8 @@ pub struct World {
     pub actors: BTreeMap<String, Actor>,
     pub market: Market,
     pub convoys: BTreeMap<u64, Convoy>,
-    pub contracts: BTreeMap<u64, Contract>,
+    pub raids: BTreeMap<u64, Raid>,
+    pub bounties: BTreeMap<u64, Bounty>,
     pub trades: Vec<TradeRecord>,
     pub ledger: Vec<LedgerEntry>,
     next_id: u64,
@@ -308,6 +372,23 @@ pub struct Quote {
 }
 
 impl World {
+    pub fn empty(seed: u64, market: Market) -> Self {
+        World {
+            tick: 0,
+            version: 0,
+            seed,
+            balances: BTreeMap::new(),
+            actors: BTreeMap::new(),
+            market,
+            convoys: BTreeMap::new(),
+            raids: BTreeMap::new(),
+            bounties: BTreeMap::new(),
+            trades: Vec::new(),
+            ledger: Vec::new(),
+            next_id: 0,
+        }
+    }
+
     // ── reads ────────────────────────────────────────────────────────────────
 
     pub fn balance(&self, account: &str, asset: Asset) -> i64 {
@@ -318,12 +399,18 @@ impl World {
         self.actors.get(id).ok_or_else(|| unknown("actor", id))
     }
 
-    fn merchant(&self) -> &Actor {
+    pub fn merchant(&self) -> &Actor {
         &self.actors[&self.market.merchant]
     }
 
     pub fn merchant_stock(&self, r: Resource) -> i64 {
         self.balance(&self.merchant().account, Asset::Res(r))
+    }
+
+    /// Below its credit reserve the merchant stops buying and stops restocking.
+    pub fn merchant_insolvent(&self) -> bool {
+        let m = self.merchant();
+        self.balance(&m.account, Asset::Credits) < m.credit_reserve
     }
 
     /// Units the merchant sold minus units it bought over the last day.
@@ -350,23 +437,40 @@ impl World {
         Ok(Quote { resource: r, side, qty, total, unit_now: self.price(r), version: self.version })
     }
 
-    /// Fair value of a convoy's cargo at production cost.
-    pub fn cargo_value(&self, convoy: &Convoy) -> i64 {
-        convoy.units * pricing::production_cost(convoy.resource)
+    pub fn open_bounties(&self) -> impl Iterator<Item = &Bounty> {
+        self.bounties.values().filter(|b| b.status == BountyStatus::Open)
     }
 
-    pub fn bounty_range(&self, convoy: &Convoy) -> (i64, i64) {
-        let v = self.cargo_value(convoy);
-        (v * BOUNTY_MIN_BP / pricing::BP, v * BOUNTY_MAX_BP / pricing::BP)
+    /// The open bounty a raid on (target, resource) would collect, if any (oldest first).
+    pub fn bounty_for(&self, target: &str, resource: Resource) -> Option<&Bounty> {
+        self.open_bounties().find(|b| b.target == target && b.resource == resource)
     }
 
-    pub fn open_contracts(&self) -> impl Iterator<Item = &Contract> {
-        self.contracts.values().filter(|c| c.status == ContractStatus::Open)
+    pub fn active_raid_of(&self, player: &str) -> Option<&Raid> {
+        self.raids.values().find(|r| r.player == player && r.status == RaidStatus::Active)
+    }
+
+    /// Raids extracted against `target` within the last `ticks`.
+    pub fn recent_raids_on(&self, target: &str, ticks: u64) -> usize {
+        let since = self.tick.saturating_sub(ticks);
+        self.raids
+            .values()
+            .filter(|r| r.plan.target == target && r.started_at >= since && matches!(r.status, RaidStatus::Extracted { .. }))
+            .count()
     }
 
     /// Sum of every balance of `asset`, `WORLD` included. Always zero.
     pub fn total(&self, asset: Asset) -> i64 {
         self.balances.values().filter_map(|m| m.get(&asset)).sum()
+    }
+
+    /// Total ever issued (created) / destroyed for an asset, from the ledger.
+    pub fn issued(&self, asset: Asset) -> i64 {
+        self.ledger.iter().filter(|e| e.transfer.asset == asset && e.transfer.reason.class() == "issuance").map(|e| e.transfer.qty).sum()
+    }
+
+    pub fn destroyed(&self, asset: Asset) -> i64 {
+        self.ledger.iter().filter(|e| e.transfer.asset == asset && e.transfer.reason.class() == "destruction").map(|e| e.transfer.qty).sum()
     }
 
     // ── the only way value moves ─────────────────────────────────────────────
@@ -426,43 +530,44 @@ impl World {
         let account = self.authorize(caller, action)?;
         match action {
             Action::Trade { resource, side, qty, limit_total } => self.trade(&account, *resource, *side, *qty, *limit_total),
-            Action::PostContract { convoy, bounty } => self.post_contract(caller_actor(caller), *convoy, *bounty),
+            Action::PostBounty { target, resource, amount } => self.post_bounty(caller_actor(caller), target, *resource, *amount),
             Action::ConfigureDefense { level } => self.configure_defense(caller_actor(caller), *level),
             Action::SetStrategy { strategy } => {
                 self.market.strategy = strategy.clamped();
                 self.version += 1;
                 Ok(vec![Event::StrategyChanged { strategy: self.market.strategy }])
             }
-            Action::AcceptContract { contract } => self.accept(*contract, caller_player(caller)),
-            Action::AbandonContract { contract } => self.abandon(*contract, caller_player(caller)),
-            Action::SettleRaid { contract, player } => self.settle_raid(*contract, player),
+            Action::StartRaid { target, resource } => self.start_raid(caller_player(caller), target, *resource),
+            Action::SettleRaid { raid, player } => self.settle_raid(*raid, player),
+            Action::FailRaid { raid, player } => self.fail_raid(*raid, player),
         }
     }
 
     /// Returns the account the command spends from. Agents act only for their own
-    /// actor; players only for themselves; only the system settles raids.
+    /// actor; players only for themselves; only the system settles or fails raids.
     fn authorize(&self, caller: &Caller, action: &Action) -> Result<AccountId, EconError> {
-        let deny = || EconError::Unauthorized { caller: format!("{caller:?}"), action: action_name(action).into() };
+        let deny = || EconError::Unauthorized { caller: format!("{caller:?}"), action: action.name().into() };
         match (caller, action) {
-            (Caller::Agent(id), Action::Trade { .. } | Action::PostContract { .. } | Action::ConfigureDefense { .. }) => {
+            (Caller::Agent(id), Action::Trade { .. } | Action::PostBounty { .. } | Action::ConfigureDefense { .. }) => {
                 let a = self.actor(id)?;
-                if matches!(action, Action::Trade { .. }) && a.kind == ActorKind::Merchant {
-                    return Err(deny()); // the merchant is the market; it doesn't trade with itself
+                if a.kind == ActorKind::Merchant && !matches!(action, Action::PostBounty { .. }) {
+                    return Err(deny()); // the merchant is the market: it doesn't trade with itself or run escorts
                 }
                 Ok(a.account.clone())
             }
             (Caller::Agent(id), Action::SetStrategy { .. }) => {
                 if *id == self.market.merchant { Ok(self.actor(id)?.account.clone()) } else { Err(deny()) }
             }
-            (Caller::Player(p), Action::Trade { .. } | Action::AcceptContract { .. } | Action::AbandonContract { .. }) => {
-                Ok(player_account(p))
-            }
-            (Caller::System, Action::SettleRaid { .. }) => Ok(WORLD.into()),
+            (Caller::Player(p), Action::Trade { .. } | Action::StartRaid { .. }) => Ok(player_account(p)),
+            (Caller::System, Action::SettleRaid { .. } | Action::FailRaid { .. }) => Ok(WORLD.into()),
             _ => Err(deny()),
         }
     }
 
     fn trade(&mut self, party: &str, r: Resource, side: Side, qty: i64, limit_total: i64) -> Result<Vec<Event>, EconError> {
+        if side == Side::Sell && self.merchant_insolvent() {
+            return Err(EconError::MerchantInsolvent);
+        }
         let q = self.quote(r, side, qty)?;
         let ok = match side { Side::Buy => q.total <= limit_total, Side::Sell => q.total >= limit_total };
         if !ok {
@@ -485,28 +590,23 @@ impl World {
         Ok(ev)
     }
 
-    fn post_contract(&mut self, issuer: &str, convoy_id: u64, bounty: i64) -> Result<Vec<Event>, EconError> {
-        let convoy = self.convoys.get(&convoy_id).ok_or_else(|| unknown("convoy", &convoy_id.to_string()))?.clone();
-        if convoy.status != ConvoyStatus::InTransit {
-            return Err(EconError::ConvoyNotInTransit { convoy: convoy_id });
+    fn post_bounty(&mut self, sponsor: &str, target: &str, r: Resource, amount: i64) -> Result<Vec<Event>, EconError> {
+        if sponsor == target {
+            return Err(EconError::SelfTarget);
         }
-        if convoy.owner == issuer {
-            return Err(EconError::OwnConvoy);
-        }
-        if self.contracts.values().any(|c| c.convoy == convoy_id && matches!(c.status, ContractStatus::Open | ContractStatus::Accepted { .. })) {
-            return Err(EconError::ConvoyAlreadyContracted { convoy: convoy_id });
-        }
-        let (min, max) = self.bounty_range(&convoy);
-        if bounty < min || bounty > max {
-            return Err(EconError::BountyOutOfRange { bounty, min, max });
+        let plan = mission::raid_plan(self, target, r).ok_or_else(|| EconError::NoRaidTarget { target: target.into(), resource: r })?;
+        let value = plan.manifest * pricing::production_cost(r);
+        let (min, max) = (value * BOUNTY_MIN_BP / pricing::BP, value * BOUNTY_MAX_BP / pricing::BP);
+        if amount < min || amount > max {
+            return Err(EconError::BountyOutOfRange { amount, min, max });
         }
         let id = self.peek_id();
-        let c = Contract { id, issuer: issuer.into(), convoy: convoy_id, bounty, posted_at: self.tick, expires_at: convoy.arrives_at, status: ContractStatus::Open };
-        let account = self.actor(issuer)?.account.clone();
-        let mut ev = self.apply(&[Transfer { from: account, to: c.escrow(), asset: Asset::Credits, qty: bounty, reason: Reason::Escrow { contract: id } }])?;
+        let b = Bounty { id, sponsor: sponsor.into(), target: target.into(), resource: r, amount, posted_at: self.tick, expires_at: self.tick + BOUNTY_TICKS, status: BountyStatus::Open };
+        let account = self.actor(sponsor)?.account.clone();
+        let mut ev = self.apply(&[Transfer { from: account, to: b.escrow(), asset: Asset::Credits, qty: amount, reason: Reason::Escrow { bounty: id } }])?;
         self.commit_id(id);
-        self.contracts.insert(id, c);
-        ev.push(Event::ContractPosted { contract: id, issuer: issuer.into(), convoy: convoy_id, bounty });
+        self.bounties.insert(id, b);
+        ev.push(Event::BountyPosted { bounty: id, sponsor: sponsor.into(), target: target.into(), resource: r, amount });
         Ok(ev)
     }
 
@@ -519,59 +619,68 @@ impl World {
         Ok(vec![Event::DefenseChanged { actor: actor.into(), level }])
     }
 
-    fn contract_mut(&mut self, id: u64) -> Result<&mut Contract, EconError> {
-        self.contracts.get_mut(&id).ok_or_else(|| unknown("contract", &id.to_string()))
-    }
-
-    fn accept(&mut self, id: u64, player: &str) -> Result<Vec<Event>, EconError> {
-        let tick = self.tick;
-        let c = self.contract_mut(id)?;
-        if c.status != ContractStatus::Open || tick >= c.expires_at {
-            return Err(state_err(c, "open"));
+    /// Lock in the raid plan from current state. Nothing moves yet.
+    fn start_raid(&mut self, player: &str, target: &str, r: Resource) -> Result<Vec<Event>, EconError> {
+        if self.active_raid_of(player).is_some() {
+            return Err(EconError::RaidInProgress);
         }
-        c.status = ContractStatus::Accepted { player: player.into() };
+        let plan = mission::raid_plan(self, target, r).ok_or_else(|| EconError::NoRaidTarget { target: target.into(), resource: r })?;
+        let id = self.peek_id();
+        self.commit_id(id);
+        let manifest = plan.manifest;
+        self.raids.insert(id, Raid { id, player: player.into(), plan, started_at: self.tick, status: RaidStatus::Active });
         self.version += 1;
-        Ok(vec![Event::ContractAccepted { contract: id, player: player.into() }])
+        Ok(vec![Event::RaidStarted { raid: id, player: player.into(), target: target.into(), resource: r, manifest }])
     }
 
-    fn abandon(&mut self, id: u64, player: &str) -> Result<Vec<Event>, EconError> {
-        let c = self.contract_mut(id)?;
-        if c.status != (ContractStatus::Accepted { player: player.into() }) {
-            return Err(state_err(c, "accepted by you"));
-        }
-        c.status = ContractStatus::Open;
-        self.version += 1;
-        Ok(vec![Event::ContractAbandoned { contract: id, player: player.into() }])
-    }
-
-    /// The raid succeeded: the bounty goes to the player and the convoy's cargo to the
-    /// issuer, in one atomic batch. Settling the same contract twice is an error.
+    /// The raid succeeded: the depot's cargo goes to the player, plus any open bounty on
+    /// that depot. The player receives what the depot actually holds now, up to the
+    /// planned manifest, so nothing is ever created. Settling twice is rejected.
     fn settle_raid(&mut self, id: u64, player: &str) -> Result<Vec<Event>, EconError> {
-        let c = self.contracts.get(&id).ok_or_else(|| unknown("contract", &id.to_string()))?.clone();
-        match &c.status {
-            ContractStatus::Completed { .. } => return Err(EconError::AlreadySettled { contract: id }),
-            ContractStatus::Accepted { player: p } if p == player => {}
-            _ => return Err(state_err(&c, "accepted by this player")),
+        let raid = self.raids.get(&id).ok_or_else(|| unknown("raid", &id.to_string()))?.clone();
+        match &raid.status {
+            RaidStatus::Extracted { .. } => return Err(EconError::AlreadySettled { raid: id }),
+            RaidStatus::Failed => return Err(EconError::RaidNotActive { raid: id }),
+            RaidStatus::Active if raid.player != player => return Err(EconError::RaidNotActive { raid: id }),
+            RaidStatus::Active => {}
         }
-        let convoy = self.convoys[&c.convoy].clone();
-        if convoy.status != ConvoyStatus::InTransit {
-            return Err(EconError::ConvoyNotInTransit { convoy: convoy.id });
+        let target = self.actor(&raid.plan.target)?.account.clone();
+        let asset = Asset::Res(raid.plan.resource);
+        let units = raid.plan.manifest.min(self.balance(&target, asset));
+        let to = player_account(player);
+        let mut batch = Vec::new();
+        if units > 0 {
+            batch.push(Transfer { from: target, to: to.clone(), asset, qty: units, reason: Reason::Raid { raid: id } });
         }
-        let issuer = self.actor(&c.issuer)?.account.clone();
-        let mut ev = self.apply(&[
-            Transfer { from: c.escrow(), to: player_account(player), asset: Asset::Credits, qty: c.bounty, reason: Reason::Bounty { contract: id } },
-            Transfer { from: convoy.account(), to: issuer, asset: Asset::Res(convoy.resource), qty: convoy.units, reason: Reason::Raid { contract: id } },
-        ])?;
-        self.contracts.get_mut(&id).unwrap().status = ContractStatus::Completed { player: player.into() };
-        self.convoys.get_mut(&convoy.id).unwrap().status = ConvoyStatus::Raided;
-        ev.push(Event::ConvoyRaided { convoy: convoy.id, contract: id, player: player.into() });
+        let bounty = self.bounty_for(&raid.plan.target, raid.plan.resource).cloned();
+        if let Some(b) = &bounty {
+            batch.push(Transfer { from: b.escrow(), to, asset: Asset::Credits, qty: b.amount, reason: Reason::BountyPaid { bounty: b.id, raid: id } });
+        }
+        let mut ev = self.apply(&batch)?;
+        let paid = bounty.as_ref().map_or(0, |b| b.amount);
+        if let Some(b) = bounty {
+            self.bounties.get_mut(&b.id).unwrap().status = BountyStatus::Paid { raid: id, player: player.into() };
+        }
+        self.raids.get_mut(&id).unwrap().status = RaidStatus::Extracted { units, bounty: paid };
+        self.version += 1;
+        ev.push(Event::RaidExtracted { raid: id, player: player.into(), units, bounty: paid });
         Ok(ev)
+    }
+
+    fn fail_raid(&mut self, id: u64, player: &str) -> Result<Vec<Event>, EconError> {
+        let raid = self.raids.get_mut(&id).ok_or_else(|| unknown("raid", &id.to_string()))?;
+        if raid.status != RaidStatus::Active || raid.player != player {
+            return Err(EconError::RaidNotActive { raid: id });
+        }
+        raid.status = RaidStatus::Failed;
+        self.version += 1;
+        Ok(vec![Event::RaidFailed { raid: id, player: player.into() }])
     }
 
     // ── time ─────────────────────────────────────────────────────────────────
 
-    /// Advance one tick: income, production and consumption, convoy arrivals (and
-    /// expiry of their contracts), then dispatches.
+    /// Advance one tick: income, production and consumption, shipment arrivals,
+    /// bounty expiry, then dispatches.
     pub fn tick(&mut self) -> Vec<Event> {
         let t = self.tick;
         let mut ev = Vec::new();
@@ -594,8 +703,7 @@ impl World {
             // Consumption burns what exists; any gap is a shortage, never a negative balance.
             for r in Resource::ALL {
                 let want = spread(a.consumption[r.idx()], t);
-                let have = self.balance(&a.account, Asset::Res(r));
-                let used = want.min(have);
+                let used = want.min(self.balance(&a.account, Asset::Res(r)));
                 if used > 0 {
                     ev.extend(self.apply(&[Transfer { from: a.account.clone(), to: WORLD.into(), asset: Asset::Res(r), qty: used, reason: Reason::Consumption }]).expect("checked"));
                 }
@@ -608,25 +716,26 @@ impl World {
         let arriving: Vec<Convoy> = self.convoys.values().filter(|c| c.status == ConvoyStatus::InTransit && c.arrives_at <= t).cloned().collect();
         for c in arriving {
             let owner = self.actors[&c.owner].account.clone();
-            ev.extend(self.apply(&[Transfer { from: c.account(), to: owner, asset: Asset::Res(c.resource), qty: c.units, reason: Reason::ConvoyArrived { convoy: c.id } }]).expect("convoy holds its cargo"));
+            ev.extend(self.apply(&[Transfer { from: c.account(), to: owner, asset: Asset::Res(c.resource), qty: c.units, reason: Reason::ShipmentArrived { convoy: c.id } }]).expect("convoy holds its cargo"));
             self.convoys.get_mut(&c.id).unwrap().status = ConvoyStatus::Arrived;
-            ev.push(Event::ConvoyArrived { convoy: c.id });
-            let expiring: Vec<Contract> = self.contracts.values().filter(|k| k.convoy == c.id && matches!(k.status, ContractStatus::Open | ContractStatus::Accepted { .. })).cloned().collect();
-            for k in expiring {
-                let issuer = self.actors[&k.issuer].account.clone();
-                ev.extend(self.apply(&[Transfer { from: k.escrow(), to: issuer, asset: Asset::Credits, qty: k.bounty, reason: Reason::Refund { contract: k.id } }]).expect("escrow holds the bounty"));
-                self.contracts.get_mut(&k.id).unwrap().status = ContractStatus::Expired;
-                ev.push(Event::ContractExpired { contract: k.id });
-            }
+            ev.push(Event::ShipmentArrived { convoy: c.id });
+        }
+
+        let expired: Vec<Bounty> = self.open_bounties().filter(|b| b.expires_at <= t).cloned().collect();
+        for b in expired {
+            let sponsor = self.actors[&b.sponsor].account.clone();
+            ev.extend(self.apply(&[Transfer { from: b.escrow(), to: sponsor, asset: Asset::Credits, qty: b.amount, reason: Reason::Refund { bounty: b.id } }]).expect("escrow holds the bounty"));
+            self.bounties.get_mut(&b.id).unwrap().status = BountyStatus::Expired;
+            ev.push(Event::BountyExpired { bounty: b.id });
         }
 
         for id in &ids {
-            let Some(plan) = self.actors[id].convoy.clone() else { continue };
+            let Some(plan) = self.actors[id].shipment.clone() else { continue };
             if plan.next_dispatch != t {
                 continue;
             }
             ev.extend(self.dispatch(id, &plan));
-            self.actors.get_mut(id).unwrap().convoy.as_mut().unwrap().next_dispatch = t + plan.every_ticks;
+            self.actors.get_mut(id).unwrap().shipment.as_mut().unwrap().next_dispatch = t + plan.every_ticks;
         }
 
         self.tick += 1;
@@ -634,37 +743,54 @@ impl World {
         ev
     }
 
-    /// Send a convoy. Escort wages are paid up front at the actor's chosen defense level,
-    /// dropping to the best level it can afford; a merchant caravan also pays import cost,
-    /// shrinking the load to what it can afford.
-    fn dispatch(&mut self, actor_id: &str, plan: &ConvoyPlan) -> Vec<Event> {
+    /// Send a supply shipment. A faction's shipment burns `LOGISTICS_FUEL` (no fuel, no
+    /// shipment) and pays escort wages at the best defense level it can afford. A
+    /// merchant caravan pays import cost, shrinking to what it can afford above its
+    /// reserve; an insolvent merchant does not restock.
+    fn dispatch(&mut self, actor_id: &str, plan: &ShipmentPlan) -> Vec<Event> {
         let a = self.actors[actor_id].clone();
+        let is_faction = a.kind == ActorKind::Faction;
+        if !is_faction && self.merchant_insolvent() {
+            return vec![Event::MerchantSuspended { reason: "insolvent: restocking paused".into() }];
+        }
+        let fuel = self.balance(&a.account, Asset::Res(Resource::Fuel));
+        if is_faction && fuel < LOGISTICS_FUEL {
+            return vec![Event::LogisticsGrounded { actor: actor_id.into(), fuel }];
+        }
         let credits = self.balance(&a.account, Asset::Credits);
         let mut level = a.defense.clamp(DEFENSE_MIN, DEFENSE_MAX);
         while level > DEFENSE_MIN && DEFENSE_COST[level as usize] > credits {
             level -= 1;
         }
-        let wages = DEFENSE_COST[level as usize];
+        let wages = if is_faction { DEFENSE_COST[level as usize] } else { 0 };
         let unit_import = pricing::production_cost(plan.resource) * IMPORT_COST_BP / pricing::BP;
-        let units = if a.kind == ActorKind::Merchant { plan.units.min((credits - wages).max(0) / unit_import.max(1)) } else { plan.units };
+        let units = if is_faction { plan.units } else { plan.units.min((credits - a.credit_reserve).max(0) / unit_import.max(1)) };
         if units <= 0 {
             return vec![];
         }
         let id = self.peek_id();
-        let seed = (splitmix(self.seed ^ id) & 0xffff_ffff) as u32;
-        let convoy = Convoy { id, owner: actor_id.into(), resource: plan.resource, units, defense: level, dispatched_at: self.tick, arrives_at: self.tick + plan.transit_ticks, status: ConvoyStatus::InTransit, seed };
-        let mut batch = vec![Transfer { from: WORLD.into(), to: convoy.account(), asset: Asset::Res(plan.resource), qty: units, reason: Reason::ConvoyCargo { convoy: id } }];
+        let convoy = Convoy { id, owner: actor_id.into(), resource: plan.resource, units, defense: level, dispatched_at: self.tick, arrives_at: self.tick + plan.transit_ticks, status: ConvoyStatus::InTransit };
+        let mut batch = vec![Transfer { from: WORLD.into(), to: convoy.account(), asset: Asset::Res(plan.resource), qty: units, reason: Reason::Shipment { convoy: id } }];
+        if is_faction {
+            batch.push(Transfer { from: a.account.clone(), to: WORLD.into(), asset: Asset::Res(Resource::Fuel), qty: LOGISTICS_FUEL, reason: Reason::Logistics { convoy: id } });
+        }
         if wages > 0 {
             batch.push(Transfer { from: a.account.clone(), to: WORLD.into(), asset: Asset::Credits, qty: wages, reason: Reason::EscortWages { convoy: id } });
         }
-        if a.kind == ActorKind::Merchant {
+        if !is_faction {
             batch.push(Transfer { from: a.account.clone(), to: WORLD.into(), asset: Asset::Credits, qty: units * unit_import, reason: Reason::ImportCost { convoy: id } });
         }
         let mut ev = self.apply(&batch).expect("dispatch is sized to what the actor can afford");
         self.commit_id(id);
-        ev.push(Event::ConvoyDispatched { convoy: id, owner: actor_id.into(), resource: plan.resource, units, defense: level });
+        ev.push(Event::ShipmentDispatched { convoy: id, owner: actor_id.into(), resource: plan.resource, units, defense: level });
         self.convoys.insert(id, convoy);
         ev
+    }
+
+    /// Credit an account from `WORLD` when building a starting state. Never reachable
+    /// from a command.
+    pub fn grant(&mut self, account: &str, asset: Asset, qty: i64) {
+        self.apply(&[Transfer { from: WORLD.into(), to: account.into(), asset, qty, reason: Reason::Genesis }]).expect("grant");
     }
 }
 
@@ -682,30 +808,8 @@ fn caller_player(c: &Caller) -> &str {
     match c { Caller::Player(p) => p, _ => "" }
 }
 
-fn action_name(a: &Action) -> &'static str {
-    match a {
-        Action::Trade { .. } => "trade",
-        Action::PostContract { .. } => "post_contract",
-        Action::ConfigureDefense { .. } => "configure_defense",
-        Action::SetStrategy { .. } => "set_strategy",
-        Action::AcceptContract { .. } => "accept_contract",
-        Action::AbandonContract { .. } => "abandon_contract",
-        Action::SettleRaid { .. } => "settle_raid",
-    }
-}
-
 fn unknown(what: &str, id: &str) -> EconError {
     EconError::Unknown { what: what.into(), id: id.into() }
-}
-
-fn state_err(c: &Contract, expected: &str) -> EconError {
-    let state = match &c.status {
-        ContractStatus::Open => "open",
-        ContractStatus::Accepted { .. } => "accepted",
-        ContractStatus::Completed { .. } => "completed",
-        ContractStatus::Expired => "expired",
-    };
-    EconError::ContractState { contract: c.id, state: state.into(), expected: expected.into() }
 }
 
 /// The share of a per-day amount that falls in tick `t`: spreads `d` over the day's
@@ -723,68 +827,4 @@ pub fn splitmix(mut x: u64) -> u64 {
     x ^ (x >> 31)
 }
 
-// ── the starting world ───────────────────────────────────────────────────────
-
-pub const IRONVEIL: &str = "ironveil";
-pub const VEX: &str = "vex";
-
-/// The seeded starting state: one faction (Ironveil) and one independent merchant (Vex).
-pub fn genesis(seed: u64) -> World {
-    let ironveil = Actor {
-        id: IRONVEIL.into(),
-        name: "Ironveil Directorate".into(),
-        kind: ActorKind::Faction,
-        account: "faction:ironveil".into(),
-        income_per_day: 960,
-        production: [72, 0, 0],
-        consumption: [24, 12, 96],
-        reserve_days: 2,
-        credit_reserve: 1_000,
-        defense: 2,
-        convoy: Some(ConvoyPlan { resource: Resource::Fuel, units: 60, every_ticks: 12, transit_ticks: 6, next_dispatch: 0 }),
-    };
-    let vex = Actor {
-        id: VEX.into(),
-        name: "Vex Exchange".into(),
-        kind: ActorKind::Merchant,
-        account: "merchant:vex".into(),
-        income_per_day: 0,
-        production: [0, 0, 0],
-        consumption: [0, 0, 0],
-        reserve_days: 0,
-        credit_reserve: 800,
-        defense: 1,
-        convoy: Some(ConvoyPlan { resource: Resource::Med, units: 40, every_ticks: 24, transit_ticks: 8, next_dispatch: 3 }),
-    };
-    let mut w = World {
-        tick: 0,
-        version: 0,
-        seed,
-        balances: BTreeMap::new(),
-        actors: BTreeMap::new(),
-        market: Market { merchant: VEX.into(), target: [120, 60, 120], strategy: Strategy { margin_bp: 2_000, spread_bp: 1_000 } },
-        convoys: BTreeMap::new(),
-        contracts: BTreeMap::new(),
-        trades: Vec::new(),
-        ledger: Vec::new(),
-        next_id: 0,
-    };
-    let seed_balances = [
-        (&ironveil.account, Asset::Credits, 4_000),
-        (&ironveil.account, Asset::Res(Resource::Ammo), 100),
-        (&ironveil.account, Asset::Res(Resource::Med), 30),
-        (&ironveil.account, Asset::Res(Resource::Fuel), 200),
-        (&vex.account, Asset::Credits, 3_000),
-        (&vex.account, Asset::Res(Resource::Ammo), 80),
-        (&vex.account, Asset::Res(Resource::Med), 50),
-        (&vex.account, Asset::Res(Resource::Fuel), 60),
-    ];
-    let batch: Vec<Transfer> = seed_balances
-        .iter()
-        .map(|(acct, asset, qty)| Transfer { from: WORLD.into(), to: (*acct).clone(), asset: *asset, qty: *qty, reason: Reason::Production })
-        .collect();
-    w.apply(&batch).expect("genesis issuance");
-    w.actors.insert(ironveil.id.clone(), ironveil);
-    w.actors.insert(vex.id.clone(), vex);
-    w
-}
+pub use scenario::{acceptance, genesis, MERCHANT, VANGUARD};

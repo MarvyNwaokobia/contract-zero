@@ -13,7 +13,9 @@
 use sqlx::PgPool;
 
 /// (filename, embedded SQL), in dependency order.
-const MIGRATIONS: &[(&str, &str)] = &[];
+const MIGRATIONS: &[(&str, &str)] = &[
+    ("0001_init.sql", include_str!("../migrations/0001_init.sql")),
+];
 
 /// Apply every migration not yet recorded, in order, each in its own transaction. Called
 /// once at startup before the server binds. A failure here aborts boot on purpose — a box

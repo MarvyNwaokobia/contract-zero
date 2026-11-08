@@ -3,7 +3,7 @@ import { buildConvoyMission, convoyDifficulty, loadSeconds, CARGO_POINT, type Co
 import type { CoverBox } from './index';
 
 const base: ConvoyContract = {
-  id: 'c-001', issuer: 'Ashen Compact', target: 'Ironveil', cargo: { resource: 'fuel', units: 120 }, defense: 2, seed: 42,
+  id: 'c-001', issuer: 'Vex Exchange', target: 'Vanguard', cargo: { resource: 'fuel', units: 120 }, defense: 2, seed: 42,
 };
 
 function inside(px: number, pz: number, b: CoverBox, margin: number): boolean {
@@ -78,5 +78,34 @@ describe('convoy mission', () => {
   it('fits NVG on night convoys only', () => {
     expect(buildConvoyMission(base).attachments).toBeUndefined();
     expect(buildConvoyMission({ ...base, zone: 'BLACKSITE' }).attachments).toEqual(['nvg']);
+  });
+});
+
+describe('convoy mission from the server guard plan', () => {
+  const plan = {
+    hall: { rifles: 1, sidearms: 2 }, yard: { rifles: 4, sidearms: 0 },
+    guard_hp: 112, sidearm_damage_bp: 4500, reinforce_per_drop: 0, reinforce_every_secs_x100: 370,
+  };
+
+  it('fields exactly the guards the faction could arm, with their loadouts', () => {
+    const m = buildConvoyMission({ ...base, guards: plan });
+    const hall = m.enemies.filter((e) => e.room === 1);
+    const yard = m.enemies.filter((e) => e.room === 2);
+    expect(hall).toHaveLength(3);
+    expect(yard).toHaveLength(4);
+    expect(hall.filter((e) => e.dmgMult === 0.45)).toHaveLength(2);
+    expect(yard.every((e) => e.dmgMult === undefined)).toBe(true);
+    expect(m.enemies.every((e) => e.hp === 112)).toBe(true);
+  });
+
+  it('sends no reinforcements when the faction has no medicine', () => {
+    const load = buildConvoyMission({ ...base, guards: plan }).objectives[3];
+    expect(load.reinforceCount).toBe(0);
+    expect(load.reinforceEvery).toBe(3.7);
+  });
+
+  it('can field no guards at all when the faction has no ammunition', () => {
+    const empty = { ...plan, hall: { rifles: 0, sidearms: 0 }, yard: { rifles: 0, sidearms: 0 } };
+    expect(buildConvoyMission({ ...base, guards: empty }).enemies).toHaveLength(0);
   });
 });

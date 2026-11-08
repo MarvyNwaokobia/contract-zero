@@ -417,7 +417,7 @@ export class FpsAudio {
     if (speaker === 'handler') {        // close, warm, a friend's channel
       this.noiseBand(1900, 0.1, 0.14);
       this.noiseBand(1400, 0.07, 0.09);
-    } else if (speaker === 'ironveil') { // low — the channel drops to make room for command
+    } else if (speaker === 'vanguard') { // low — the channel drops to make room for command
       this.noiseBand(520, 0.16, 0.16);
     } else {
       this.noiseBand(1150, 0.11, 0.12);

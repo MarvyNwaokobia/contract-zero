@@ -23,12 +23,27 @@ import { mulberry32 } from './endless';
 export type Resource = 'ammo' | 'med' | 'fuel';
 export type ConvoyZone = 'DUSTLINE' | 'REDYARD' | 'BLACKSITE';
 
+/** A squad as the economy armed it: rifle guards and cheaper sidearm guards. */
+export interface Squad { rifles: number; sidearms: number }
+
+/** The server's guard plan for a raid (apps/api/crates/economy/src/mission.rs). */
+export interface GuardPlan {
+  hall: Squad;
+  yard: Squad;
+  guard_hp: number;
+  /** A sidearm guard's damage relative to a rifle guard, in basis points. */
+  sidearm_damage_bp: number;
+  /** Guards per reinforcement drop during the hold (0 when the faction has no medicine). */
+  reinforce_per_drop: number;
+  reinforce_every_secs_x100: number;
+}
+
 export interface ConvoyContract {
-  /** Stable contract id; also the default seed source. */
+  /** Stable raid id; also the default seed source. */
   id: string;
-  /** Faction that posted the contract (who pays). */
-  issuer: string;
-  /** Faction whose convoy is being raided. */
+  /** Who is paying a bounty on this depot, if anyone. */
+  issuer?: string;
+  /** Faction whose depot is being raided. */
   target: string;
   cargo: { resource: Resource; units: number };
   /** The target's defense posture, 1 (light) … 5 (fortified). Set by its commander. */
@@ -37,6 +52,9 @@ export interface ConvoyContract {
   seed: number;
   /** Time of day / theme. Defaults to DUSTLINE. */
   zone?: ConvoyZone;
+  /** The guards the faction could actually arm. When absent (training), escorts come
+   *  from `defense` alone via `convoyDifficulty`. */
+  guards?: GuardPlan;
 }
 
 export const RESOURCE_LABEL: Record<Resource, string> = {
@@ -85,22 +103,50 @@ function overlapsCover(x: number, z: number, cover: CoverBox[], margin: number):
   return cover.some((c) => Math.abs(x - c.x) < c.w / 2 + margin && Math.abs(z - c.z) < c.d / 2 + margin);
 }
 
-/** Seeded escort placement inside a room, clear of cover and of each other. */
-function placeEscorts(room: 1 | 2, count: number, hp: number, cover: CoverBox[], rng: () => number): EnemySpec[] {
+/** Seeded escort placement inside a room, clear of cover and of each other. Each
+ *  entry of `loadouts` is one guard's damage multiplier (1 = rifle). */
+function placeEscorts(room: 1 | 2, loadouts: number[], hp: number, cover: CoverBox[], rng: () => number): EnemySpec[] {
   const b = ROOM_BOUNDS[room];
   const out: EnemySpec[] = [];
-  for (let tries = 0; out.length < count && tries < 400; tries++) {
+  for (let tries = 0; out.length < loadouts.length && tries < 400; tries++) {
     const x = b.x[0] + rng() * (b.x[1] - b.x[0]);
     const z = b.z[0] + rng() * (b.z[1] - b.z[0]);
     if (overlapsCover(x, z, cover, 1.0)) continue;
     if (out.some((e) => Math.hypot(e.pos[0] - x, e.pos[1] - z) < 2.2)) continue;
-    out.push({ pos: [+x.toFixed(2), +z.toFixed(2)], room, hp });
+    const dmgMult = loadouts[out.length];
+    out.push({ pos: [+x.toFixed(2), +z.toFixed(2)], room, hp, ...(dmgMult !== 1 ? { dmgMult } : {}) });
   }
   return out;
 }
 
+const squadLoadouts = (s: Squad, sidearmMult: number): number[] =>
+  [...Array(s.rifles).fill(1), ...Array(s.sidearms).fill(sidearmMult)];
+
+/** Escorts and hold pressure: from the server's guard plan, or from defense alone. */
+export function escortsFor(c: ConvoyContract) {
+  if (c.guards) {
+    const g = c.guards;
+    const side = g.sidearm_damage_bp / 10_000;
+    return {
+      hall: squadLoadouts(g.hall, side),
+      yard: squadLoadouts(g.yard, side),
+      hp: g.guard_hp,
+      reinforceEvery: g.reinforce_every_secs_x100 / 100,
+      reinforceCount: g.reinforce_per_drop,
+    };
+  }
+  const d = convoyDifficulty(c.defense);
+  return {
+    hall: Array(d.hallEscorts).fill(1),
+    yard: Array(d.yardEscorts).fill(1),
+    hp: d.escortHp,
+    reinforceEvery: d.reinforceEvery,
+    reinforceCount: d.reinforceCount,
+  };
+}
+
 export function buildConvoyMission(c: ConvoyContract, gun: GunId = 'assault_rifle' as GunId): Mission {
-  const diff = convoyDifficulty(c.defense);
+  const esc = escortsFor(c);
   const rng = mulberry32(c.seed >>> 0);
   const cover = [...LAYOUT_B.cover.filter((k) => k.z > -6), ...YARD_COVER];
   const label = RESOURCE_LABEL[c.cargo.resource];
@@ -110,17 +156,17 @@ export function buildConvoyMission(c: ConvoyContract, gun: GunId = 'assault_rifl
   return {
     id: `contract-${c.id}`,
     zone,
-    op: `CONTRACT · ${c.issuer.toUpperCase()}`,
+    op: c.issuer ? `CONTRACT · ${c.issuer.toUpperCase()}` : `RAID · ${c.target.toUpperCase()}`,
     name: `${label} CONVOY`,
-    brief: `raid ${c.target}'s convoy · load ${c.cargo.units} ${label.toLowerCase()} · extract`,
-    story: `${c.issuer} is paying for ${c.target}'s ${label.toLowerCase()}. ${c.cargo.units} units are parked in the yard under a level-${clampDefense(c.defense)} guard. Load it and walk it out.`,
+    brief: `raid ${c.target}'s depot · load ${c.cargo.units} ${label.toLowerCase()} · extract`,
+    story: `${c.target} has ${c.cargo.units} units of ${label.toLowerCase()} staged in the depot yard under ${esc.hall.length + esc.yard.length} guards.${c.issuer ? ` ${c.issuer} is paying a bounty on it.` : ''} Load it and walk it out.`,
     gun,
     start: LAYOUT_B.start,
     walls: [...LAYOUT_B.walls],
     cover,
     enemies: [
-      ...placeEscorts(1, diff.hallEscorts, diff.escortHp, cover, rng),
-      ...placeEscorts(2, diff.yardEscorts, diff.escortHp, cover, rng),
+      ...placeEscorts(1, esc.hall, esc.hp, cover, rng),
+      ...placeEscorts(2, esc.yard, esc.hp, cover, rng),
     ],
     objectives: [
       { text: 'INTERCEPT THE CONVOY', kind: 'reach', pos: o.breach, activateRoom: 1 },
@@ -128,7 +174,7 @@ export function buildConvoyMission(c: ConvoyContract, gun: GunId = 'assault_rifl
       { text: 'PUSH TO THE YARD', kind: 'reach', pos: o.push, activateRoom: 2 },
       {
         text: `LOAD THE ${label}`, kind: 'defend', pos: CARGO_POINT, holdSecs: loadSeconds(c.cargo.units),
-        reinforceRoom: 2, reinforceEvery: diff.reinforceEvery, reinforceCount: diff.reinforceCount,
+        reinforceRoom: 2, reinforceEvery: esc.reinforceEvery, reinforceCount: esc.reinforceCount,
       },
       { text: 'EXTRACT WITH THE CARGO', kind: 'reach', pos: LAYOUT_B.start },
     ],

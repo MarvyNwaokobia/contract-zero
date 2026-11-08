@@ -313,7 +313,7 @@ export class AudioDirector {
         this.noiseBand(1900, 1.1, 0.09, 0.18, this.verbBus);
         this.noiseBand(1400, 1.4, 0.06, 0.12, this.verbBus);
         break;
-      case 'ironveil': // command doesn't crackle in — the channel drops to make room
+      case 'vanguard': // command doesn't crackle in — the channel drops to make room
         this.sine(120, 34, 0.5, 0.5, this.verbBus);
         this.noiseBand(700, 0.7, 0.3, 0.14, this.verbBus);
         this.music?.gap(260);

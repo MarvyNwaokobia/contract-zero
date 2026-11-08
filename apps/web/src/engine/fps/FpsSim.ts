@@ -62,6 +62,8 @@ export interface FpsEnemy {
    *  whether it is still hunting or has given up and gone back to its post. */
   seenAt: number;
   boss: boolean;
+  /** Scales this enemy's damage per hit: 1 = rifle loadout, < 1 = a cheaper loadout. */
+  dmgMult: number;
   phase: number;     // 0 for a mook; 1..3 for a boss, rising as its health falls
   // ── Incendiary DoT (B) ──
   burnUntil: number; // sim-time the thermite burn stops (0 = not burning)
@@ -182,6 +184,9 @@ export interface EnemySpec {
   hp?: number;
   room?: number; // which mission room this enemy belongs to (slice 4)
   boss?: boolean; // a named boss — the scene gives it a health bar + menace tint
+  /** Damage multiplier for this enemy's loadout (default 1). Set by the economy:
+   *  a guard the faction couldn't arm with a rifle carries a sidearm. */
+  dmgMult?: number;
 }
 
 export interface FpsSimOptions {
@@ -482,6 +487,7 @@ export class FpsSim {
       seenZ: sz,
       seenAt: 0,   // no contact yet: it holds its post and watches its arc
       boss: spec.boss ?? false,
+      dmgMult: spec.dmgMult ?? 1,
       phase: spec.boss ? 1 : 0,
       burnUntil: 0,
       burnDps: 0,
@@ -1200,7 +1206,7 @@ export class FpsSim {
 
     if (!part || !tgt.alive || this.time < this.getMercyUntil(e.targetId)) return;
     this.setMercyUntil(e.targetId, this.time + E.MERCY_MS);
-    const dmg = Math.round(E.DMG * FPS_TUNING.PLAYER_HIT.PART_MULT[part]);
+    const dmg = Math.round(E.DMG * e.dmgMult * FPS_TUNING.PLAYER_HIT.PART_MULT[part]);
     const fromDir = normalize([e.x - px, 0, e.z - pz]);
 
     if (e.targetId === LOCAL_TARGET) {

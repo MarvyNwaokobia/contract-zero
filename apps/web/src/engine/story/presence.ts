@@ -5,7 +5,7 @@
  *
  *   KESTREL  — your contract handler. Calm, transactional, on your side as long
  *              as the contract is.
- *   IRONVEIL — Ironveil Directorate command. The faction whose convoys you hit;
+ *   VANGUARD — Vanguard command. The faction whose convoys you hit;
  *              it notices, and it talks about what it will do next.
  *   VEX      — the independent merchant who buys what you take. Friendly in the
  *              way a business is friendly.
@@ -16,7 +16,7 @@
  * layer prefers the file and falls back to static-only.
  */
 
-export type Speaker = 'handler' | 'ironveil' | 'vex';
+export type Speaker = 'handler' | 'vanguard' | 'vex';
 
 export interface PresenceLine {
   id: string;
@@ -43,7 +43,7 @@ export type PresenceTrigger =
 
 export const SPEAKER_META: Record<Speaker, { name: string; color: string }> = {
   handler: { name: 'KESTREL', color: '#8fd6e8' },
-  ironveil: { name: 'IRONVEIL COMMAND', color: '#e0455a' },
+  vanguard: { name: 'VANGUARD COMMAND', color: '#e0455a' },
   vex: { name: 'VEX', color: '#e6c766' },
 };
 
@@ -51,13 +51,13 @@ export const PRESENCE_LINES: PresenceLine[] = [
   { id: 'handler-op-start', speaker: 'handler', trigger: 'opStart', text: "Contract's live. The cargo is in the yard past the hall. Load it, walk it out, get paid." },
   { id: 'handler-op-breach', speaker: 'handler', trigger: 'opBreach', text: "You're in. Escort's awake now, so make it quick." },
   { id: 'handler-troops-cleared', speaker: 'handler', trigger: 'troopsCleared', text: 'Forward escort is down. Someone just keyed in on the convoy channel.' },
-  { id: 'ironveil-first-word', speaker: 'ironveil', trigger: 'rivalFirstWord', text: "This is Ironveil. That cargo is accounted for. You will be too." },
+  { id: 'vanguard-first-word', speaker: 'vanguard', trigger: 'rivalFirstWord', text: "This is Vanguard. That cargo is accounted for. You will be too." },
   { id: 'handler-push-in', speaker: 'handler', trigger: 'opPushIn', text: "That's the yard. Get on the cargo and start loading. They will try to take it back." },
-  { id: 'ironveil-finale', speaker: 'ironveil', trigger: 'finaleReveal', text: 'Every crate you carry out, we pay for twice. Remember that when the next convoy rolls.' },
+  { id: 'vanguard-finale', speaker: 'vanguard', trigger: 'finaleReveal', text: 'Every crate you carry out, we pay for twice. Remember that when the next convoy rolls.' },
   { id: 'handler-low-hp', speaker: 'handler', trigger: 'lowHp', text: "You're hit. Get behind something. The cargo isn't going anywhere." },
-  { id: 'ironveil-hero-down', speaker: 'ironveil', trigger: 'opHeroDown', text: 'Raider down. Recover the cargo and log the bounty as unpaid.' },
+  { id: 'vanguard-hero-down', speaker: 'vanguard', trigger: 'opHeroDown', text: 'Raider down. Recover the cargo and log the bounty as unpaid.' },
   { id: 'vex-mission-cleared', speaker: 'vex', trigger: 'missionCleared', text: "Lovely. Bring it round to the exchange. I'll have the credits ready, as agreed." },
-  { id: 'ironveil-zone-clear', speaker: 'ironveil', trigger: 'zoneClear', text: 'Convoy commander lost. Doubling escorts on every route out of the depot.' },
+  { id: 'vanguard-zone-clear', speaker: 'vanguard', trigger: 'zoneClear', text: 'Convoy commander lost. Doubling escorts on every route out of the depot.' },
   { id: 'handler-zone-clear', speaker: 'handler', trigger: 'zoneClearTag', text: 'Hear that? They just raised the price of the next job.' },
   { id: 'handler-boss-escalate', speaker: 'handler', trigger: 'bossEscalate', text: "He's hurt and he knows it. He'll stop being careful now." },
   { id: 'handler-boss-enrage', speaker: 'handler', trigger: 'bossEnrage', text: 'Almost done. This is when they are worst. Finish it.' },

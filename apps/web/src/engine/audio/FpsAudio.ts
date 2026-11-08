@@ -1,9 +1,10 @@
+import type { Speaker } from '../story/presence';
 import { spatialize } from './spatial';
 import type { GunShotAudio } from '../combat/GunFeel';
 
 /**
  * @module audio/FpsAudio
- * @description The tactical audio director for the Valor clone (the plan slice 2).
+ * @description The tactical audio director for CONTRACT ZERO.
  *
  * Ready-or-Not sells itself through sound, so this is the first full-quality
  * system. Self-contained WebAudio synthesis — no samples to download, which
@@ -49,15 +50,15 @@ export function shotShape(profile: GunShotAudio): { rate: number; toneHz: number
 
 /** The ambience config for a zone (falls back to Ashfall). Exported for tests. */
 export function zoneAmbience(zone: string): { lp: number; vol: number; drone?: number } {
-  return ZONE_AMB[zone] ?? ZONE_AMB.ASHFALL;
+  return ZONE_AMB[zone] ?? ZONE_AMB.DUSTLINE;
 }
 
 // Per-zone ambience bed: how dark the room tone is (lowpass), how loud, and an
 // optional low drone — the Rift gets an ominous sub hum, Survival a tense one.
 const ZONE_AMB: Record<string, { lp: number; vol: number; drone?: number }> = {
-  ASHFALL: { lp: 520, vol: 0.05 },
-  'PROVING GROUND': { lp: 360, vol: 0.045 },        // colder, quieter, institutional
-  'THE RIFT': { lp: 240, vol: 0.06, drone: 44 },     // the dark place hums under you
+  DUSTLINE: { lp: 520, vol: 0.05 },
+  'REDYARD': { lp: 360, vol: 0.045 },        // colder, quieter, institutional
+  'BLACKSITE': { lp: 240, vol: 0.06, drone: 44 },     // the dark place hums under you
   SURVIVAL: { lp: 620, vol: 0.055, drone: 70 },      // a taut arena bed
 };
 
@@ -82,14 +83,14 @@ export class FpsAudio {
   private ambBaseVol = 0.05;
   private ambLp: BiquadFilterNode | null = null; // the ambience tone filter (retuned per zone)
   private drone: OscillatorNode | null = null;   // optional low zone hum (the Rift / Survival)
-  private zone = 'ASHFALL';
+  private zone = 'DUSTLINE';
 
   // Listener pose (camera), updated each frame.
   private lx = 0;
   private lz = 0;
   private lyaw = 0;
 
-  private stats_: FpsAudioStats = { shots: 0, impacts: 0, reloads: 0, footsteps: 0, unlocked: false, samples: 0, zone: 'ASHFALL' };
+  private stats_: FpsAudioStats = { shots: 0, impacts: 0, reloads: 0, footsteps: 0, unlocked: false, samples: 0, zone: 'DUSTLINE' };
 
   // Real gunshot samples, decoded into this context's graph.
   private rifle: AudioBuffer[] = [];
@@ -375,7 +376,7 @@ export class FpsAudio {
    * without a recording land on the signature + subtitle alone, exactly as the
    * story system was designed to degrade.
    */
-  vo(id: string, speaker: 'ember' | 'valor' | 'cinder'): void {
+  vo(id: string, speaker: Speaker): void {
     // The static + duck need the WebAudio graph, but the recording does not —
     // never let a missing context swallow a line.
     if (this.ctx) {
@@ -403,7 +404,7 @@ export class FpsAudio {
     try {
       const el = new Audio(`/vo/${id}.mp3`);
       el.volume = 0.95;
-      // Valor speaks slowly: hold the subtitle for the RECORDING, not a guess.
+      // Some lines run long: hold the subtitle for the RECORDING, not a guess.
       el.addEventListener('loadedmetadata', () => {
         if (Number.isFinite(el.duration) && el.duration > 0) this.voDurations.set(id, el.duration);
       });
@@ -412,11 +413,11 @@ export class FpsAudio {
   }
 
   /** Per-speaker static: you know WHO is talking before you read a word. */
-  private radioSignature(speaker: 'ember' | 'valor' | 'cinder'): void {
-    if (speaker === 'ember') {        // close, warm, a friend's channel
+  private radioSignature(speaker: Speaker): void {
+    if (speaker === 'handler') {        // close, warm, a friend's channel
       this.noiseBand(1900, 0.1, 0.14);
       this.noiseBand(1400, 0.07, 0.09);
-    } else if (speaker === 'valor') { // low — the channel drops to make room for him
+    } else if (speaker === 'ironveil') { // low — the channel drops to make room for command
       this.noiseBand(520, 0.16, 0.16);
     } else {
       this.noiseBand(1150, 0.11, 0.12);
@@ -562,7 +563,7 @@ export class FpsAudio {
   setZone(zone: string): void {
     this.zone = zone;
     this.stats_.zone = zone;
-    const cfg = ZONE_AMB[zone] ?? ZONE_AMB.ASHFALL;
+    const cfg = ZONE_AMB[zone] ?? ZONE_AMB.DUSTLINE;
     this.ambBaseVol = cfg.vol;
     const ctx = this.ctx;
     if (!ctx) return; // applied by startAmbience() on the next unlock()
@@ -597,7 +598,7 @@ export class FpsAudio {
   private startAmbience(): void {
     const ctx = this.ctx;
     if (!ctx) return;
-    const cfg = ZONE_AMB[this.zone] ?? ZONE_AMB.ASHFALL;
+    const cfg = ZONE_AMB[this.zone] ?? ZONE_AMB.DUSTLINE;
     const buffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
     const data = buffer.getChannelData(0);
     let last = 0;

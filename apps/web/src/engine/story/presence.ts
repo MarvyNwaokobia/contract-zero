@@ -1,28 +1,22 @@
 /**
- * The three voices (CLONE_PLAN.md slice 5: Valor as presence).
+ * Radio voices over the fight.
  *
- * The gate for this slice: a first-time player can say who they are, who
- * Ember is, and why Valor scares them, WITHOUT reading a menu. So the story
- * arrives as voices over the fight, never as a screen you must visit:
+ * The story arrives as voices on the channel, never as a screen you must visit:
  *
- *   ASH   — the hero. The one who walked out of the fire. Never speaks;
- *           everyone speaks TO them (the GoW intimacy trick at zero VO cost).
- *   EMBER — the other survivor. Your ally on a scavenged radio. Warm, scared,
- *           practical. The relationship arc of the campaign.
- *   VALOR — the name every enemy dies protecting. He has your radio channel.
- *           He is never a body in zone 1 — only a voice that owns things:
- *           the crew, Cinder, and the blade in your hand.
+ *   KESTREL  — your contract handler. Calm, transactional, on your side as long
+ *              as the contract is.
+ *   IRONVEIL — Ironveil Directorate command. The faction whose convoys you hit;
+ *              it notices, and it talks about what it will do next.
+ *   VEX      — the independent merchant who buys what you take. Friendly in the
+ *              way a business is friendly.
  *
- * Delivery: each line is a radio-styled subtitle + per-speaker static
- * signature now; the ids map 1:1 to VO files (public/vo/{id}.mp3) that
- * scripts/generate-vo.mjs produces when an ElevenLabs key is available.
- * AudioDirector.playVo() prefers the file and falls back to static-only.
- *
- * Lines are data, triggers are semantic — the campaign reuses this exact
- * shape when the playground grows into Ashfall (slice 6).
+ * Delivery: each line is a radio-styled subtitle + per-speaker static signature;
+ * ids map 1:1 to optional VO files (public/vo/{id}.mp3) that
+ * scripts/generate-vo.mjs produces when an ElevenLabs key is available. The audio
+ * layer prefers the file and falls back to static-only.
  */
 
-export type Speaker = 'ember' | 'valor' | 'cinder';
+export type Speaker = 'handler' | 'ironveil' | 'vex';
 
 export interface PresenceLine {
   id: string;
@@ -31,154 +25,42 @@ export interface PresenceLine {
   trigger: PresenceTrigger;
 }
 
+/** The beats the scene fires. */
 export type PresenceTrigger =
-  | 'combatStart'   // first fight of the session
-  | 'firstCatch'    // the first recall catch — the weapon acknowledged
-  | 'lowHp'         // first time below 30
-  | 'troopsCleared' // round 1 down, something else is coming
-  | 'bossIntro'     // Cinder takes the field
-  | 'bossPhase2'
-  | 'bossPhase3'
-  | 'heroDown'
-  | 'zoneClear'     // Cinder dead
-  | 'zoneClearTag'  // the follow-up beat after zoneClear
-  // ── Valor doorkicker beats (the plan slice 6). The melee triggers above name a
-  // blade the hero no longer carries, so the rifle operation gets its own lines.
-  // These have no recorded mp3 yet: they land as subtitle + radio static until
-  // scripts/generate-vo.mjs is run with an ElevenLabs key (it reads this file).
-  | 'opStart'        // briefing: who you are, who Ember is, whose compound this is
-  | 'opBreach'       // the doorway
-  | 'valorFirstWord' // he answers the channel Ember just noticed
-  | 'opPushIn'       // entering the objective room
-  | 'opHeroDown'     // Valor over your body (rifle-appropriate)
-  | 'missionCleared' // a non-finale op is done (Ember)
-  | 'valorReveal'    // the finale: Valor, finally in the room with you
-  | 'bossEscalate'   // a boss dropped past half — it stops holding back (phase 2)
-  | 'bossEnrage';    // a boss is nearly down and turns feral (phase 3)
+  | 'opStart'        // deployment: whose cargo, who is paying
+  | 'opBreach'       // through the first door
+  | 'troopsCleared'  // the forward escort is down
+  | 'rivalFirstWord' // the convoy owner comes on the channel (once per session)
+  | 'opPushIn'       // entering the yard
+  | 'finaleReveal'   // entering the last room of the hardest op
+  | 'lowHp'          // first time below 30
+  | 'opHeroDown'     // the player is down for good
+  | 'missionCleared' // extracted
+  | 'zoneClear'      // a boss is down
+  | 'zoneClearTag'   // the follow-up beat after zoneClear
+  | 'bossEscalate'   // a boss dropped past half (phase 2)
+  | 'bossEnrage';    // a boss is nearly down (phase 3)
 
 export const SPEAKER_META: Record<Speaker, { name: string; color: string }> = {
-  ember: { name: 'EMBER', color: '#ffb38a' },
-  valor: { name: 'VALOR', color: '#e0455a' },
-  cinder: { name: 'CINDER', color: '#ff4422' },
+  handler: { name: 'KESTREL', color: '#8fd6e8' },
+  ironveil: { name: 'IRONVEIL COMMAND', color: '#e0455a' },
+  vex: { name: 'VEX', color: '#e6c766' },
 };
 
 export const PRESENCE_LINES: PresenceLine[] = [
-  {
-    id: 'ember-radio-check',
-    speaker: 'ember',
-    trigger: 'combatStart',
-    text: "Radio check. Ash, it's me. So you actually took the blade... they're going to come for it.",
-  },
-  {
-    id: 'ember-first-catch',
-    speaker: 'ember',
-    trigger: 'firstCatch',
-    text: 'It comes back to you. It never did that for any of them.',
-  },
-  {
-    id: 'ember-low-hp',
-    speaker: 'ember',
-    trigger: 'lowHp',
-    text: "You're bleeding. Move, Ash. MOVE.",
-  },
-  {
-    id: 'ember-troops-cleared',
-    speaker: 'ember',
-    trigger: 'troopsCleared',
-    text: 'Four down... wait. Ash, someone else is on this channel.',
-  },
-  {
-    id: 'valor-intro',
-    speaker: 'valor',
-    trigger: 'bossIntro',
-    text: "There you are. My crew, my village, and now my blade in your hand. Cinder, bring it back to me.",
-  },
-  {
-    id: 'cinder-phase2',
-    speaker: 'cinder',
-    trigger: 'bossPhase2',
-    text: 'You want to know what the fire looked like? Look closer.',
-  },
-  {
-    id: 'valor-phase3',
-    speaker: 'valor',
-    trigger: 'bossPhase3',
-    text: 'Stop playing with it, Cinder.',
-  },
-  {
-    id: 'valor-hero-down',
-    speaker: 'valor',
-    trigger: 'heroDown',
-    text: 'Leave the body. Bring my blade.',
-  },
-  {
-    id: 'valor-zone-clear',
-    speaker: 'valor',
-    trigger: 'zoneClear',
-    text: '...So it chose you. Keep it warm for me, ember-rat. I burn everything I own.',
-  },
-  {
-    id: 'ember-zone-clear',
-    speaker: 'ember',
-    trigger: 'zoneClearTag',
-    text: 'That voice. Ash... that was him. That was Valor.',
-  },
-
-  // ── Valor doorkicker lines (slice 6). No mp3 yet → subtitle + radio static. ──
-  {
-    id: 'ember-op-start',
-    speaker: 'ember',
-    trigger: 'opStart',
-    text: "Radio check, Ash. It's Ember. Two of us walked out of that fire, and one of us is standing outside a compound that belongs to him. Go.",
-  },
-  {
-    id: 'ember-op-breach',
-    speaker: 'ember',
-    trigger: 'opBreach',
-    text: "Door's yours. Whatever they're holding in there, they're holding it for him.",
-  },
-  {
-    id: 'valor-first-word',
-    speaker: 'valor',
-    trigger: 'valorFirstWord',
-    text: "You hear me. Good. I wanted you to know I have been on this channel the whole time.",
-  },
-  {
-    id: 'valor-push-in',
-    speaker: 'valor',
-    trigger: 'opPushIn',
-    text: 'Deeper, then. Everything you came for is in that room. So is everything I left there for you.',
-  },
-  {
-    id: 'valor-op-down',
-    speaker: 'valor',
-    trigger: 'opHeroDown',
-    text: 'Leave the body where it fell. Ember, you can stay on the line for this part.',
-  },
-  {
-    id: 'ember-mission-cleared',
-    speaker: 'ember',
-    trigger: 'missionCleared',
-    text: "Compound's clear, Ash. Extract, and we push to the next one. He's still out there.",
-  },
-  {
-    id: 'valor-reveal',
-    speaker: 'valor',
-    trigger: 'valorReveal',
-    text: 'So. You walked all the way into the dark to find me. Good. I was getting tired of the radio.',
-  },
-  {
-    id: 'valor-boss-escalate',
-    speaker: 'valor',
-    trigger: 'bossEscalate',
-    text: "You cut him. He felt that. Now watch what he does when he stops being careful.",
-  },
-  {
-    id: 'valor-boss-enrage',
-    speaker: 'valor',
-    trigger: 'bossEnrage',
-    text: "He's almost gone, and he knows it. That's when they're worst. Finish it.",
-  },
+  { id: 'handler-op-start', speaker: 'handler', trigger: 'opStart', text: "Contract's live. The cargo is in the yard past the hall. Load it, walk it out, get paid." },
+  { id: 'handler-op-breach', speaker: 'handler', trigger: 'opBreach', text: "You're in. Escort's awake now, so make it quick." },
+  { id: 'handler-troops-cleared', speaker: 'handler', trigger: 'troopsCleared', text: 'Forward escort is down. Someone just keyed in on the convoy channel.' },
+  { id: 'ironveil-first-word', speaker: 'ironveil', trigger: 'rivalFirstWord', text: "This is Ironveil. That cargo is accounted for. You will be too." },
+  { id: 'handler-push-in', speaker: 'handler', trigger: 'opPushIn', text: "That's the yard. Get on the cargo and start loading. They will try to take it back." },
+  { id: 'ironveil-finale', speaker: 'ironveil', trigger: 'finaleReveal', text: 'Every crate you carry out, we pay for twice. Remember that when the next convoy rolls.' },
+  { id: 'handler-low-hp', speaker: 'handler', trigger: 'lowHp', text: "You're hit. Get behind something. The cargo isn't going anywhere." },
+  { id: 'ironveil-hero-down', speaker: 'ironveil', trigger: 'opHeroDown', text: 'Raider down. Recover the cargo and log the bounty as unpaid.' },
+  { id: 'vex-mission-cleared', speaker: 'vex', trigger: 'missionCleared', text: "Lovely. Bring it round to the exchange. I'll have the credits ready, as agreed." },
+  { id: 'ironveil-zone-clear', speaker: 'ironveil', trigger: 'zoneClear', text: 'Convoy commander lost. Doubling escorts on every route out of the depot.' },
+  { id: 'handler-zone-clear', speaker: 'handler', trigger: 'zoneClearTag', text: 'Hear that? They just raised the price of the next job.' },
+  { id: 'handler-boss-escalate', speaker: 'handler', trigger: 'bossEscalate', text: "He's hurt and he knows it. He'll stop being careful now." },
+  { id: 'handler-boss-enrage', speaker: 'handler', trigger: 'bossEnrage', text: 'Almost done. This is when they are worst. Finish it.' },
 ];
 
 export function linesFor(trigger: PresenceTrigger): PresenceLine[] {

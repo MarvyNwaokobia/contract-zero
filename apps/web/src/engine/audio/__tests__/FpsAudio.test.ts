@@ -39,12 +39,12 @@ describe('per-zone ambience', () => {
   });
 
   it('the Rift is darker (lower room tone) than Ashfall and hums with a drone', () => {
-    expect(zoneAmbience('THE RIFT').lp).toBeLessThan(zoneAmbience('ASHFALL').lp);
-    expect(zoneAmbience('THE RIFT').drone).toBeGreaterThan(0);
-    expect(zoneAmbience('ASHFALL').drone).toBeUndefined();
+    expect(zoneAmbience('BLACKSITE').lp).toBeLessThan(zoneAmbience('DUSTLINE').lp);
+    expect(zoneAmbience('BLACKSITE').drone).toBeGreaterThan(0);
+    expect(zoneAmbience('DUSTLINE').drone).toBeUndefined();
   });
 
   it('an unknown zone falls back to the Ashfall bed', () => {
-    expect(zoneAmbience('NOWHERE')).toEqual(zoneAmbience('ASHFALL'));
+    expect(zoneAmbience('NOWHERE')).toEqual(zoneAmbience('DUSTLINE'));
   });
 });

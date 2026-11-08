@@ -5,7 +5,7 @@ import type { PbrMaps } from './usePbr';
  * World-space (triplanar) texturing for MeshStandardMaterial.
  *
  * WHY: every wall and crate in the FPS scene is the SAME unit cube scaled to size
- * (see UNIT_BOX in ValorScene — one shared geometry, ~10 GPU buffers saved per
+ * (see UNIT_BOX in ContractZeroScene — one shared geometry, ~10 GPU buffers saved per
  * room). A unit cube carries unit UVs, so a 6m × 3m wall and a 1m crate both map
  * the texture 0..1 across their whole face: the brick on the long wall is stretched
  * six times wider than the brick on the crate beside it, and every face has a

@@ -15,10 +15,10 @@ import { useImpactTextures } from '../vfx/useImpactTextures';
 import { DroppedWeapon } from '../vfx/DroppedWeapon';
 import {
   FpsSim,
-  xpForKill, rankForXp, xpIntoRank, xpBarSize, rankUpsBetween, gReward, careerXpFor, XP_REWARD, rayAABB, aabbOfCover, slideMove, type FpsInput, type Vec3, type Rank, type Attachment,
+  xpForKill, rankForXp, xpIntoRank, xpBarSize, rankUpsBetween, careerXpFor, XP_REWARD, rayAABB, aabbOfCover, slideMove, type FpsInput, type Vec3, type Rank, type Attachment,
 } from '../fps';
 import { RANK_COLORS } from '../../lib/constants';
-import { linesFor, SPEAKER_META, type PresenceLine, type PresenceTrigger } from '../story/presence';
+import { linesFor, SPEAKER_META, type PresenceLine, type PresenceTrigger, type Speaker } from '../story/presence';
 import { GUN_FEEL } from '../combat/GunFeel';
 import { STARTER_GUN_ID, type GunId } from '../combat/GunStats';
 import type { AmmoId, AttachmentId, AttachmentSlot } from '../combat/Loadout';
@@ -34,19 +34,15 @@ import {
 import { dressingFor, dressingColliders, type PropSpec } from './setDressing';
 
 /**
- * Valor clone · slice 1 graybox (docs/the plan.md).
+ * CONTRACT ZERO first-person scene.
  *
  * The single verb, in isolation: a first-person gunfight that has to feel great
  * MUTED, with no art and no sound. First-person camera, viewmodel with sway +
  * bob + recoil, ADS / lean / crouch, aim decided by a camera raycast against
- * head/body hitboxes, cover that eats rounds, lethal Valor damage, static dummies
- * that fall and respawn so the feel can be hammered on.
+ * head/body hitboxes, cover that eats rounds, lethal damage, and enemies that
+ * fight back from cover.
  *
- * Isolated on purpose (Marvy's rule): this mounts at /dev/verb and touches
- * nothing in the live /fight game. It becomes /fight only when the whole Valor
- * build is done.
- *
- * Controls are KEYBOARD-FIRST (mouse clicks are unreliable for Marvy):
+ * Controls are KEYBOARD-FIRST (every action has a key):
  *   move WASD · look mouse OR arrow keys · FIRE Space · ADS Left-Shift
  *   lean Q/E · crouch C · reload R. Mouse buttons also work as a bonus.
  */
@@ -73,7 +69,7 @@ const LOOK_SMOOTH_RATE = 19;
 // Player-tunable look sensitivity. A single multiplier over the tuned defaults, kept
 // per device in localStorage — a phone and a desktop want very different numbers, and
 // localStorage is already per device, so one key covers both without a mode switch.
-const SENS_KEY = 'valor_look_sens';
+const SENS_KEY = 'cz_look_sens';
 const SENS_MIN = 0.25, SENS_MAX = 2.5, SENS_DEFAULT = 1;
 function loadLookSens(): number {
   if (typeof window === 'undefined') return SENS_DEFAULT;
@@ -432,7 +428,7 @@ export interface CoopOpts {
   myWallet: string;
   /** Non-host only — the host's latest broadcast, read every frame. */
   latestHostSnapshot?: React.RefObject<CoopHostSnapshot | null>;
-  /** Host only — called on ValorScene's own broadcast cadence. */
+  /** Host only — called on ContractZeroScene's own broadcast cadence. */
   sendHostState?: (snapshot: CoopHostSnapshot) => void;
   /** Non-host only — this frame's local input; the caller/hook decides
    *  transport rate, not this. */
@@ -450,7 +446,7 @@ const HOLD_RADIUS = 6.5;
 
 // Earn loop (slice 5). Career XP persists locally in the sandbox; when this is
 // attached to /fight it banks through the real rank/RewardPool path instead.
-const XP_KEY = 'valor_career_xp';
+const XP_KEY = 'cz_career_xp';
 const XP_POPS = 4;
 
 /** Placeholder body, real rifle animation. Swapping the mesh is one asset change. */
@@ -1298,22 +1294,22 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
   // ── Probe hooks (headless verification) ──
   useEffect(() => {
     const w = window as unknown as Record<string, unknown>;
-    w.__valorState = () => sim.snapshot();
-    w.__valorProps = () => dressingFor(mission); // set-dressing placements (headless visual check)
-    w.__valorKillAll = () => sim.debugKillAll();
+    w.__czState = () => sim.snapshot();
+    w.__czProps = () => dressingFor(mission); // set-dressing placements (headless visual check)
+    w.__czKillAll = () => sim.debugKillAll();
     // Endless probe: clear ONLY the room the player is standing in, leaving the
     // dormant rooms ahead intact so a breach still has something to wake.
-    w.__valorKillRoom = () => sim.debugKillRoom(chain.current.cursor + 1);
-    w.__valorKillPlayer = () => sim.debugKillPlayer();
-    w.__valorAim = () => ({ pitch: pitch.current, yaw: yaw.current });
-    w.__valorAudio = () => audio.stats();
+    w.__czKillRoom = () => sim.debugKillRoom(chain.current.cursor + 1);
+    w.__czKillPlayer = () => sim.debugKillPlayer();
+    w.__czAim = () => ({ pitch: pitch.current, yaw: yaw.current });
+    w.__czAudio = () => audio.stats();
     // `alive` / `refills` / `reviving` make the second wind observable: a mission
     // RESTART and a second wind both put health back to full, so the health bar
     // alone cannot tell you which one happened.
-    w.__valorMission = () => ({ objective: objective.current, total: OBJECTIVES.length, complete: completeAt.current > 0, briefing: sim.time < briefingUntil.current, survival, gauntlet: !!mission.gauntlet, wave: survWave.current, waveState: survState.current, survOver: survOver.current, kills: sim.snapshot().stats.kills, simTime: sim.time, alive: sim.snapshot().playerAlive, hp: sim.snapshot().playerHp, refills: refills.current, reviving: reviveAt.current > 0, weaponDown: dropPhysics.current.active, weaponLanded: dropPhysics.current.landed });
+    w.__czMission = () => ({ objective: objective.current, total: OBJECTIVES.length, complete: completeAt.current > 0, briefing: sim.time < briefingUntil.current, survival, gauntlet: !!mission.gauntlet, wave: survWave.current, waveState: survState.current, survOver: survOver.current, kills: sim.snapshot().stats.kills, simTime: sim.time, alive: sim.snapshot().playerAlive, hp: sim.snapshot().playerHp, refills: refills.current, reviving: reviveAt.current > 0, weaponDown: dropPhysics.current.active, weaponLanded: dropPhysics.current.landed });
     // Endless chain state, for headless verification of the streamed room chain:
     // which room the player is in, how many are live, and whether the room is clear.
-    w.__valorEndless = () => {
+    w.__czEndless = () => {
       const c = chain.current;
       const cur = c.rooms.find((r) => r.index === c.cursor);
       return {
@@ -1343,34 +1339,34 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
         kills: sim.snapshot().stats.kills,
       };
     };
-    w.__valorWarp = (x: number, z: number) => { pos.current.set(x, EYE_STAND, z); };
-    w.__valorSkipBriefing = () => { briefingUntil.current = 0; };
-    w.__valorXp = () => ({ careerXp: careerXp.current, rank: rankForXp(careerXp.current), intoRank: xpIntoRank(careerXp.current) });
-    w.__valorStory = () => ({ fired: [...storyFired.current], queued: voQueue.current.length });
-    w.__valorRig = () => rigApis.current[0]?.debug() ?? null;
-    w.__valorPlayer = () => ({ x: +pos.current.x.toFixed(3), z: +pos.current.z.toFixed(3) });
-    w.__valorStagger = () => ({
+    w.__czWarp = (x: number, z: number) => { pos.current.set(x, EYE_STAND, z); };
+    w.__czSkipBriefing = () => { briefingUntil.current = 0; };
+    w.__czXp = () => ({ careerXp: careerXp.current, rank: rankForXp(careerXp.current), intoRank: xpIntoRank(careerXp.current) });
+    w.__czStory = () => ({ fired: [...storyFired.current], queued: voQueue.current.length });
+    w.__czRig = () => rigApis.current[0]?.debug() ?? null;
+    w.__czPlayer = () => ({ x: +pos.current.x.toFixed(3), z: +pos.current.z.toFixed(3) });
+    w.__czStagger = () => ({
       shoveX: +shoveX.current.toFixed(4), shoveZ: +shoveZ.current.toFixed(4),
       pitch: +staggerP.current.toFixed(4), yaw: +staggerY.current.toFixed(4), shake: +shake.current.toFixed(4),
     });
-    w.__valorColliders = () => COLLIDERS;
-    w.__valorCam = () => ({ x: +camera.position.x.toFixed(3), z: +camera.position.z.toFixed(3) });
+    w.__czColliders = () => COLLIDERS;
+    w.__czCam = () => ({ x: +camera.position.x.toFixed(3), z: +camera.position.z.toFixed(3) });
     // audition any presence line (also lets us verify which ids have a recording)
-    w.__valorVo = (id: string, speaker: 'ember' | 'valor' | 'cinder') => audio.vo(id, speaker);
-    w.__valorSetXp = (n: number) => { careerXp.current = n; try { window.localStorage.setItem(XP_KEY, String(n)); } catch { /* ignore */ } };
+    w.__czVo = (id: string, speaker: Speaker) => audio.vo(id, speaker);
+    w.__czSetXp = (n: number) => { careerXp.current = n; try { window.localStorage.setItem(XP_KEY, String(n)); } catch { /* ignore */ } };
     // headless: wound the live boss to a fraction of its health, to drive phases
-    w.__valorHurtBoss = (frac: number) => {
+    w.__czHurtBoss = (frac: number) => {
       const b = sim.getEnemies().find((e) => e.boss && e.alive);
       if (b) (b as { hp: number }).hp = Math.max(1, Math.round(b.maxHp * frac));
       return b ? { hp: b.hp, phase: b.phase } : null;
     };
-    w.__valorWakeRoom = (room: number) => sim.setRoomActive(room, true); // headless room activation
-    w.__valorSwitch = (n?: number) => (typeof n === 'number' ? sim.switchGun(n) : sim.nextWeapon());
-    w.__valorFire = (on: boolean) => { controls.current.fire = !!on; }; // headless: hold the trigger (aim-assist test)
-    w.__valorToggle = (a: Attachment) => sim.toggleAttachment(a);
+    w.__czWakeRoom = (room: number) => sim.setRoomActive(room, true); // headless room activation
+    w.__czSwitch = (n?: number) => (typeof n === 'number' ? sim.switchGun(n) : sim.nextWeapon());
+    w.__czFire = (on: boolean) => { controls.current.fire = !!on; }; // headless: hold the trigger (aim-assist test)
+    w.__czToggle = (a: Attachment) => sim.toggleAttachment(a);
     // C3: WebGL resource + draw snapshot — the soak probe watches memory.geometries/
     // textures/programs for growth (a disposal leak) over a long run.
-    w.__valorPerf = () => ({
+    w.__czPerf = () => ({
       geometries: gl.info.memory.geometries,
       textures: gl.info.memory.textures,
       programs: gl.info.programs?.length ?? 0,
@@ -1380,7 +1376,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
     });
     // ── Survival re-arm bridge (B1): applies a PAID re-arm's effect to the sim.
     //    The outer component charges the G$ first, then calls these on success. ──
-    w.__valorRevive = () => {
+    w.__czRevive = () => {
       if (!survival || sim.snapshot().playerAlive) return false;
       sim.revive();
       survOver.current = false;
@@ -1389,8 +1385,8 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       if (hud.current.survEnd) { hud.current.survEnd.style.opacity = '0'; hud.current.survEnd.style.pointerEvents = 'none'; }
       return true;
     };
-    w.__valorResupply = () => { if (!survival || !sim.snapshot().playerAlive) return false; sim.resupply(); return true; };
-    w.__valorWaveSkip = () => {
+    w.__czResupply = () => { if (!survival || !sim.snapshot().playerAlive) return false; sim.resupply(); return true; };
+    w.__czWaveSkip = () => {
       if (!survival || !sim.snapshot().playerAlive) return false;
       sim.despawnAll();                                    // clear the field → next wave
       survState.current = 'intermission';
@@ -1398,10 +1394,10 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       return true;
     };
     return () => {
-      delete w.__valorState; delete w.__valorKillAll; delete w.__valorKillRoom; delete w.__valorKillPlayer; delete w.__valorAim; delete w.__valorAudio;
-      delete w.__valorMission; delete w.__valorEndless; delete w.__valorWarp; delete w.__valorSkipBriefing;
-      delete w.__valorXp; delete w.__valorSetXp; delete w.__valorStory; delete w.__valorVo; delete w.__valorRig; delete w.__valorPlayer; delete w.__valorColliders; delete w.__valorCam; delete w.__valorStagger; delete w.__valorHurtBoss; delete w.__valorWakeRoom; delete w.__valorSwitch; delete w.__valorFire; delete w.__valorToggle;
-      delete w.__valorRevive; delete w.__valorResupply; delete w.__valorWaveSkip; delete w.__valorPerf;
+      delete w.__czState; delete w.__czKillAll; delete w.__czKillRoom; delete w.__czKillPlayer; delete w.__czAim; delete w.__czAudio;
+      delete w.__czMission; delete w.__czEndless; delete w.__czWarp; delete w.__czSkipBriefing;
+      delete w.__czXp; delete w.__czSetXp; delete w.__czStory; delete w.__czVo; delete w.__czRig; delete w.__czPlayer; delete w.__czColliders; delete w.__czCam; delete w.__czStagger; delete w.__czHurtBoss; delete w.__czWakeRoom; delete w.__czSwitch; delete w.__czFire; delete w.__czToggle;
+      delete w.__czRevive; delete w.__czResupply; delete w.__czWaveSkip; delete w.__czPerf;
     };
   }, [sim, audio]);
 
@@ -1924,7 +1920,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
           onDeath?.(sim.snapshot().stats);
         }
       } else if (ev.kind === 'bossPhase') {
-        // The boss just escalated: pulse it, jolt the view, and let Valor mark it.
+        // The boss just escalated: pulse it, jolt the view, and let the handler call it.
         bossFlash.current = 1;
         shake.current = Math.min(0.05, shake.current + 0.028);
         say(ev.phase >= 3 ? 'bossEnrage' : 'bossEscalate');
@@ -2498,12 +2494,12 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
         if (objective.current === 0) say('opBreach');
         else if (objective.current === 1 && obj.kind === 'clear') {
           say('troopsCleared');
-          // Valor first answers the channel ONCE in the whole campaign.
+          // The convoy owner comes on the channel ONCE per session.
           try {
-            if (!window.localStorage.getItem('valor_heard')) { say('valorFirstWord'); window.localStorage.setItem('valor_heard', '1'); }
-          } catch { say('valorFirstWord'); }
+            if (!window.localStorage.getItem('cz_heard')) { say('rivalFirstWord'); window.localStorage.setItem('cz_heard', '1'); }
+          } catch { say('rivalFirstWord'); }
         } else if (objective.current === 2 && obj.kind === 'clear') {
-          say(isFinale ? 'valorReveal' : 'opPushIn'); // the finale: he's finally in the room
+          say(isFinale ? 'finaleReveal' : 'opPushIn'); // the finale: he's finally in the room
         }
         objective.current++;
         if (objective.current >= OBJECTIVES.length) {
@@ -2939,7 +2935,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       hud.current.rankUpRank.textContent = rank.toUpperCase();
       hud.current.rankUpRank.style.color = RANK_COLORS[rank];
     }
-    if (hud.current.rankUpG) hud.current.rankUpG.textContent = `+${gReward(rank)} G$`;
+    if (hud.current.rankUpG) hud.current.rankUpG.textContent = "";
     const el = hud.current.rankUp;
     if (el) {
       el.style.opacity = '1';
@@ -2990,7 +2986,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       voCurrentId.current = null;
     }
     // Once the recording's real length is known, hold the caption for all of it —
-    // the text-length guess cuts Valor off (he speaks slowly).
+    // the text-length guess can cut a slow line off.
     const id = voCurrentId.current;
     if (id) {
       const d = audio.voDuration(id);
@@ -3256,7 +3252,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
           pass) and Bloom (a mipmap blur) — the two priciest effects — keeping only the
           cheap chromatic edge + vignette that sell the "lens". Used on touch AND on any
           desktop/laptop that can't hold framerate on the full stack (adaptive: see the
-          PerformanceMonitor → `degraded` in ValorScene). Capable machines keep the full look. */}
+          PerformanceMonitor → `degraded` in ContractZeroScene). Capable machines keep the full look. */}
       {/* Endless always takes the LIGHT stack. N8AO runs `enableNormalPass`, which is a
           second full render of the scene every frame — affordable on an authored op,
           not on top of a streamed four-room compound and a pool of skinned characters.
@@ -3309,7 +3305,7 @@ function MissionSelect({ current, progress, onPick, onSurvival, onGauntlet, gaun
       <div style={{ maxWidth: 760, margin: '0 auto' }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 22 }}>
           <div>
-            <div style={{ fontSize: 12, letterSpacing: 8, color: '#37d0e0' }}>Valor · CAMPAIGN</div>
+            <div style={{ fontSize: 12, letterSpacing: 8, color: '#37d0e0' }}>TRAINING</div>
             <div style={{ fontSize: 32, fontWeight: 800, letterSpacing: 4 }}>OPERATIONS</div>
           </div>
           <button
@@ -3449,17 +3445,17 @@ function MissionDebrief({ mode, cleared, next, reward, onDeploy, onRetry, onExit
           <div style={{ marginBottom: 22 }}>
             <div style={{ fontSize: 14, letterSpacing: 3, color: '#5fe0a8', fontWeight: 700 }}>+{reward.xpAwarded} XP</div>
             {reward.bountyAwarded > 0 && (
-              <div style={{ fontSize: 12, letterSpacing: 2, color: '#ffcf5f', marginTop: 7 }}>{reward.firstClear ? 'FIRST CLEAR BONUS' : 'OP BOUNTY'} · +{reward.bountyAwarded} G$</div>
+              <div style={{ fontSize: 12, letterSpacing: 2, color: '#ffcf5f', marginTop: 7 }}>{reward.firstClear ? 'FIRST CLEAR BONUS' : 'OP BOUNTY'} · +{reward.bountyAwarded} CR</div>
             )}
             {reward.rankedUp && reward.newRank && (
-              <div style={{ fontSize: 16, letterSpacing: 3, color: '#37d0e0', fontWeight: 800, marginTop: 7 }}>RANK UP → {reward.newRank.toUpperCase()} · +{reward.gAwarded} G$</div>
+              <div style={{ fontSize: 16, letterSpacing: 3, color: '#37d0e0', fontWeight: 800, marginTop: 7 }}>RANK UP → {reward.newRank.toUpperCase()} · +{reward.gAwarded} CR</div>
             )}
           </div>
         )}
         {mode === 'finale' ? (
           <>
             <div style={{ fontSize: 13, letterSpacing: 8, color: '#9fb4c8' }}>THE FIRE IS OUT</div>
-            <div style={{ fontSize: 48, fontWeight: 800, letterSpacing: 5, margin: '10px 0', color: '#ff5a47' }}>VALOR IS DEAD</div>
+            <div style={{ fontSize: 48, fontWeight: 800, letterSpacing: 5, margin: '10px 0', color: '#ff5a47' }}>DIRECTOR DOWN</div>
             <div style={{ fontSize: 14, color: '#c6b4ae', letterSpacing: 1, lineHeight: 1.6 }}>You walked all the way into the dark and out the other side. The radio is quiet now. Ashfall can begin again.</div>
             <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 30 }}>
               <button onClick={onRetry} style={btn('#ff8a7a')}>{iconRow('refresh', 'REPLAY FINALE', 14)}</button>
@@ -3498,7 +3494,7 @@ export interface ContractRun {
   onKilled: (stats: ContractRunStats) => void;
 }
 
-export function ValorScene({ contract, onOpStart, onOpCleared, onOpFailed, startMission, resumeLevel, accountRank, accountXp, equippedGun, equippedAmmo, equippedMods, fieldKit, onExit, endless, seasonal, coop }: {
+export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed, startMission, resumeLevel, accountRank, accountXp, equippedGun, equippedAmmo, equippedMods, fieldKit, onExit, endless, seasonal, coop }: {
   /** Boot straight into an ENDLESS run on the generated room chain, bypassing the
    *  campaign entirely. Present for Campaign Endless and the Seasonal Campaign;
    *  absent everywhere else. */
@@ -3574,7 +3570,7 @@ export function ValorScene({ contract, onOpStart, onOpCleared, onOpFailed, start
     bossWrap: null, bossName: null, bossFill: null,
   });
 
-  // Mobile is a first-class target (Marvy's note): a left move-stick, a right
+  // Mobile is a first-class target: a left move-stick, a right
   // look-pad, and fire/ADS/reload buttons write into this, read by FpsWorld.
   const controls = useRef<Controls>({ moveX: 0, moveY: 0, lookX: 0, lookY: 0, lookSens: loadLookSens(), fire: false, ads: false, crouch: false, reload: false, fireMode: false, swap: false, toggle: null, lockCycle: false, tapAimX: null, tapAimY: null });
   const audio = useMemo(() => new FpsAudio(), []);
@@ -3755,21 +3751,21 @@ export function ValorScene({ contract, onOpStart, onOpCleared, onOpFailed, start
   };
   useEffect(() => {
     const w = window as unknown as Record<string, unknown>;
-    w.__valorCampaign = () => ({ index: missionIndex, total: CAMPAIGN.length, name: mission.name, zone: mission.zone, done: campaignDone, progress, selectOpen });
-    w.__valorNextMission = () => advance();
-    w.__valorResetCampaign = () => {
+    w.__czCampaign = () => ({ index: missionIndex, total: CAMPAIGN.length, name: mission.name, zone: mission.zone, done: campaignDone, progress, selectOpen });
+    w.__czNextMission = () => advance();
+    w.__czResetCampaign = () => {
       try { window.localStorage.removeItem(CAMPAIGN_KEY); window.localStorage.removeItem(PROGRESS_KEY); } catch { /* ignore */ }
       setCampaignDone(false); setSelect(false); setProgress(0); setMissionIndex(0); setRunNonce((n) => n + 1);
     };
-    w.__valorOpenSelect = (v = true) => setSelect(!!v);
-    w.__valorPickMission = (i: number) => pickMission(i);
-    w.__valorSurvival = () => pickSurvival();
-    w.__valorGauntlet = () => { setMode('gauntlet'); setCampaignDone(false); setDebrief(null); setSelect(false); setRunNonce((n) => n + 1); }; // probe: force ranked mode (bypasses unlock)
-    w.__valorPause = (v = true) => (v ? openPause() : resume()); // C4 probe
-    w.__valorProgress = () => progress;
+    w.__czOpenSelect = (v = true) => setSelect(!!v);
+    w.__czPickMission = (i: number) => pickMission(i);
+    w.__czSurvival = () => pickSurvival();
+    w.__czGauntlet = () => { setMode('gauntlet'); setCampaignDone(false); setDebrief(null); setSelect(false); setRunNonce((n) => n + 1); }; // probe: force ranked mode (bypasses unlock)
+    w.__czPause = (v = true) => (v ? openPause() : resume()); // C4 probe
+    w.__czProgress = () => progress;
     return () => {
-      delete w.__valorCampaign; delete w.__valorNextMission; delete w.__valorResetCampaign;
-      delete w.__valorOpenSelect; delete w.__valorPickMission; delete w.__valorSurvival; delete w.__valorGauntlet; delete w.__valorPause; delete w.__valorProgress;
+      delete w.__czCampaign; delete w.__czNextMission; delete w.__czResetCampaign;
+      delete w.__czOpenSelect; delete w.__czPickMission; delete w.__czSurvival; delete w.__czGauntlet; delete w.__czPause; delete w.__czProgress;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [missionIndex, campaignDone, progress, selectOpen]);
@@ -3796,16 +3792,16 @@ export function ValorScene({ contract, onOpStart, onOpCleared, onOpFailed, start
   // 'low' = force the minimal tier. Persisted so a weak machine stays fixed.
   const [quality, setQuality] = useState<'auto' | 'high' | 'low'>(() => {
     if (typeof window === 'undefined') return 'auto';
-    const q = window.localStorage.getItem('valor_quality');
+    const q = window.localStorage.getItem('cz_quality');
     return q === 'high' || q === 'low' ? q : 'auto';
   });
   const pickQuality = useCallback((q: 'auto' | 'high' | 'low') => {
     setQuality(q);
     setDegraded(false); // let 'auto' re-evaluate; 'high'/'low' are explicit
     try {
-      window.localStorage.setItem('valor_quality', q);
+      window.localStorage.setItem('cz_quality', q);
       // HIGH means "this machine is fine" → forget the auto-detect so it starts full.
-      if (q === 'high') window.localStorage.removeItem('valor_degraded');
+      if (q === 'high') window.localStorage.removeItem('cz_degraded');
     } catch { /* private mode */ }
   }, []);
   // Look sensitivity. Mirrored in React state purely so the slider re-renders; the
@@ -3825,11 +3821,11 @@ export function ValorScene({ contract, onOpStart, onOpCleared, onOpFailed, start
   // ~5s of full-quality slowdown before detection kicks in. (Only used in 'auto'.)
   const [degraded, setDegraded] = useState(() => {
     if (typeof window === 'undefined') return false;
-    return window.localStorage.getItem('valor_degraded') === '1';
+    return window.localStorage.getItem('cz_degraded') === '1';
   });
   const markDegraded = useCallback(() => {
     setDegraded(true);
-    try { window.localStorage.setItem('valor_degraded', '1'); } catch { /* private mode */ }
+    try { window.localStorage.setItem('cz_degraded', '1'); } catch { /* private mode */ }
   }, []);
   const degradeHits = useRef(0);
   const sceneMountedAt = useRef(0);
@@ -3892,7 +3888,7 @@ export function ValorScene({ contract, onOpStart, onOpCleared, onOpFailed, start
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // VALOR is a landscape game. On a phone held upright, block play with a rotate
+  // CONTRACT ZERO is a landscape game. On a phone held upright, block play with a rotate
   // prompt (and try a best-effort orientation lock once we're in landscape).
   const [portrait, setPortrait] = useState(false);
   useEffect(() => {
@@ -4200,7 +4196,7 @@ export function ValorScene({ contract, onOpStart, onOpCleared, onOpFailed, start
         <div ref={(r) => { hud.current.rankUp = r; }} style={{ position: 'absolute', left: '50%', top: '28%', transform: 'translate(-50%,-50%)', opacity: 0, transition: 'opacity .4s', pointerEvents: 'none', textAlign: 'center' }}>
           <div style={{ fontSize: 13, letterSpacing: 6, color: '#9fb4c8' }}>RANK UP</div>
           <div ref={(r) => { hud.current.rankUpRank = r; }} style={{ fontSize: 38, fontWeight: 800, letterSpacing: 4, margin: '4px 0' }}>SILVER</div>
-          <div ref={(r) => { hud.current.rankUpG = r; }} style={{ fontSize: 16, fontWeight: 700, color: '#5fe0a8' }}>+20 G$</div>
+          <div ref={(r) => { hud.current.rankUpG = r; }} style={{ fontSize: 16, fontWeight: 700, color: '#5fe0a8' }}></div>
         </div>
 
         {/* health bar — the vital stat. On touch it takes the prime top-left slot
@@ -4239,7 +4235,7 @@ export function ValorScene({ contract, onOpStart, onOpCleared, onOpFailed, start
 
         {/* boss health bar */}
         <div ref={(r) => { hud.current.bossWrap = r; }} style={{ position: 'absolute', left: '50%', top: 96, transform: 'translateX(-50%)', width: 360, opacity: 0, transition: 'opacity .3s', textAlign: 'center' }}>
-          <div ref={(r) => { hud.current.bossName = r; }} style={{ fontSize: 13, letterSpacing: 4, fontWeight: 700, color: '#e0455a', textShadow: '0 0 6px #000', marginBottom: 4 }}>VALOR</div>
+          <div ref={(r) => { hud.current.bossName = r; }} style={{ fontSize: 13, letterSpacing: 4, fontWeight: 700, color: '#e0455a', textShadow: '0 0 6px #000', marginBottom: 4 }}>TARGET</div>
           <div style={{ width: 360, height: 6, background: '#2a1114', border: '1px solid rgba(224,69,90,.4)' }}>
             <div ref={(r) => { hud.current.bossFill = r; }} style={{ width: '100%', height: '100%', background: 'linear-gradient(90deg,#ff4d3d,#e0455a)' }} />
           </div>
@@ -4361,7 +4357,7 @@ export function ValorScene({ contract, onOpStart, onOpCleared, onOpFailed, start
         {/* zone / op label (operations are chosen outside the game now). On touch it
             shifts right to clear the top-left EXIT button. */}
         <div style={{ position: 'absolute', left: isTouch ? 90 : 150, top: 20 }}>
-          <span style={{ fontSize: 12, letterSpacing: 2, color: '#6f7d8c' }}>{mode === 'endless' ? `Valor · ${seasonal ? 'SEASONAL CAMPAIGN' : 'ENDLESS'} · ${mission.name}` : mode === 'gauntlet' ? 'Valor · GAUNTLET · RANKED' : mode === 'survival' ? 'Valor · SURVIVAL · THE KILL-HOUSE' : `Valor · ${mission.zone} · OP ${missionIndex + 1}/${CAMPAIGN.length}`}</span>
+          <span style={{ fontSize: 12, letterSpacing: 2, color: '#6f7d8c' }}>{mode === 'endless' ? `CONTRACT ZERO · ${seasonal ? 'SEASONAL CAMPAIGN' : 'ENDLESS'} · ${mission.name}` : mode === 'gauntlet' ? 'CONTRACT ZERO · GAUNTLET · RANKED' : mode === 'survival' ? 'CONTRACT ZERO · SURVIVAL · THE KILL-HOUSE' : `CONTRACT ZERO · ${mission.zone} · OP ${missionIndex + 1}/${CAMPAIGN.length}`}</span>
         </div>
         {!isTouch && (
           <div style={{ position: 'absolute', right: 26, top: 20, fontSize: 11, lineHeight: 1.7, textAlign: 'right', color: '#6f7d8c' }}>
@@ -4511,12 +4507,12 @@ export function ValorScene({ contract, onOpStart, onOpCleared, onOpFailed, start
         </>
       )}
 
-      {/* ── Landscape gate: a phone held upright can't play VALOR ── */}
+      {/* ── Landscape gate: a phone held upright can't play CONTRACT ZERO ── */}
       {isTouch && portrait && (
         <div style={{ position: 'absolute', inset: 0, zIndex: 60, background: 'radial-gradient(circle at 50% 40%, #0b1018, #05070b)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#cfe0ea', textAlign: 'center', fontFamily: UI_FONT, pointerEvents: 'auto' }}>
           <div style={{ color: '#37d0e0', animation: 'none' }}><Icon name="rotate" size={64} /></div>
           <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: 5, marginTop: 22 }}>ROTATE YOUR DEVICE</div>
-          <div style={{ fontSize: 13, color: '#7f8c99', letterSpacing: 3, marginTop: 10 }}>VALOR IS PLAYED IN LANDSCAPE</div>
+          <div style={{ fontSize: 13, color: '#7f8c99', letterSpacing: 3, marginTop: 10 }}>CONTRACT ZERO IS PLAYED IN LANDSCAPE</div>
           {/* This screen covers everything at z-index 60, including the EXIT button in
               the HUD beneath it. Without its own way out, a player who opened a fight
               and DIDN'T want to rotate had no exit at all — rotate or kill the app.

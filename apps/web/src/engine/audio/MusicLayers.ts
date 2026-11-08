@@ -14,7 +14,7 @@
  * away from a fight audibly relaxes. `gap()` hard-mutes the whole score for
  * a beat — the silence that makes the catch and the kill read.
  *
- * The Valor motif (D minor, deliberately singable in 8 notes):
+ * The main motif (D minor, deliberately singable in 8 notes):
  *   D4 · F4 · A4 · G4 ·· D4 · F4 · C5 · A4
  */
 

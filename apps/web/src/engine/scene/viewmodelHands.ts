@@ -5,7 +5,7 @@
  * Until now the first-person viewmodel had ONE 6cm cube of brown, labelled in the
  * scene as "simple graybox hands so the first person reads". It didn't: at the
  * framing the game actually uses it sits behind the receiver and is never visible,
- * so every weapon in Valor floated in front of the camera with nothing holding it.
+ * so every weapon floated in front of the camera with nothing holding it.
  * A floating gun is the single loudest "this is a prototype" tell a shooter has —
  * the hands are what make the weapon YOURS rather than a prop on a stick.
  *
@@ -37,7 +37,7 @@ import type { GunId } from '../combat/GunStats';
  * Where the weapon sits relative to the eye, hip-ready and down the sights. The
  * scene lerps between these by the ADS factor.
  *
- * They live here rather than in ValorScene so the grip bench (/dev/grip) can frame a
+ * They live here rather than in ContractZeroScene so the grip bench (/dev/grip) can frame a
  * weapon exactly the way the game does. A bench that is a few centimetres off is
  * worse than no bench: you tune a grip until it reads there and it is wrong in the
  * op, which is precisely the failure these anchors are hand-tuned to avoid.
@@ -59,7 +59,7 @@ export const WEAPON_VIEW: Record<GunId, { scale: number; z: number; y: number }>
   smg: { scale: 1.0, z: 0.05, y: -0.01 },     // stubby, snappy
   assault_rifle: { scale: 1.0, z: 0, y: 0 },  // the baseline
   marksman: { scale: 1.0, z: -0.05, y: 0.01 },// long — pushed out front
-  legendary: { scale: 1.0, z: 0, y: 0 },      // the Valor Prototype
+  legendary: { scale: 1.0, z: 0, y: 0 },      // the ZX-0 Prototype
   // Seasonal weapons: longer bodies are pushed further out so the muzzle clears frame.
   ashfall_carbine: { scale: 1.0, z: 0.04, y: -0.005 },
   warden_repeater: { scale: 1.0, z: -0.06, y: 0.01 },

@@ -39,7 +39,7 @@ import * as THREE from 'three';
  */
 
 /**
- * Where the sun sits. Must stay in step with the key light in ValorScene
+ * Where the sun sits. Must stay in step with the key light in ContractZeroScene
  * (`<directionalLight position={[9, 16, 10]}>`), or the specular hotspot on the
  * weapon will disagree with the direction its shadows fall.
  */
@@ -87,7 +87,7 @@ void main() {
 /**
  * Sky above the horizon, ground below it, sun disc on top.
  *
- * The dome the player sees (SkyDome in ValorScene) fades to its horizon colour
+ * The dome the player sees (SkyDome in ContractZeroScene) fades to its horizon colour
  * below the horizon, because nothing is ever drawn down there — the compound
  * floor covers it. An environment map has no such luxury: the lower hemisphere is
  * exactly what a gun barrel held at chest height reflects, so leaving it sky-

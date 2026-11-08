@@ -21,7 +21,7 @@ import { LAYOUT_B, type Mission } from './campaign';
 import { mulberry32 } from './endless';
 
 export type Resource = 'ammo' | 'med' | 'fuel';
-export type ConvoyZone = 'ASHFALL' | 'PROVING GROUND' | 'THE RIFT';
+export type ConvoyZone = 'DUSTLINE' | 'REDYARD' | 'BLACKSITE';
 
 export interface ConvoyContract {
   /** Stable contract id; also the default seed source. */
@@ -35,7 +35,7 @@ export interface ConvoyContract {
   defense: number;
   /** Seed for escort placement. */
   seed: number;
-  /** Time of day / theme. Defaults to ASHFALL. */
+  /** Time of day / theme. Defaults to DUSTLINE. */
   zone?: ConvoyZone;
 }
 
@@ -104,7 +104,7 @@ export function buildConvoyMission(c: ConvoyContract, gun: GunId = 'assault_rifl
   const rng = mulberry32(c.seed >>> 0);
   const cover = [...LAYOUT_B.cover.filter((k) => k.z > -6), ...YARD_COVER];
   const label = RESOURCE_LABEL[c.cargo.resource];
-  const zone = c.zone ?? 'ASHFALL';
+  const zone = c.zone ?? 'DUSTLINE';
   const o = LAYOUT_B.obj;
 
   return {
@@ -132,6 +132,6 @@ export function buildConvoyMission(c: ConvoyContract, gun: GunId = 'assault_rifl
       },
       { text: 'EXTRACT WITH THE CARGO', kind: 'reach', pos: LAYOUT_B.start },
     ],
-    attachments: zone === 'THE RIFT' ? ['nvg'] : undefined,
+    attachments: zone === 'BLACKSITE' ? ['nvg'] : undefined,
   };
 }

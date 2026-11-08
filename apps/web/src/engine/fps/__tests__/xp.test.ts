@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   xpForKill, rankForXp, rankIndexForXp, xpIntoRank, xpBarSize, rankUpsBetween,
-  gReward, careerXpFor, XP_REWARD, RANK_STEP_XP, PRESTIGE_STEP_XP, xpForNextRank,
+  careerXpFor, XP_REWARD, RANK_STEP_XP, PRESTIGE_STEP_XP, xpForNextRank,
 } from '../xp';
 
 // Career XP at which each rank is reached, walked down the progressive curve.
@@ -105,13 +105,6 @@ describe('earn loop: rank from XP', () => {
     expect(rankUpsBetween(0, AT.Bronze - 1)).toEqual([]);
     // A full campaign dropped on a fresh player crosses three ranks at once.
     expect(rankUpsBetween(0, 2_610)).toEqual(['Bronze', 'Silver', 'Gold']);
-  });
-
-  it('pays more G$ the higher the rank', () => {
-    expect(gReward('Bronze')).toBe(500);
-    expect(gReward('Silver')).toBe(1_000);
-    expect(gReward('Diamond')).toBe(3_000);
-    expect(gReward('Diamond')).toBeGreaterThan(gReward('Bronze'));
   });
 });
 

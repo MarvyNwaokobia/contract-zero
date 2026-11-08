@@ -77,6 +77,6 @@ describe('convoy mission', () => {
 
   it('fits NVG on night convoys only', () => {
     expect(buildConvoyMission(base).attachments).toBeUndefined();
-    expect(buildConvoyMission({ ...base, zone: 'THE RIFT' }).attachments).toEqual(['nvg']);
+    expect(buildConvoyMission({ ...base, zone: 'BLACKSITE' }).attachments).toEqual(['nvg']);
   });
 });

@@ -104,7 +104,7 @@ describe('grips are measured off the weapon', () => {
   });
 
   it('is named so the scene can find it, and holds no loose meshes', () => {
-    // ValorScene looks this group up by name every frame to tuck it away at ADS.
+    // ContractZeroScene looks this group up by name every frame to tuck it away at ADS.
     const g = buildViewmodelHands('assault_rifle', rifle(), LEN);
     expect(g.name).toBe('hands');
     // Three materials per hand at most, merged — not twenty boxes each.

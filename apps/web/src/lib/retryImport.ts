@@ -3,7 +3,7 @@
 /**
  * Chunk-load resilience for the heavy game bundles.
  *
- * The 3D scenes (ValorScene / GameScene) ship as large dynamic chunks — three.js
+ * The 3D scene (ContractZeroScene) ship as large dynamic chunks — three.js
  * + fiber + drei + postprocessing all land in one file. On weak / mobile networks
  * that single fetch can stall past webpack's chunk-load timeout, and after a
  * redeploy an old open tab can reference a chunk hash the CDN has since aged out.
@@ -43,7 +43,7 @@ export function isTimeoutChunkError(err: unknown): boolean {
   return /timeout/i.test(message);
 }
 
-const RELOAD_KEY = 'valor:chunk-reload-at';
+const RELOAD_KEY = 'cz:chunk-reload-at';
 
 // In-memory guard: stops a second auto-reload within the SAME page load (before
 // any reload has actually navigated away). It resets to false on a real reload,
@@ -153,12 +153,7 @@ function warmChunk(key: string, load: () => Promise<unknown>): void {
   else setTimeout(run, 800);
 }
 
-/** Preload the first-person /fight scene (ValorScene). */
+/** Preload the first-person scene (ContractZeroScene). */
 export function warmFightScene(): void {
-  warmChunk('valor-scene', () => import('@/engine/scene/ValorScene'));
-}
-
-/** Preload the legacy scene used by /endless and /fight-legacy (GameScene). */
-export function warmGameScene(): void {
-  warmChunk('game-scene', () => import('@/engine/scene/GameScene'));
+  warmChunk('cz-scene', () => import('@/engine/scene/ContractZeroScene'));
 }

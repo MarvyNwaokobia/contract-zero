@@ -17,13 +17,13 @@ page.on('response', (r) => { if (r.status() >= 400) missing.push(`${r.status()} 
 
 await page.goto('http://localhost:3100/dev/verb', { waitUntil: 'domcontentloaded', timeout: 180_000 });
 await page.waitForSelector('canvas', { timeout: 180_000 });
-await page.waitForFunction(() => typeof window.__valorMission === 'function', null, { timeout: 120_000 });
+await page.waitForFunction(() => typeof window.__czMission === 'function', null, { timeout: 120_000 });
 await page.waitForTimeout(2000);
-await page.evaluate(() => window.__valorSkipBriefing?.());
+await page.evaluate(() => window.__czSkipBriefing?.());
 await page.waitForTimeout(6000); // scene-ready + countdown
 const snap = () => page.evaluate(() => {
-  const s = window.__valorState?.() ?? {};
-  return { pos: window.__valorPlayer(), ammo: s.ammo, simTime: window.__valorMission().simTime, objective: window.__valorMission().objective };
+  const s = window.__czState?.() ?? {};
+  return { pos: window.__czPlayer(), ammo: s.ammo, simTime: window.__czMission().simTime, objective: window.__czMission().objective };
 });
 const before = await snap();
 await page.screenshot({ path: `${out}/verb-start.png` });
@@ -36,9 +36,9 @@ await page.keyboard.up('KeyW');
 const moved = await snap();
 
 // Fire: hold the trigger through the scene's control state.
-await page.evaluate(() => window.__valorFire(true));
+await page.evaluate(() => window.__czFire(true));
 await page.waitForTimeout(15000);
-await page.evaluate(() => window.__valorFire(false));
+await page.evaluate(() => window.__czFire(false));
 const after = await snap();
 await page.screenshot({ path: `${out}/verb-after.png` });
 

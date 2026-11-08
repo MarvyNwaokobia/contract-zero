@@ -31,8 +31,8 @@ export interface Objective {
 
 export interface Mission {
   id: string;
-  zone: string;   // ASHFALL / PROVING GROUND / THE RIFT
-  op: string;     // briefing header, e.g. "OPERATION ASHFALL"
+  zone: string;   // DUSTLINE / REDYARD / BLACKSITE
+  op: string;     // briefing header, e.g. "TRAINING · DUSTLINE"
   name: string;   // mission title, e.g. "BREACH & CLEAR"
   brief: string;  // one-line briefing subtitle
   gun: GunId;         // primary weapon for the op
@@ -83,23 +83,23 @@ export interface ZoneTheme {
 }
 
 export const ZONE_THEMES: Record<string, ZoneTheme> = {
-  // ASHFALL — daytime. A real blue sky over the burned village; bright, warm sun.
-  ASHFALL: {
+  // DUSTLINE — daytime. A real blue sky over the dry country; bright, warm sun.
+  DUSTLINE: {
     bg: '#aec6de', fog: ['#c2d2e2', 34, 96], hemi: ['#bcd6f0', '#6a5a42', 0.95],
     sun: { color: '#fff3e0', intensity: 2.5 }, fill: { color: '#8fb0d8', intensity: 0.5 },
     ambient: 0.6, practical: '#ffd0a0', practicalIntensity: 1.1, floorTint: '#b3a898', wallTint: '#ac9f90',
     sky: { top: '#3f7ec9', bottom: '#cbd9e4' },
   },
-  // PROVING GROUND — golden-hour evening. Low warm sun, cool sky opposite it.
-  'PROVING GROUND': {
+  // REDYARD — golden-hour evening. Low warm sun, cool sky opposite it.
+  'REDYARD': {
     bg: '#c68a54', fog: ['#b67c4c', 30, 86], hemi: ['#d8b489', '#3a3026', 0.78],
     sun: { color: '#ffb066', intensity: 1.8 }, fill: { color: '#6f86b6', intensity: 0.46 },
     ambient: 0.44, practical: '#ffc59a', practicalIntensity: 1.7, floorTint: '#a29683', wallTint: '#9a8d7e',
     sky: { top: '#5566a4', bottom: '#e2a05e' },
   },
-  // THE RIFT — night, but a readable night: deep blue moonlight, not pitch black.
+  // BLACKSITE — night, but a readable night: deep blue moonlight, not pitch black.
   // NVG lifts it further; only the blackout op leans all the way into the dark.
-  'THE RIFT': {
+  'BLACKSITE': {
     bg: '#0d1626', fog: ['#101c34', 18, 58], hemi: ['#617fb2', '#10131e', 0.46],
     sun: { color: '#93aade', intensity: 1.0 }, fill: { color: '#6a55d0', intensity: 0.5 },
     ambient: 0.24, practical: '#9a6bff', practicalIntensity: 2.2, floorTint: '#5c5c68', wallTint: '#545660',
@@ -127,7 +127,7 @@ function twoRoom(o: { breach: [number, number]; push: [number, number]; extract:
   ];
 }
 
-// ── LAYOUT A · the Ashfall compound (entry → front room → objective room) ──
+// ── LAYOUT A · the Dustline compound (entry → front room → objective room) ──
 const A_START: [number, number] = [0, 16];
 const A_WALLS: CoverBox[] = [
   { x: -10, z: 0, w: 0.6, d: 37, h: WALL_H }, { x: 10, z: 0, w: 0.6, d: 37, h: WALL_H },
@@ -144,7 +144,7 @@ const A_COVER: CoverBox[] = [
 ];
 const A_OBJ = { breach: [0, 8.5] as [number, number], push: [4, 0.5] as [number, number], extract: [-3, -14] as [number, number] };
 
-// ── LAYOUT A2 · the Ashfall row-house (ash-2): same footprint, but the doors
+// ── LAYOUT A2 · the Dustline row-house (dl-2): same footprint, but the doors
 //    zigzag the other way — left, then right, then centre — so it reads as a
 //    different building even though the theme is identical. ──
 const A2_START: [number, number] = [0, 16];
@@ -161,8 +161,8 @@ const A2_COVER: CoverBox[] = [
 ];
 const A2_OBJ = { breach: [-4, 8] as [number, number], push: [4, 0.3] as [number, number], extract: [0, -13] as [number, number] };
 
-// ── LAYOUT A3 · the Ashfall stronghold (ash-3, Cinder): doors mirror A2 (right,
-//    left, right) and funnel to a back room where Cinder holds. ──
+// ── LAYOUT A3 · the Dustline stronghold (dl-3, dl-5): doors mirror A2 (right,
+//    left, right) and funnel to a back room where the Foreman holds. ──
 const A3_START: [number, number] = [0, 16];
 const A3_WALLS: CoverBox[] = [
   { x: -10, z: 0, w: 0.6, d: 37, h: WALL_H }, { x: 10, z: 0, w: 0.6, d: 37, h: WALL_H },
@@ -196,8 +196,8 @@ const B_OBJ = { breach: [-4, 6.5] as [number, number], push: [5, -5.5] as [numbe
 /** Layout B, exported for missions generated outside this file (fps/convoy.ts). */
 export const LAYOUT_B = { start: B_START, walls: B_WALLS, cover: B_COVER, obj: B_OBJ } as const;
 
-// ── LAYOUT C · the Rift: tight, claustrophobic, a straight push through two
-//    centred doorways into the room where Valor waits. ──
+// ── LAYOUT C · the blacksite: tight, claustrophobic, a straight push through two
+//    centred doorways into the room where the Director waits. ──
 const C_START: [number, number] = [0, 12];
 const C_WALLS: CoverBox[] = [
   { x: -9, z: -1, w: 0.6, d: 31, h: WALL_H }, { x: 9, z: -1, w: 0.6, d: 31, h: WALL_H },
@@ -215,12 +215,12 @@ const C_OBJ = { breach: [0, 4.5] as [number, number], push: [0, -5.5] as [number
 const AR = 'assault_rifle' as GunId;
 const SMG = 'smg' as GunId;
 const DMR = 'marksman' as GunId;
-const PROTO = 'legendary' as GunId; // the "Valor Prototype" — the finale weapon
+const PROTO = 'legendary' as GunId; // the "ZX-0 Prototype" — the finale weapon
 
 export const CAMPAIGN: Mission[] = [
-  // ── Zone 1 · ASHFALL (day → dusk; bosses on op 5) ──
+  // ── Zone 1 · DUSTLINE (day; boss on op 5) ──
   {
-    id: 'ash-1', zone: 'ASHFALL', op: 'OPERATION ASHFALL', name: 'BREACH & CLEAR', gun: AR, story: 'You walked out of the fire alive. Ember found your channel. The crew that lit Ashfall is dug into the first compound — go take it back.',
+    id: 'dl-1', zone: 'DUSTLINE', op: 'TRAINING · DUSTLINE', name: 'BREACH & CLEAR', gun: AR, story: 'Every operator starts here. A two-room compound held by Ironveil irregulars. Clear it and reach extract.',
     brief: 'push the compound · clear both rooms · reach extract',
     start: A_START, walls: A_WALLS, cover: A_COVER,
     enemies: [
@@ -230,7 +230,7 @@ export const CAMPAIGN: Mission[] = [
     objectives: twoRoom(A_OBJ),
   },
   {
-    id: 'ash-2', zone: 'ASHFALL', op: 'OPERATION ASHFALL', name: 'HOLD THE LINE', gun: SMG, story: "They know you lived now, and they know you're coming. This block is dug in deeper. Hold the line and push through.",
+    id: 'dl-2', zone: 'DUSTLINE', op: 'TRAINING · DUSTLINE', name: 'HOLD THE LINE', gun: SMG, story: 'Same block, more of them, dug in deeper. Learn to fight from cover.',
     brief: 'more of them, dug in · clear the compound',
     start: A2_START, walls: A2_WALLS, cover: A2_COVER,
     enemies: [
@@ -241,9 +241,9 @@ export const CAMPAIGN: Mission[] = [
   },
   {
     // ── SIGNATURE (defend) · hold a burning well while the crew counter-attacks ──
-    id: 'ash-3', zone: 'ASHFALL', op: 'OPERATION ASHFALL', name: 'THE WELL', gun: AR, secondary: SMG,
-    story: "Ashfall's only clean water runs under the old well-house. Take it and hold it — the crew will throw everything they have left to take it back.",
-    brief: 'seize the well-house · hold it until the counter-attack breaks',
+    id: 'dl-3', zone: 'DUSTLINE', op: 'TRAINING · DUSTLINE', name: 'THE PUMP HOUSE', gun: AR, secondary: SMG,
+    story: "The district's only clean water runs through this pump house. Take it and hold it while they counter-attack.",
+    brief: 'seize the pump house · hold it until the counter-attack breaks',
     start: A3_START, walls: A3_WALLS, cover: A3_COVER,
     enemies: [
       { pos: [-4, 6], room: 1 }, { pos: [4, 5], room: 1 }, { pos: [-2, 3], room: 1 },
@@ -258,8 +258,8 @@ export const CAMPAIGN: Mission[] = [
     ],
   },
   {
-    id: 'ash-4', zone: 'ASHFALL', op: 'OPERATION ASHFALL', name: 'SMOKE & ASH', gun: DMR, secondary: SMG,
-    story: 'Cinder torched the granary to cover his retreat to the last house. Cut through the smoke and run his rearguard down before he digs in.',
+    id: 'dl-4', zone: 'DUSTLINE', op: 'TRAINING · DUSTLINE', name: 'SMOKE SCREEN', gun: DMR, secondary: SMG,
+    story: 'The Foreman torched a depot to cover his retreat. Cut through the smoke and run his rearguard down.',
     brief: 'push through the smoke · run the rearguard down',
     start: A_START, walls: A_WALLS, cover: A_COVER,
     enemies: [
@@ -269,20 +269,20 @@ export const CAMPAIGN: Mission[] = [
     objectives: twoRoom(A_OBJ),
   },
   {
-    id: 'ash-5', zone: 'ASHFALL', op: 'OPERATION ASHFALL', name: 'CINDER', gun: AR, story: "Cinder is the one who lit the match. He's holed up in the last house on the row. Put him down and Ashfall is yours.", boss: true,
-    brief: 'the man who lit the fire is in that room · put him down',
+    id: 'dl-5', zone: 'DUSTLINE', op: 'TRAINING · DUSTLINE', name: 'THE FOREMAN', gun: AR, story: "The Foreman runs Ironveil's Dustline yards. He is holed up in the last building on the row. Put him down.", boss: true,
+    brief: 'the Foreman is in that room · put him down',
     start: A3_START, walls: A3_WALLS, cover: A3_COVER,
     enemies: [
       { pos: [-4, 6], room: 1 }, { pos: [4, 5], room: 1 }, { pos: [-2, 3], room: 1 }, { pos: [3, 6], room: 1 },
       { pos: [0, -5], room: 2, hp: 420, boss: true }, { pos: [-5, -3], room: 2 }, { pos: [5, -4], room: 2 }, { pos: [3, -6.5], room: 2 },
     ],
-    objectives: twoRoom({ ...A3_OBJ, clear2: 'ELIMINATE CINDER' }),
+    objectives: twoRoom({ ...A3_OBJ, clear2: 'ELIMINATE THE FOREMAN' }),
   },
 
-  // ── Zone 2 · PROVING GROUND (cold evening; boss on op 10) ──
+  // ── Zone 2 · REDYARD (evening; boss on op 10) ──
   {
-    id: 'pg-1', zone: 'PROVING GROUND', op: 'OPERATION PROVING GROUND', name: 'THE HALL', gun: DMR, story: 'Past the ashes lies the Proving Ground — the compound where Valor trained the crew that burned your home. Take the hall, then the vault.', secondary: SMG,
-    brief: 'his crew trained here · take the hall, then the vault',
+    id: 'ry-1', zone: 'REDYARD', op: 'TRAINING · REDYARD', name: 'THE HALL', gun: DMR, story: 'Redyard is where Ironveil trains its convoy guards. Take the hall, then the vault behind it.', secondary: SMG,
+    brief: 'their guards train here · take the hall, then the vault',
     start: B_START, walls: B_WALLS, cover: B_COVER,
     enemies: [
       { pos: [-5, 4], room: 1 }, { pos: [5, 3], room: 1 }, { pos: [-2, 0], room: 1 }, { pos: [3, -2], room: 1 }, { pos: [0, 2], room: 1 },
@@ -291,8 +291,8 @@ export const CAMPAIGN: Mission[] = [
     objectives: twoRoom(B_OBJ),
   },
   {
-    id: 'pg-2', zone: 'PROVING GROUND', op: 'OPERATION PROVING GROUND', name: 'THE YARD', gun: AR, secondary: SMG,
-    story: 'The training yard sits between the hall and the cells. Clear it fast — the Warden hears gunfire and he starts moving prisoners.',
+    id: 'ry-2', zone: 'REDYARD', op: 'TRAINING · REDYARD', name: 'THE YARD', gun: AR, secondary: SMG,
+    story: 'The yard sits between the hall and the cells. Clear it fast: the Warden hears gunfire and starts moving prisoners.',
     brief: 'clear the yard · they know you are coming',
     start: A2_START, walls: A2_WALLS, cover: A2_COVER,
     enemies: [
@@ -303,8 +303,8 @@ export const CAMPAIGN: Mission[] = [
   },
   {
     // ── SIGNATURE (rescue) · pull the informant out of the holding cells ──
-    id: 'pg-3', zone: 'PROVING GROUND', op: 'OPERATION PROVING GROUND', name: 'THE INFORMANT', gun: SMG, secondary: DMR,
-    story: "One of Valor's own wants out, and he knows the way into the Rift. He's held in the back cells. Get to him and walk him out alive.",
+    id: 'ry-3', zone: 'REDYARD', op: 'TRAINING · REDYARD', name: 'THE INFORMANT', gun: SMG, secondary: DMR,
+    story: 'An Ironveil logistics clerk wants out, and he knows the convoy routes. He is held in the back cells. Walk him out alive.',
     brief: 'reach the informant · escort him to extract · keep him alive',
     start: B_START, walls: B_WALLS, cover: B_COVER,
     hostage: [0, -13],
@@ -321,8 +321,8 @@ export const CAMPAIGN: Mission[] = [
     ],
   },
   {
-    id: 'pg-4', zone: 'PROVING GROUND', op: 'OPERATION PROVING GROUND', name: 'THE ARMORY', gun: DMR, secondary: AR,
-    story: "The informant's word is good: the armory feeds the whole compound. Burn it and the Warden fights the last round with what he has on him.",
+    id: 'ry-4', zone: 'REDYARD', op: 'TRAINING · REDYARD', name: 'THE ARMORY', gun: DMR, secondary: AR,
+    story: 'The armory feeds the whole compound. Take it and the Warden fights the last round with what he has on him.',
     brief: 'take the armory · cut off his resupply',
     start: A_START, walls: A_WALLS, cover: A_COVER,
     enemies: [
@@ -332,7 +332,7 @@ export const CAMPAIGN: Mission[] = [
     objectives: twoRoom(A_OBJ),
   },
   {
-    id: 'pg-5', zone: 'PROVING GROUND', op: 'OPERATION PROVING GROUND', name: 'THE WARDEN', gun: AR, story: 'The Warden runs the Proving Ground and he will not step aside. Break him and the road to the Rift opens.', boss: true,
+    id: 'ry-5', zone: 'REDYARD', op: 'TRAINING · REDYARD', name: 'THE WARDEN', gun: AR, story: 'The Warden runs Redyard and will not step aside. Break him and the road to the blacksite opens.', boss: true,
     brief: 'the Warden runs this place · he will not step aside',
     start: B_START, walls: B_WALLS, cover: B_COVER,
     enemies: [
@@ -342,10 +342,10 @@ export const CAMPAIGN: Mission[] = [
     objectives: twoRoom({ ...B_OBJ, clear2: 'ELIMINATE THE WARDEN' }),
   },
 
-  // ── Zone 3 · THE RIFT (full night, NVG; boss on op 15) ──
+  // ── Zone 3 · BLACKSITE (night, NVG; boss on op 15) ──
   {
-    id: 'rift-1', zone: 'THE RIFT', op: 'OPERATION RIFT', name: 'INTO THE DARK', gun: SMG, story: "Valor's channel goes quiet past here. This is the Rift — the dark place he disappears into. Push in and find him.", attachments: ['nvg'],
-    brief: 'his channel goes quiet here · push through and find him',
+    id: 'bs-1', zone: 'BLACKSITE', op: 'TRAINING · BLACKSITE', name: 'INTO THE DARK', gun: SMG, story: 'Past Redyard the lights go out. This is the blacksite where Ironveil keeps what it does not log. Push in.', attachments: ['nvg'],
+    brief: 'the lights go out here · push through',
     start: C_START, walls: C_WALLS, cover: C_COVER,
     enemies: [
       { pos: [-4, 2], room: 1 }, { pos: [4, 1], room: 1 }, { pos: [-1, 0], room: 1 }, { pos: [2, -3], room: 1 }, { pos: [-2, 3], room: 1 },
@@ -354,8 +354,8 @@ export const CAMPAIGN: Mission[] = [
     objectives: twoRoom(C_OBJ),
   },
   {
-    id: 'rift-2', zone: 'THE RIFT', op: 'OPERATION RIFT', name: 'DEEPER', gun: SMG, secondary: AR, attachments: ['nvg'],
-    story: 'The tunnels open into a drowned hall. Valor is letting you come to him — every step in is a step you will have to fight back out of.',
+    id: 'bs-2', zone: 'BLACKSITE', op: 'TRAINING · BLACKSITE', name: 'DEEPER', gun: SMG, secondary: AR, attachments: ['nvg'],
+    story: 'The tunnels open into a flooded hall. Every step in is a step you will have to fight back out of.',
     brief: 'the hall runs deep · clear it in the dark',
     start: B_START, walls: B_WALLS, cover: B_COVER,
     enemies: [
@@ -366,8 +366,8 @@ export const CAMPAIGN: Mission[] = [
   },
   {
     // ── SIGNATURE (blackout) · the Rift kills your NVG; fight by muzzle-flash ──
-    id: 'rift-3', zone: 'THE RIFT', op: 'OPERATION RIFT', name: 'LIGHTS OUT', gun: SMG, secondary: AR, blackout: true,
-    story: 'Whatever the Rift is, it eats light. Your goggles die at the threshold. There is no seeing your way through this one — only the flash of your own gun.',
+    id: 'bs-3', zone: 'BLACKSITE', op: 'TRAINING · BLACKSITE', name: 'LIGHTS OUT', gun: SMG, secondary: AR, blackout: true,
+    story: 'Jammers at the threshold kill your goggles. There is no seeing your way through: only the flash of your own gun.',
     brief: 'NVG is jammed · clear the dark by muzzle-flash alone',
     start: C_START, walls: C_WALLS, cover: C_COVER,
     enemies: [
@@ -377,9 +377,9 @@ export const CAMPAIGN: Mission[] = [
     objectives: twoRoom(C_OBJ),
   },
   {
-    id: 'rift-4', zone: 'THE RIFT', op: 'OPERATION RIFT', name: 'THE THRESHOLD', gun: AR, secondary: SMG, attachments: ['nvg'],
-    story: 'His guard closes ranks at the last door. Break the threshold and there is nothing left between you and the voice on the radio.',
-    brief: 'break his last guard · the door to Valor is beyond',
+    id: 'bs-4', zone: 'BLACKSITE', op: 'TRAINING · BLACKSITE', name: 'THE THRESHOLD', gun: AR, secondary: SMG, attachments: ['nvg'],
+    story: "The Director's guard closes ranks at the last door. Break the threshold.",
+    brief: 'break the last guard · the Director is beyond',
     start: A2_START, walls: A2_WALLS, cover: A2_COVER,
     enemies: [
       { pos: [-5, 6], room: 1 }, { pos: [5, 5], room: 1 }, { pos: [-2, 4], room: 1 }, { pos: [3, 6], room: 1 }, { pos: [0, 3], room: 1 },
@@ -388,14 +388,14 @@ export const CAMPAIGN: Mission[] = [
     objectives: twoRoom(A2_OBJ),
   },
   {
-    id: 'rift-valor', zone: 'THE RIFT', op: 'OPERATION RIFT', name: 'VALOR', gun: PROTO, story: 'The voice that has been on your radio the whole way finally has a face and a body. This is the last room. End it.', secondary: AR, attachments: ['nvg'], boss: true,
-    brief: 'the voice on your radio has a face · end it',
+    id: 'bs-5', zone: 'BLACKSITE', op: 'TRAINING · BLACKSITE', name: 'THE DIRECTOR', gun: PROTO, story: 'The Director signs every convoy order in the region. This is the last room. End it.', secondary: AR, attachments: ['nvg'], boss: true,
+    brief: 'the Director is in the last room · end it',
     start: C_START, walls: C_WALLS, cover: C_COVER,
     enemies: [
       { pos: [-4, 2], room: 1 }, { pos: [4, 1], room: 1 }, { pos: [-1, -1], room: 1 }, { pos: [2, -3], room: 1 },
       { pos: [0, -12], room: 2, hp: 900, boss: true }, { pos: [-5, -9], room: 2 }, { pos: [4, -11], room: 2 }, { pos: [-2, -14], room: 2 },
     ],
-    objectives: twoRoom({ ...C_OBJ, clear2: 'KILL VALOR' }),
+    objectives: twoRoom({ ...C_OBJ, clear2: 'ELIMINATE THE DIRECTOR' }),
   },
 ];
 
@@ -444,11 +444,11 @@ export const GAUNTLET_MISSION: Mission = {
 // from the run's seed and streams rooms in as the player pushes forward. Both the
 // Campaign Endless unlock and the Seasonal Campaign run on this one mission.
 
-// ASHFALL (daylight), deliberately — the Rift's night theme renders the generated
+// DUSTLINE (daylight), deliberately — the night night theme renders the generated
 // compound almost pitch black, and a mode people compete in for money has to be
 // readable. Endless has no authored set dressing or practicals to light it either.
 export const ENDLESS_MISSION: Mission = {
-  id: 'endless', zone: 'ASHFALL', op: 'ENDLESS', name: 'NO EXIT',
+  id: 'endless', zone: 'DUSTLINE', op: 'ENDLESS', name: 'NO EXIT',
   brief: 'breach · clear · push forward · it does not end',
   gun: AR, secondary: SMG, endless: true,
   start: [0, -1.5], walls: [], cover: [], enemies: [], objectives: [],
@@ -483,7 +483,7 @@ function darken(hex: string, f: number): string {
 
 /** The effective theme for an op: its zone base, dimmed by how deep it sits in the zone. */
 export function themeForMission(m: Mission): ZoneTheme {
-  const base = ZONE_THEMES[m.zone] ?? ZONE_THEMES.ASHFALL;
+  const base = ZONE_THEMES[m.zone] ?? ZONE_THEMES.DUSTLINE;
   const zoneOps = CAMPAIGN.filter((x) => x.zone === m.zone);
   const k = zoneOps.indexOf(m);
   const n = zoneOps.length;
@@ -508,5 +508,5 @@ export function themeForMission(m: Mission): ZoneTheme {
   };
 }
 
-export const CAMPAIGN_KEY = 'valor_mission';   // the op you're currently on
-export const PROGRESS_KEY = 'valor_progress';  // the furthest op you've unlocked (soft gating)
+export const CAMPAIGN_KEY = 'cz_mission';   // the op you're currently on
+export const PROGRESS_KEY = 'cz_progress';  // the furthest op you've unlocked (soft gating)

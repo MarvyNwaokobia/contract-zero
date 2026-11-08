@@ -20,7 +20,7 @@
 export type GunId =
   | 'sidearm' | 'smg' | 'assault_rifle' | 'marksman' | 'legendary'
   // ── SEASONAL weapons (tiers 6-10) ──
-  // Priced 3,000-10,000 G$, above the Valor Prototype's 6,000, and every one of them
+  // Priced above the ZX-0 Prototype, and every one of them
   // is a genuine upgrade on it — a player paying this much must FEEL it, not read it
   // on a card. Their models are built in code (scene/proceduralGuns.ts) rather than
   // loaded as GLBs.
@@ -77,7 +77,7 @@ export const GUN_CATALOG: Record<GunId, GunStats> = {
     critChance: 0.15, critMult: 2.0, magazine: 10, reloadTime: 2.2,
   },
   legendary: {
-    id: 'legendary', name: 'Valor Prototype', tier: 5,
+    id: 'legendary', name: 'ZX-0 Prototype', tier: 5,
     damage: 30, fireRate: 480, accuracy: 0.80, projectileSpeed: 34, range: 12,
     critChance: 0.12, critMult: 1.8, magazine: 28, reloadTime: 1.8,
   },
@@ -88,7 +88,7 @@ export const GUN_CATALOG: Record<GunId, GunStats> = {
 
   /** 3,000 G$ — bullpup carbine. Fast, accurate, forgiving: the entry seasonal. */
   ashfall_carbine: {
-    id: 'ashfall_carbine', name: 'Ashfall Carbine', tier: 6,
+    id: 'ashfall_carbine', name: 'Dustline Carbine', tier: 6,
     damage: 26, fireRate: 620, accuracy: 0.84, projectileSpeed: 38, range: 13,
     critChance: 0.12, critMult: 1.8, magazine: 32, reloadTime: 1.6,
   },
@@ -100,7 +100,7 @@ export const GUN_CATALOG: Record<GunId, GunStats> = {
   },
   /** 6,500 G$ — energy marksman. Enormous per-shot damage at range, punishing to miss. */
   rift_lance: {
-    id: 'rift_lance', name: 'Rift Lance', tier: 8,
+    id: 'rift_lance', name: 'Blacksite Lance', tier: 8,
     damage: 95, fireRate: 150, accuracy: 0.94, projectileSpeed: 60, range: 26,
     critChance: 0.28, critMult: 2.4, magazine: 12, reloadTime: 2.1,
   },
@@ -116,7 +116,7 @@ export const GUN_CATALOG: Record<GunId, GunStats> = {
    *  reacted to and flattened the whole difficulty curve. Tuned to sit about a third
    *  above the Seraph — clearly the best weapon in the game, without ending it. */
   ember_halo: {
-    id: 'ember_halo', name: 'Ember Halo', tier: 10,
+    id: 'ember_halo', name: 'Zero Halo', tier: 10,
     damage: 44, fireRate: 600, accuracy: 0.92, projectileSpeed: 52, range: 22,
     critChance: 0.20, critMult: 2.0, magazine: 40, reloadTime: 1.7,
   },

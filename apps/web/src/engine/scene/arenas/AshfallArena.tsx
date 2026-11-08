@@ -8,7 +8,7 @@ import { mulberry32 } from './prng';
 import { VILLAGE, WELL_POS, CART_POS, CART_YAW, type HouseSpec } from './ashfallLayout';
 
 /**
- * ASHFALL, Zone 1's burned village. The campaign's first real PLACE: an open
+ * DUSTLINE, the first zone. A real PLACE: an open
  * dirt square ringed by torched houses, lone chimneys, dead trees and rising
  * smoke, under a low smoke-choked sun. The story opens here ("the fire started
  * here"), so the environment IS the narrative.

@@ -264,7 +264,7 @@ function buildMarksman(): THREE.Group {
   return finish(k, 'marksman', 0.058, 0.730);
 }
 
-// ── Tier 5 · Valor Prototype: exotic energy rifle, glowing core + coils ──────
+// ── Tier 5 · ZX-0 Prototype: exotic energy rifle, glowing core + coils ──────
 function buildLegendary(): THREE.Group {
   const k = makeKit('legendary');
 

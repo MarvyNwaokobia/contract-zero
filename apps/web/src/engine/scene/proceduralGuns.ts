@@ -173,9 +173,9 @@ export type ProceduralGunId =
   | 'ashfall_carbine' | 'warden_repeater' | 'rift_lance' | 'seraph_lmg' | 'ember_halo';
 
 /**
- * ASHFALL CARBINE — a compact bullpup. Magazine BEHIND the grip, which is what makes
+ * DUSTLINE CARBINE — a compact bullpup. Magazine BEHIND the grip, which is what makes
  * a bullpup read as one: short overall, mass carried at the shoulder. Burnt gunmetal
- * with brass furniture, tying it to the Ashfall zone.
+ * with brass furniture, tying it to the Dustline zone.
  */
 function ashfallCarbine(): THREE.Group {
   const g = new THREE.Group();
@@ -230,7 +230,7 @@ function wardenRepeater(): THREE.Group {
 
 /**
  * RIFT LANCE — an energy marksman rifle. Skeletal alloy frame, an exposed coil down
- * the spine, and a single cyan emissive run. Reads as Rift-tech next to the others
+ * the spine, and a single cyan emissive run. Reads as blacksite tech next to the others
  * without being a different genre.
  */
 function riftLance(): THREE.Group {

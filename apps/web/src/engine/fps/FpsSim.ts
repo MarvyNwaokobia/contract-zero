@@ -1,7 +1,7 @@
 /**
  * @module fps/FpsSim
- * @description The headless first-person shooter core for the Valor clone (the plan
- * slice 1). Render-free and deterministic: no Three.js rendering, no DOM. The
+ * @description The headless first-person shooter core for CONTRACT ZERO.
+ * Render-free and deterministic: no Three.js rendering, no DOM. The
  * scene passes the shooter's eye ray + input each step; the sim owns ammo,
  * cadence, reload, spread, the raycast against enemy hitboxes and cover, damage,
  * and respawns, and emits events the scene turns into muzzle flash, tracers,
@@ -84,7 +84,7 @@ const LOCAL_TARGET = '__local__';
 
 /** A teammate in a co-op Endless party, tracked as a live target for enemy
  *  AI alongside the local player. HP/alive are HOST-owned (this `FpsSim`
- *  instance only ever runs on the party host — see `ValorScene`'s `coop`
+ *  instance only ever runs on the party host — see `ContractZeroScene`'s `coop`
  *  prop) — a teammate's own client never reports its own HP, only its
  *  position/aim, exactly like the local player never reports its own HP
  *  either. */
@@ -215,7 +215,7 @@ export interface Hostage {
   rescued: boolean;
 }
 
-// ── Tunables (feel levers — tune these with Marvy against the muted graybox) ──
+// ── Tunables (feel levers — tune these against the muted graybox) ──
 export const FPS_TUNING = {
   // Hitboxes (standing). A full articulated silhouette — head, torso, both arms
   // and legs are all hittable, so the player can shoot ANY part of the body and
@@ -233,7 +233,7 @@ export const FPS_TUNING = {
   MOVE_SPREAD_MULT: 1.8,
   CROUCH_SPREAD_MULT: 0.7,
 
-  // Lethality. Valor is lethal: a global scale over the catalogue damage, then a
+  // Lethality. Combat is lethal: a global scale over the catalogue damage, then a
   // per-zone multiplier — a head drops a target fast, limbs chip, torso in
   // between (tuned so ~1 head / ~3 torso / ~4-5 limb shots kill a 100hp target).
   LETHALITY: 2.2,
@@ -802,7 +802,7 @@ export class FpsSim {
     }
   }
 
-  /** A teammate's shot, co-op Endless only (see `ValorScene`'s `coop`
+  /** A teammate's shot, co-op Endless only (see `ContractZeroScene`'s `coop`
    *  prop) — reuses the exact same raycast/damage resolution
    *  `resolveShot` uses for the local player (cover, ground, enemy
    *  hitboxes, crit roll, burn DoT), tagging the resulting `hit`/`kill`
@@ -1002,7 +1002,7 @@ export class FpsSim {
       // false from birth and a whole survival wave would spawn, decide it had lost
       // you, and walk back to its own spawn points. `markContact` always assumes
       // contact with the LOCAL player specifically — room-wake is always triggered
-      // by the local client's own position (see `ValorScene`'s coop host path), so
+      // by the local client's own position (see `ContractZeroScene`'s coop host path), so
       // that's the correct first guess; `pickTarget` below re-evaluates for real
       // the very same frame regardless.
       if (e.seenAt === 0) this.markContact(e);
@@ -1192,7 +1192,7 @@ export class FpsSim {
     // camera shake) assumes it's about the client running this sim. A shot
     // at a teammate still deals real damage below; the teammate's own
     // client learns about it by diffing their own hp across successive
-    // broadcast snapshots (see `ValorScene`'s coop wiring), not from an
+    // broadcast snapshots (see `ContractZeroScene`'s coop wiring), not from an
     // event here.
     if (e.targetId === LOCAL_TARGET) {
       this.push(out, { kind: 'enemyFire', enemyId: e.id, from, dir, impact, hit: part !== null, part, normal });
@@ -1403,7 +1403,7 @@ export class FpsSim {
     }
   }
 
-  // ── Co-op Endless (party mode) — see `ValorScene`'s `coop` prop ────────────
+  // ── Co-op Endless (party mode) — see `ContractZeroScene`'s `coop` prop ────────────
 
   /** Registers or updates a teammate as a live AI target — called once per
    *  frame per teammate by the HOST's own client, fed from the party
@@ -1544,7 +1544,7 @@ export class FpsSim {
       // Co-op Endless only — empty in every other mode. This is what the
       // HOST's client broadcasts over `useCoopSocket`'s `sendHostState` so
       // every teammate's own client can render everyone else and detect
-      // its own hp dropping (see `ValorScene`'s coop wiring).
+      // its own hp dropping (see `ContractZeroScene`'s coop wiring).
       combatants: Object.fromEntries(
         [...this.combatants].map(([id, c]) => [id, { x: c.x, z: c.z, hp: c.hp, alive: c.alive }]),
       ),

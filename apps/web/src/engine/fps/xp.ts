@@ -1,11 +1,11 @@
 /**
  * @module fps/xp
- * @description The earn loop (the plan slice 5), Marvy's spec: XP per kill, the
+ * @description The XP loop: XP per kill, the
  * kills in a level sum to the level's XP, and filling the rank bar ranks you up
- * and pays G$. The bar is PROGRESSIVE: each rank costs more than the last.
+ * and is reputation only (it never pays currency). The bar is PROGRESSIVE: each rank costs more than the last.
  *
  * Pure + headlessly testable. It deliberately reuses the LIVE game's ladder
- * (RANKS / RANK_STEP_XP / RANK_G_REWARD from lib/constants) so the sandbox and
+ * (RANKS / RANK_STEP_XP from lib/constants) so the sandbox and
  * production agree on the numbers, and attaching this to /fight later is a
  * wiring change rather than a re-tune.
  *
@@ -15,7 +15,7 @@
  */
 
 import {
-  RANKS, RANK_STEP_XP, PRESTIGE_STEP_XP, RANK_G_REWARD, xpForNextRank, type Rank,
+  RANKS, RANK_STEP_XP, PRESTIGE_STEP_XP, xpForNextRank, type Rank,
 } from '../../lib/constants';
 import type { HitPart } from './FpsSim';
 
@@ -83,11 +83,6 @@ export function rankUpsBetween(oldXp: number, newXp: number): Rank[] {
   const out: Rank[] = [];
   for (let i = from + 1; i <= to; i++) out.push(RANKS[i]);
   return out;
-}
-
-/** The G$ paid out for reaching a rank. */
-export function gReward(rank: Rank): number {
-  return RANK_G_REWARD[rank];
 }
 
 /**

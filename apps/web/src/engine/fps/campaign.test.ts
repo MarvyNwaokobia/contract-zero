@@ -14,7 +14,7 @@ function inside(px: number, pz: number, b: CoverBox, margin: number): boolean {
 describe('campaign geometry', () => {
   it('has 15 missions, 5 per zone, across 3 themed zones', () => {
     expect(CAMPAIGN).toHaveLength(15);
-    const order = ['ASHFALL', 'PROVING GROUND', 'THE RIFT'];
+    const order = ['DUSTLINE', 'REDYARD', 'BLACKSITE'];
     expect(Array.from(new Set(CAMPAIGN.map((m) => m.zone)))).toEqual(order);
     for (const z of order) {
       expect(CAMPAIGN.filter((m) => m.zone === z)).toHaveLength(5);
@@ -28,9 +28,9 @@ describe('campaign geometry', () => {
 
   it('gives each zone exactly one signature non-doorkicker op', () => {
     const verbs = (kind: string) => CAMPAIGN.filter((m) => m.objectives.some((o) => o.kind === kind));
-    expect(verbs('defend').map((m) => m.zone)).toEqual(['ASHFALL']);
-    expect(verbs('rescue').map((m) => m.zone)).toEqual(['PROVING GROUND']);
-    expect(CAMPAIGN.filter((m) => m.blackout).map((m) => m.zone)).toEqual(['THE RIFT']);
+    expect(verbs('defend').map((m) => m.zone)).toEqual(['DUSTLINE']);
+    expect(verbs('rescue').map((m) => m.zone)).toEqual(['REDYARD']);
+    expect(CAMPAIGN.filter((m) => m.blackout).map((m) => m.zone)).toEqual(['BLACKSITE']);
   });
 
   for (const m of CAMPAIGN) {
@@ -92,12 +92,12 @@ describe('campaign geometry', () => {
 
 describe('day → night arc (A1)', () => {
   it('the first op of a zone keeps the tuned anchor theme', () => {
-    const ash1 = CAMPAIGN.find((m) => m.id === 'ash-1')!;
-    expect(themeForMission(ash1)).toEqual(ZONE_THEMES.ASHFALL);
+    const dl1 = CAMPAIGN.find((m) => m.id === 'dl-1')!;
+    expect(themeForMission(dl1)).toEqual(ZONE_THEMES.DUSTLINE);
   });
 
   it('later ops in a zone step the key light down and the ambient darker', () => {
-    const zoneOps = CAMPAIGN.filter((m) => m.zone === 'ASHFALL');
+    const zoneOps = CAMPAIGN.filter((m) => m.zone === 'DUSTLINE');
     const first = themeForMission(zoneOps[0]);
     const last = themeForMission(zoneOps[zoneOps.length - 1]);
     expect(last.sun.intensity).toBeLessThan(first.sun.intensity);

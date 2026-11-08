@@ -1,3 +1,4 @@
+import type { Speaker } from '../story/presence';
 import { MusicLayers } from './MusicLayers';
 import { spatialize } from './spatial';
 
@@ -277,7 +278,7 @@ export class AudioDirector {
    * as the speaker's radio signature under the subtitle. Ducks the score
    * either way — a voice owns the room.
    */
-  playVo(id: string, speaker: 'ember' | 'valor' | 'cinder') {
+  playVo(id: string, speaker: Speaker) {
     this.radioSignature(speaker);
     this.duckMusic(0.4, 1600);
     const known = this.voAvailable.get(id);
@@ -306,18 +307,18 @@ export class AudioDirector {
   }
 
   /** Per-speaker radio static: tells WHO is talking before you read a word. */
-  private radioSignature(speaker: 'ember' | 'valor' | 'cinder') {
+  private radioSignature(speaker: Speaker) {
     switch (speaker) {
-      case 'ember': // close, warm, slightly bright — a friend's channel
+      case 'handler': // close, warm, slightly bright — a friend's channel
         this.noiseBand(1900, 1.1, 0.09, 0.18, this.verbBus);
         this.noiseBand(1400, 1.4, 0.06, 0.12, this.verbBus);
         break;
-      case 'valor': // he doesn't crackle in — the channel drops to make room
+      case 'ironveil': // command doesn't crackle in — the channel drops to make room
         this.sine(120, 34, 0.5, 0.5, this.verbBus);
         this.noiseBand(700, 0.7, 0.3, 0.14, this.verbBus);
         this.music?.gap(260);
         break;
-      case 'cinder': // fire on the line
+      case 'vex': // a bright trader's line
         this.noiseBand(2600, 0.8, 0.18, 0.2, this.verbBus);
         this.noiseSweep(900, 300, 0.25, 0.2, this.verbBus);
         break;

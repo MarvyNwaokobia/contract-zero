@@ -1,0 +1,134 @@
+// Typed client for the CONTRACT ZERO API (apps/api).
+import type { ConvoyContract } from '@/engine/fps/convoy';
+
+export const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080';
+
+export type ResourceName = 'ammo' | 'med' | 'fuel';
+
+export interface Squad { rifles: number; sidearms: number }
+export interface GuardPlan {
+  planned: number;
+  ammo_available: number;
+  hall: Squad;
+  yard: Squad;
+  guard_hp: number;
+  sidearm_damage_bp: number;
+  reinforce_per_drop: number;
+  reinforce_every_secs_x100: number;
+}
+
+export interface BoardEntry {
+  target: string;
+  target_name: string;
+  resource: ResourceName;
+  manifest: number;
+  defense: number;
+  guards: GuardPlan;
+  bounty: { id: number; sponsor: string; sponsor_name: string; amount: number; expires_at: number } | null;
+  market_value: { bid: number; unit_bid: number };
+  mission: ConvoyContract;
+}
+
+export interface Holdings { credits: number; ammo: number; med: number; fuel: number }
+
+export interface ActorView {
+  id: string;
+  name: string;
+  kind: 'faction' | 'merchant';
+  holdings: Holdings;
+  requirement: Record<ResourceName, number>;
+  ammo_target: number;
+  credit_reserve: number;
+  defense: number;
+  recent_raids: number;
+}
+
+export interface PriceView {
+  resource: ResourceName;
+  stock: number;
+  price: { cost: number; stock: number; target: number; net_demand_24h: number; margin_bp: number; scarcity_bp: number; demand_bp: number; mid: number; ask: number; bid: number };
+}
+
+export interface WorldView {
+  tick: number;
+  day: number;
+  hour: number;
+  zone: string;
+  actors: ActorView[];
+  market: { insolvent: boolean; strategy: { margin_bp: number; spread_bp: number } };
+  prices: PriceView[];
+  board: BoardEntry[];
+  flows: Record<string, { issued: number; destroyed: number; conserved: boolean }>;
+}
+
+export interface MissionStart { session: string; raid: number; min_secs: number; mission: ConvoyContract }
+
+export interface MissionResult {
+  outcome: 'extracted' | 'killed' | 'rejected';
+  reason: string | null;
+  elapsed_secs: number;
+  min_secs: number;
+  raid: number;
+  target: string;
+  resource: ResourceName;
+  extracted_units: number;
+  bounty: number;
+  player_holdings: { credits: number; cargo: number };
+}
+
+export interface AgentEvent {
+  seq: number;
+  tick: number;
+  source: string;
+  kind: string;
+  payload: {
+    planner?: string;
+    trigger?: string;
+    context?: [string, number][];
+    action?: Record<string, unknown> | null;
+    rationale?: string;
+    validation?: 'accepted' | 'rejected' | 'no_action';
+    error?: string | null;
+    [k: string]: unknown;
+  };
+}
+
+async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  const r = await fetch(`${API}${path}`, { ...init, headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) } });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((body as { error?: string }).error ?? `HTTP ${r.status}`);
+  return body as T;
+}
+
+export const api = {
+  world: () => req<WorldView>('/world'),
+  board: () => req<{ board: BoardEntry[] }>('/board').then((b) => b.board),
+  player: (id: string) => req<{ player: string; holdings: Holdings; active_raid: number | null }>(`/players/${encodeURIComponent(id)}`),
+  decisions: (limit = 30) => req<{ events: AgentEvent[] }>(`/events?kind=agent_decision&limit=${limit}`).then((e) => e.events),
+  startMission: (player: string, target: string, resource: ResourceName) =>
+    req<MissionStart>('/missions/start', { method: 'POST', body: JSON.stringify({ player, target, resource }) }),
+  completeMission: (session: string, player: string, outcome: 'extracted' | 'killed', kills: number) =>
+    req<{ replayed: boolean; result: MissionResult }>(`/missions/${session}/complete`, { method: 'POST', body: JSON.stringify({ player, outcome, kills }) }),
+};
+
+// ── the player's identity, until NEAR sign-in replaces it ───────────────────
+
+const PLAYER_KEY = 'cz_player';
+
+/** Same rules the server applies (apps/api/src/handlers/missions.rs). */
+export function validAccountId(id: string): boolean {
+  if (id.length < 2 || id.length > 64) return false;
+  if (!/^[a-z0-9._-]+$/.test(id)) return false;
+  if (/^[._-]|[._-]$/.test(id) || /[._-]{2}/.test(id)) return false;
+  return true;
+}
+
+export function loadPlayer(): string | null {
+  try { return window.localStorage.getItem(PLAYER_KEY); } catch { return null; }
+}
+
+export function savePlayer(id: string) {
+  try { window.localStorage.setItem(PLAYER_KEY, id); } catch { /* private mode */ }
+}
+
+export const RESOURCE_LABEL: Record<ResourceName, string> = { ammo: 'Ammunition', med: 'Medical supplies', fuel: 'Fuel' };

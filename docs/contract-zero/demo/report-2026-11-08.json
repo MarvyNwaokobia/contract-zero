@@ -1,0 +1,199 @@
+{
+  "player": "player.contract-zero.testnet",
+  "minutes": 6.7,
+  "page_errors": [],
+  "steps": [
+    {
+      "step": 1,
+      "title": "Sign in",
+      "secs": 12,
+      "screenshot": "01-sign-in.png",
+      "offered": [
+        "google",
+        "wallet"
+      ],
+      "used": "wallet-style signed challenge (scripted)"
+    },
+    {
+      "step": 2,
+      "title": "Operations Hub",
+      "secs": 20,
+      "screenshot": "02-operations-hub.png",
+      "callsign": "WRAITH-6"
+    },
+    {
+      "step": 3,
+      "title": "Briefing",
+      "secs": 38,
+      "screenshot": "05-briefing.png",
+      "codename": "OPERATION GREY TALLY",
+      "lines": [
+        "handler: WRAITH-6, Vanguard has a 434 credit bounty on Ashen Compact's fuel. 57 units in the depot, and whatever you carry out is yours.",
+        "vanguard: Ashen Compact paid for 1 raid(s) on us. Returning the favour: 434 cr to whoever raids its fuel depot.",
+        "handler: Ashen Compact has this site at defense level 2: 9 guards armed and waiting."
+      ],
+      "source": "authored"
+    },
+    {
+      "step": 4,
+      "title": "Contract board",
+      "secs": 23,
+      "screenshot": "03-contract-board.png",
+      "contracts": 6,
+      "kinds": [
+        "raid",
+        "sabotage"
+      ],
+      "chosen": "raid on Ashen Compact's fuel: 57 units, 9 guards, bounty 434 from Vanguard"
+    },
+    {
+      "step": 5,
+      "title": "Loadout",
+      "secs": 29,
+      "screenshot": "04-loadout.png",
+      "weapon": "Assault Rifle",
+      "owned_items": "standard issue (owned gear is Milestone 7)"
+    },
+    {
+      "step": 6,
+      "title": "In the fight",
+      "secs": 41,
+      "screenshot": "06-in-the-fight.png",
+      "objective": "ENTER THE FACILITY",
+      "radio_beats": [
+        "opBreach",
+        "opStart",
+        "troopsCleared",
+        "rivalFirstWord",
+        "opPushIn",
+        "missionCleared"
+      ],
+      "lines_heard": [
+        "You're in. They're awake now, so keep moving.",
+        "Contract's live. The fuel is in the yard past the hall. Load it and walk it out.",
+        "Forward escort's down. Someone just keyed in on the Ashen Compact channel.",
+        "This is the Ashen Compact. You're standing in our refinery. Nobody leaves the refinery.",
+        "That's the yard. Get on the cargo and start loading. They'll try to take it back."
+      ]
+    },
+    {
+      "step": 7,
+      "title": "Extraction results",
+      "secs": 70,
+      "screenshot": "07-extraction-results.png",
+      "outcome": "CARGO EXTRACTED",
+      "debrief": "KESTREL 57 fuel out, plus a 434 credit bounty. Sell it or keep it. ASHEN COMPACT We have your name now, WRAITH-6. Ashen Compact remembers."
+    },
+    {
+      "step": 8,
+      "title": "Genuine ownership",
+      "secs": 86,
+      "on_chain": "player.contract-zero.testnet holds 174 fuel on assets.contract-zero.testnet (was 117)"
+    },
+    {
+      "step": 9,
+      "title": "Trade with Vex",
+      "secs": 96,
+      "screenshot": "09-trade-with-vex.png",
+      "sold": "20 fuel",
+      "quote": "QUOTE Vex buys 5 fuel from you for 95 credits 19.0 cr/unit · firm price, held for you · quick trade: no confirmation needed Done · settled on-chain close Vex's quote FXWxx9b1… your trade 7MiAXkgU… MARKET ·"
+    },
+    {
+      "step": 10,
+      "title": "Factions respond",
+      "secs": 398,
+      "screenshot": "10-factions-respond.png",
+      "actor": "Ashen Compact",
+      "trigger": "med below target",
+      "observed": [
+        [
+          "have",
+          11
+        ],
+        [
+          "target",
+          16
+        ],
+        [
+          "budget",
+          6877
+        ],
+        [
+          "merchant_stock",
+          48
+        ],
+        [
+          "quote_qty",
+          5
+        ],
+        [
+          "quote_total",
+          289
+        ],
+        [
+          "unit_ask",
+          55
+        ]
+      ],
+      "rationale": "Buy 5 med for 289 credits.",
+      "validation": "accepted",
+      "world": [
+        "Ashen Compact bought 5 med from Vex for 289 cr"
+      ]
+    },
+    {
+      "step": 11,
+      "title": "Confirmed NEAR settlement",
+      "secs": 86,
+      "screenshot": "08-confirmed-near-settlement.png",
+      "result": "Settled on NEAR testnet: Ph1yRL2cij…",
+      "raid_op": "raid:513"
+    },
+    {
+      "step": 12,
+      "title": "War Room",
+      "secs": 399,
+      "screenshot": "11-war-room.png",
+      "chain": "trigger → observed → proposal → validation → transaction → world → gameplay"
+    },
+    {
+      "step": 13,
+      "title": "The world has changed",
+      "secs": 402,
+      "screenshot": "12-the-world-has-changed.png",
+      "before": {
+        "stock": 96,
+        "defense": 2,
+        "manifest": 57,
+        "guards": 9,
+        "bounty": 434
+      },
+      "after": {
+        "stock": 51,
+        "defense": 3,
+        "manifest": 30,
+        "guards": 11,
+        "bounty": 0,
+        "on_board": true
+      },
+      "board": {
+        "before": [
+          "raid:ashen:ammo",
+          "raid:ashen:fuel",
+          "raid:vanguard:ammo",
+          "raid:vanguard:med",
+          "raid:vanguard:fuel",
+          "sabotage:ashen:fuel"
+        ],
+        "after": [
+          "raid:ashen:ammo",
+          "raid:ashen:fuel",
+          "raid:vanguard:ammo",
+          "raid:vanguard:med",
+          "raid:vanguard:fuel",
+          "sabotage:ashen:fuel"
+        ]
+      }
+    }
+  ]
+}

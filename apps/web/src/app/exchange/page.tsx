@@ -26,22 +26,22 @@ function QuickTrade({ enabled, onChange }: { enabled: boolean; onChange: () => v
     <Panel title="QUICK TRADE" className="mt-4">
       {enabled ? (
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-emerald-400">On: trades go through without a confirmation, within the limits you set.</p>
+          <p className="text-sm text-friendly">On: trades go through without a confirmation, within the limits you set.</p>
           <button disabled={busy} onClick={() => go(() => disableQuickTrade(session))} className="text-sm text-slate-400 hover:text-slate-200">turn off</button>
         </div>
       ) : (
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-slate-400">
             Skip the confirmation on every trade for 24 hours, spending at most
-            <input type="number" min={50} max={10000} step={50} value={credits} onChange={(e) => setCredits(Math.max(50, Number(e.target.value) || 50))} className="mx-2 w-20 rounded border border-slate-700 bg-slate-950 px-2 py-0.5 text-sm tabular-nums" aria-label="credit limit" />
+            <input type="number" min={50} max={10000} step={50} value={credits} onChange={(e) => setCredits(Math.max(50, Number(e.target.value) || 50))} className="mx-2 w-20 rounded border border-line-strong bg-ink-2 px-2 py-0.5 text-sm tabular-nums" aria-label="credit limit" />
             credits and selling at most 50 units. The limits are enforced by the game contract, and you can turn it off anytime.
           </p>
-          <button disabled={busy} onClick={() => go(() => enableQuickTrade(session, { credits, units: 50, hours: 24 }))} className="rounded border border-cyan-600 px-4 py-1.5 text-sm font-semibold text-cyan-300 hover:bg-cyan-950 disabled:opacity-40">
+          <button disabled={busy} onClick={() => go(() => enableQuickTrade(session, { credits, units: 50, hours: 24 }))} className="cz-btn cz-btn-ghost px-4 py-1.5 text-sm">
             {busy ? 'Approving…' : 'Turn on'}
           </button>
         </div>
       )}
-      {err && <p className="mt-2 text-sm text-rose-400">{err}</p>}
+      {err && <p className="mt-2 text-sm text-hostile">{err}</p>}
     </Panel>
   )
 }
@@ -65,9 +65,9 @@ type Ticket = {
 
 function Bar({ have, target }: { have: number; target: number }) {
   const pct = Math.min(100, Math.round((100 * have) / Math.max(1, target)))
-  const tone = pct < 50 ? 'bg-rose-500' : pct < 90 ? 'bg-amber-400' : 'bg-emerald-500'
+  const tone = pct < 50 ? 'bg-hostile' : pct < 90 ? 'bg-amber' : 'bg-friendly'
   return (
-    <div className="h-1.5 w-full rounded bg-slate-800">
+    <div className="h-1.5 w-full bg-line">
       <div className={`h-1.5 rounded ${tone}`} style={{ width: `${pct}%` }} />
     </div>
   )
@@ -77,10 +77,10 @@ function Row({ p, canTrade, busy, onQuote }: { p: ExchangePrice; canTrade: boole
   const [qty, setQty] = useState(10)
   const premium = p.scarcity_bp / 10_000
   return (
-    <div className="grid items-center gap-3 border-t border-slate-800 py-3 first:border-t-0 sm:grid-cols-[1.4fr_1fr_1fr_auto]">
+    <div className="grid items-center gap-3 border-t border-line py-3 first:border-t-0 sm:grid-cols-[1.4fr_1fr_1fr_auto]">
       <div>
         <div className="font-semibold text-slate-100">{RESOURCE_LABEL[p.resource]}</div>
-        <div className="mt-1 flex items-center gap-2 text-xs text-slate-500">
+        <div className="mt-1 flex items-center gap-2 text-xs text-muted">
           <span className="tabular-nums">Vex holds {p.stock}/{p.target}</span>
           <div className="w-24"><Bar have={p.stock} target={p.target} /></div>
         </div>
@@ -92,11 +92,11 @@ function Row({ p, canTrade, busy, onQuote }: { p: ExchangePrice; canTrade: boole
         <input
           type="number" min={1} max={500} value={qty}
           onChange={(e) => setQty(Math.max(1, Math.min(500, Number(e.target.value) || 1)))}
-          className="w-16 rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm tabular-nums outline-none focus:border-cyan-500"
+          className="w-16 rounded border border-line-strong bg-ink-2 px-2 py-1.5 text-sm tabular-nums outline-none focus:border-amber"
           aria-label={`${p.resource} quantity`}
         />
-        <button disabled={!canTrade || busy} onClick={() => onQuote(p.resource, 'buy', qty)} className="rounded bg-cyan-500 px-3 py-1.5 text-sm font-semibold text-slate-950 hover:bg-cyan-400 disabled:opacity-40">Buy</button>
-        <button disabled={!canTrade || busy || p.sell_10 == null} onClick={() => onQuote(p.resource, 'sell', qty)} className="rounded border border-cyan-600 px-3 py-1.5 text-sm font-semibold text-cyan-300 hover:bg-cyan-950 disabled:opacity-40">Sell</button>
+        <button disabled={!canTrade || busy} onClick={() => onQuote(p.resource, 'buy', qty)} className="cz-btn cz-btn-primary px-3 py-1.5 text-sm">Buy</button>
+        <button disabled={!canTrade || busy || p.sell_10 == null} onClick={() => onQuote(p.resource, 'sell', qty)} className="cz-btn cz-btn-ghost px-3 py-1.5 text-sm">Sell</button>
       </div>
     </div>
   )
@@ -173,13 +173,13 @@ export default function Exchange() {
 
   return (
     <Shell title="Exchange" back={{ href: '/', label: 'Hub' }}>
-      {ex.isError && <p className="mb-4 text-rose-400">The economy server is not reachable.</p>}
+      {ex.isError && <p className="mb-4 text-hostile">The economy server is not reachable.</p>}
 
       {!session && (
         <Panel className="mb-4">
           <div className="flex items-center justify-between gap-3">
             <p className="text-sm text-slate-400">{loading ? 'Checking your sign-in…' : 'Sign in to buy and sell. Prices are live either way.'}</p>
-            <Link href="/signin" className="rounded bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400">Sign in</Link>
+            <Link href="/signin" className="cz-btn cz-btn-primary px-4 py-2 text-sm">Sign in</Link>
           </div>
         </Panel>
       )}
@@ -194,10 +194,10 @@ export default function Exchange() {
                 <Stat label="Med" value={holdings.med} />
                 <Stat label="Fuel" value={holdings.fuel} />
               </div>
-              {onChain && <p className="mt-2 text-xs text-slate-500">Owned by your account and recorded on-chain: only you can trade it.</p>}
+              {onChain && <p className="mt-2 text-xs text-muted">Owned by your account and recorded on-chain: only you can trade it.</p>}
             </>
           ) : (
-            <p className="text-sm text-slate-500">Loading…</p>
+            <p className="text-sm text-muted">Loading…</p>
           )}
         </Panel>
       )}
@@ -210,7 +210,7 @@ export default function Exchange() {
             {ex.data.shortages.map((s) => (
               <li key={`${s.actor}-${s.resource}`} className="text-slate-300">
                 <span className="font-semibold text-amber-400">{s.name}</span> is {s.short} {s.resource} short of its target ({s.have}/{s.target}). Its commander will buy from Vex, pushing the {s.resource} price up.{' '}
-                <Link href="/contracts" className="text-cyan-400 hover:underline">Raid its depots</Link> to deepen the shortage, or sell {s.resource} to Vex while the price is high.
+                <Link href="/contracts" className="text-amber-hi hover:underline">Raid its depots</Link> to deepen the shortage, or sell {s.resource} to Vex while the price is high.
               </li>
             ))}
           </ul>
@@ -218,25 +218,25 @@ export default function Exchange() {
       )}
 
       {ticket && q && (
-        <Panel title="QUOTE" className="mt-4 border-cyan-800">
+        <Panel title="QUOTE" className="mt-4 !border-amber/50">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <div className="text-lg font-semibold text-slate-100">
                 {q.side === 'buy' ? `Vex sells you ${q.qty} ${q.resource} for ${q.total} credits` : `Vex buys ${q.qty} ${q.resource} from you for ${q.total} credits`}
               </div>
-              <div className="text-xs text-slate-500">
+              <div className="text-xs text-muted">
                 {q.unit.toFixed(1)} cr/unit · firm price, held for you{ticket.phase === 'ready' ? ` · ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} left` : ''}
                 {ticket.call ? (quick ? ' · quick trade: no confirmation needed' : ' · nothing moves until you confirm') : ' · off-chain mode'}
               </div>
             </div>
             {ticket.phase === 'ready' && left > 0 && (
-              <button onClick={accept} disabled={!session} className="rounded bg-cyan-500 px-5 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400 disabled:opacity-40">
+              <button onClick={accept} disabled={!session} className="cz-btn cz-btn-primary px-5 py-2 text-sm">
                 {ticket.call ? (quick ? 'Trade' : 'Confirm trade') : 'Accept (off-chain)'}
               </button>
             )}
-            {ticket.phase === 'signing' && <span className="text-sm text-cyan-300">{quick ? 'Trading…' : 'Waiting for your confirmation…'}</span>}
-            {ticket.phase === 'confirming' && <span className="text-sm text-cyan-300">Settling…</span>}
-            {ticket.phase === 'settled' && <span className="text-sm font-semibold text-emerald-400">{ticket.call ? 'Done · settled on-chain' : 'Done (off-chain)'}</span>}
+            {ticket.phase === 'signing' && <span className="text-sm text-amber-hi">{quick ? 'Trading…' : 'Waiting for your confirmation…'}</span>}
+            {ticket.phase === 'confirming' && <span className="text-sm text-amber-hi">Settling…</span>}
+            {ticket.phase === 'settled' && <span className="text-sm font-semibold text-friendly">{ticket.call ? 'Done · settled on-chain' : 'Done (off-chain)'}</span>}
             {(ticket.phase === 'settled' || left === 0) && (
               <button onClick={() => setTicket(null)} className="text-sm text-slate-400 hover:text-slate-200">close</button>
             )}
@@ -245,7 +245,7 @@ export default function Exchange() {
           {ticket.txs.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-3 text-xs">
               {ticket.txs.map((h, i) => (
-                <a key={h} href={explorer(h)} target="_blank" rel="noreferrer" className="font-mono text-cyan-400 hover:underline">
+                <a key={h} href={explorer(h)} target="_blank" rel="noreferrer" className="font-mono text-amber-hi hover:underline">
                   {i === 0 ? 'Vex\'s quote' : i === 1 ? 'your trade' : 'receipt'} {h.slice(0, 8)}…
                 </a>
               ))}
@@ -254,7 +254,7 @@ export default function Exchange() {
         </Panel>
       )}
 
-      {error && <p className="mt-4 text-sm text-rose-400">{error}</p>}
+      {error && <p className="mt-4 text-sm text-hostile">{error}</p>}
 
       {ex.data && (
         <Panel title={`MARKET · ${ex.data.merchant.name.toUpperCase()}`} className="mt-4">
@@ -262,7 +262,7 @@ export default function Exchange() {
           {ex.data.prices.map((p) => (
             <Row key={p.resource} p={p} canTrade={canTrade} busy={!!ticket && ticket.phase !== 'settled' && left > 0} onQuote={requestQuote} />
           ))}
-          {!canTrade && <p className="mt-2 text-xs text-slate-500">Sign in to trade.</p>}
+          {!canTrade && <p className="mt-2 text-xs text-muted">Sign in to trade.</p>}
         </Panel>
       )}
 
@@ -270,7 +270,7 @@ export default function Exchange() {
         <Panel title="YOUR TRADES" className="mt-4">
           <ul className="space-y-1 text-sm tabular-nums text-slate-300">
             {ex.data.trades.map((t) => (
-              <li key={t.id}>{t.side === 'buy' ? 'Bought' : 'Sold'} {t.qty} {t.resource} for {t.total} cr <span className="text-slate-500">· tick {t.tick}</span></li>
+              <li key={t.id}>{t.side === 'buy' ? 'Bought' : 'Sold'} {t.qty} {t.resource} for {t.total} cr <span className="text-muted">· tick {t.tick}</span></li>
             ))}
           </ul>
         </Panel>

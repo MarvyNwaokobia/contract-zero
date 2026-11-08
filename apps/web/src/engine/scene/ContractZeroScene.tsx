@@ -1314,6 +1314,8 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
     // dormant rooms ahead intact so a breach still has something to wake.
     w.__czKillRoom = () => sim.debugKillRoom(chain.current.cursor + 1);
     w.__czKillPlayer = () => sim.debugKillPlayer();
+    // Read-only: the mission's objectives, for scripted demo runs.
+    w.__czObjectives = () => OBJECTIVES.map((o) => ({ kind: o.kind, text: o.text, pos: o.pos, room: o.room, holdSecs: o.holdSecs }));
     w.__czAim = () => ({ pitch: pitch.current, yaw: yaw.current });
     w.__czAudio = () => audio.stats();
     // `alive` / `refills` / `reviving` make the second wind observable: a mission
@@ -4395,7 +4397,7 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
         {/* zone / op label (operations are chosen outside the game now). On touch it
             shifts right to clear the top-left EXIT button. */}
         <div style={{ position: 'absolute', left: isTouch ? 90 : 150, top: 20 }}>
-          <span style={{ fontSize: 12, letterSpacing: 2, color: '#6f7d8c' }}>{mode === 'endless' ? `CONTRACT ZERO · ${seasonal ? 'SEASONAL CAMPAIGN' : 'ENDLESS'} · ${mission.name}` : mode === 'gauntlet' ? 'CONTRACT ZERO · GAUNTLET · RANKED' : mode === 'survival' ? 'CONTRACT ZERO · SURVIVAL · THE KILL-HOUSE' : `CONTRACT ZERO · ${mission.zone} · OP ${missionIndex + 1}/${CAMPAIGN.length}`}</span>
+          <span style={{ fontSize: 12, letterSpacing: 2, color: '#6f7d8c' }}>{mode === 'endless' ? `CONTRACT ZERO · ${seasonal ? 'SEASONAL CAMPAIGN' : 'ENDLESS'} · ${mission.name}` : mode === 'gauntlet' ? 'CONTRACT ZERO · GAUNTLET · RANKED' : mode === 'survival' ? 'CONTRACT ZERO · SURVIVAL · THE KILL-HOUSE' : mode === 'contract' ? `CONTRACT ZERO · ${mission.name}` : `CONTRACT ZERO · ${mission.zone} · OP ${missionIndex + 1}/${CAMPAIGN.length}`}</span>
         </div>
         {!isTouch && (
           <div style={{ position: 'absolute', right: 26, top: 20, fontSize: 11, lineHeight: 1.7, textAlign: 'right', color: '#6f7d8c' }}>

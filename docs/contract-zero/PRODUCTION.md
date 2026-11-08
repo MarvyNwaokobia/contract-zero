@@ -202,3 +202,44 @@ The setting, cast and writing rules are in `docs/contract-zero/STORY.md`.
 **Not verified:** model-voiced lines. `NEAR_AI_API_KEY` is empty, so every story is authored (`source: authored`, served in 2–3 ms).
 
 **Not built:** recorded voice for per-mission lines (they play as radio static with a subtitle), branching dialogue, and a camera cinematic. The insertion is a briefing card.
+
+### Milestone 9: integration and the §17 run (2026-11-08)
+
+**Built:**
+- **`apps/web/demo-run.mjs`.** The 13 steps of brief §17 in a real browser against the live API, the live world and NEAR testnet. It checks each step, screenshots it, records a video, and writes a `report.json`.
+  - What is scripted is stated in its header:
+    - sign-in by the player's own signed challenge (the wallet path, not the Google pop-up);
+    - quick trade opened with the player's own key;
+    - the fight flown by scene dev hooks (`__czObjectives`, new and read-only).
+  - The server still enforces the minimum mission time.
+  - The world clock is never fast-forwarded.
+- **`docs/contract-zero/DEMO.md`.** The script for a hand-recorded run: what to click, what to say at each step, the setup checklist and the known gaps.
+- **Polish found by the run:**
+  - the Exchange moved to the design system (no more cyan and slate);
+  - the in-fight header names the contract instead of a campaign "OP 1/15";
+  - War Room operation chains show the player's callsign;
+  - the demo retries a sale while the raid's cargo is still settling, as a player would.
+
+**Verified** (`docs/contract-zero/demo/report-2026-11-08.json`), one run of 6.7 minutes with 0 page errors:
+
+| § | Result |
+|---|---|
+| 1 | Sign-in page offers Google and wallet; signed in by wallet-style challenge |
+| 2 | Operator WRAITH-6 created; Hub |
+| 3 | "OPERATION GREY TALLY": Vanguard's own logged reason for its bounty on Ashen ("Ashen Compact paid for 1 raid(s) on us. Returning the favour…") |
+| 4 | 6 contracts, raid and sabotage; chose a raid on Ashen's fuel, 57 units, 9 guards, 434 cr bounty from Vanguard |
+| 5 | Assault Rifle (standard issue) |
+| 6 | Blacksite at night; radio beats fired from objectives |
+| 7 | Cargo extracted; debrief: "We have your name now, WRAITH-6. Ashen Compact remembers." |
+| 8 | Player's fuel on `assets.contract-zero.testnet`: 117 → 174 |
+| 9 | Sold 5 fuel to Vex for 95 cr via quick trade, settled on chain (quote FXWxx9b1…, trade 7MiAXkgU…) |
+| 10 | Ashen made its next decision on the live clock (restocking med) |
+| 11 | Raid settlement confirmed: Ph1yRL2cij… (`raid:513`) |
+| 12 | War Room operation chain: "raid contract on Ashen Compact's fuel → Operation #513 paid out: 57 units moved, 434 cr fee · on NEAR" |
+| 13 | Same depot after: Ashen fuel 96 → 51, defense 2 → 3, haul 57 → 30, guards 9 → 11, bounty withdrawn |
+
+**Gaps:**
+- **§5 owned items:** owned gear is Milestone 7, not built.
+- **The recording is the automated run.** A hand-played recording with Google sign-in follows `DEMO.md`.
+- **Hosting is not done.** It needs accounts for the web app, the API and Postgres; see the report.
+- **The NEAR AI planner** has no credits, so no model decisions appear in the run.

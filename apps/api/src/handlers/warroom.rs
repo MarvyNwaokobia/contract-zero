@@ -216,6 +216,10 @@ pub async fn timeline(state: web::Data<AppState>, q: web::Query<TimelineQuery>) 
         .bind(&ops).fetch_all(db).await.unwrap_or_default();
     let by_op: HashMap<String, Value> = settled.iter().map(|(op, k, s, h, e)| (op.clone(), settlement_json(op, k, s, h, e))).collect();
 
+    // Players by callsign, not account id.
+    let players: Vec<String> = rows.iter().filter(|r| r.3 == "mission").map(|r| r.2.trim_start_matches("player:").to_string()).collect();
+    let callsigns: HashMap<String, String> = sqlx::query_as::<_, (String, String)>("SELECT account, callsign FROM player_profiles WHERE account = ANY($1)")
+        .bind(&players).fetch_all(db).await.unwrap_or_default().into_iter().collect();
     let names: HashMap<String, String> = state.world.read(|w| w.actors.values().map(|a| (a.id.clone(), a.name.clone())).collect()).await;
     let name = |id: &str| names.get(id).cloned().unwrap_or_else(|| id.to_string());
 
@@ -225,7 +229,7 @@ pub async fn timeline(state: web::Data<AppState>, q: web::Query<TimelineQuery>) 
             let events: Vec<&Value> = r["events"].as_array().map(|v| v.iter().collect()).unwrap_or_default();
             let op = r["settlement"]["op_id"].as_str().unwrap_or("");
             return json!({
-                "seq": seq, "tick": tick, "kind": "operation", "actor": source, "actor_name": source.trim_start_matches("player:"),
+                "seq": seq, "tick": tick, "kind": "operation", "actor": source, "actor_name": callsigns.get(source.trim_start_matches("player:")).cloned().unwrap_or_else(|| source.trim_start_matches("player:").to_string()),
                 "trigger": format!("{} contract on {}'s {}", r["kind"].as_str().unwrap_or("raid"), name(r["target"].as_str().unwrap_or("")), r["resource"].as_str().unwrap_or("")),
                 "observed": [["outcome", r["outcome"]], ["elapsed_secs", r["elapsed_secs"]], ["min_secs", r["min_secs"]]],
                 "proposal": { "planner": "player", "summary": format!("Run the {} in the field", r["kind"].as_str().unwrap_or("raid")), "rationale": Value::Null },

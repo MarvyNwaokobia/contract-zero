@@ -37,6 +37,7 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         .route("/warroom/timeline", web::get().to(warroom::timeline))
         .route("/observer/simulate", web::post().to(world::simulate))
         .route("/missions/start", web::post().to(missions::start))
+        .route("/missions/{session}/story", web::get().to(missions::story))
         .route("/missions/{session}/complete", web::post().to(missions::complete))
         .route("/settlements", web::get().to(settlement::list))
         .route("/settlements/{op_id}", web::get().to(settlement::get))

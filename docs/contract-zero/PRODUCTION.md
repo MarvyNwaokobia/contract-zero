@@ -171,3 +171,34 @@ API: `GET /warroom?hours=` and `GET /warroom/timeline?limit=&quiet=`. `/observer
 - Rust (84) and web (449) tests pass.
 
 **Not verified:** NEAR AI chains and broadcasts on the page. The planner key is not set, so they show their empty states.
+
+### Milestone 4: narrative (2026-11-08)
+
+The setting, cast and writing rules are in `docs/contract-zero/STORY.md`.
+
+**Built:**
+- **Mission story from verified facts** (`apps/api/src/services/story.rs`).
+  - Captured at deployment: the contract's terms; the sponsor's own logged reason for posting it; the target's memory of this player; the rival paying for raids on it; the callsign; the time of day.
+  - Stored with the session (migration 0010), so the briefing, the radio and the debrief all describe the same mission.
+  - Authored templates always produce a complete story.
+  - **The briefing:** a codename, location and time, then Kestrel's terms, the sponsor's reason in the sponsor's voice, and Kestrel's intel.
+  - **The radio** fits the mission type: raid, sabotage and recovery each fire their beats from objectives. The target speaks in its own voice: Vanguard Command, or the new **Ashen Compact** speaker with its own radio signature. Its first word acknowledges the player's record against it.
+  - **The debrief:** what was taken or destroyed, what was paid, when a sabotaged line returns, and how many operations the target now remembers against you.
+- **Optional model voicing.** `GET /missions/{session}/story` asks NEAR AI to rewrite the lines in character, outside the world lock, with a 10 s limit.
+  - Each rewrite is accepted only if it keeps exactly the same numbers, adds no names and no out-of-world words, and fits on a subtitle. A failing line keeps its authored text.
+  - Proposals and verdicts are logged as `story_call`.
+- **Insertion briefing** (`components/story/Briefing.tsx`): a letterboxed card with the codename, location and time, lines typed one by one with speaker colours and scanlines. Space skips, Enter deploys. It waits up to 12 s for a voiced story, then uses the authored one.
+- **Debrief** on the results screen. The "what it did to…" panel now names the actual target. The deploy page's buttons now use the design system.
+
+**Verified:**
+- `scripts/story-e2e.mjs`, run with a real session against the live world:
+  - an unsponsored raid on Ashen: Ashen speaks, Vex buys;
+  - a Vex-sponsored sabotage on Ashen: Vex's own logged reason appears in its voice ("My fuel shelf is overstocked while Ashen Compact makes its own…");
+  - the story is refused without a session;
+  - the debrief follows a loss.
+- `apps/web/probe-story.mjs` (system Chrome), on an Ashen-sponsored raid on Vanguard: the codename and all 3 briefing lines render; in the fight, the contract's own opening line plays as Kestrel's subtitle; Vanguard's death line plays; the results screen shows the debrief; no page errors. Runs end by death, so nothing settles on NEAR.
+- Tests: 4 story tests (every kind gets a complete story with the real terms; the target's voice and memory; rewrites can't change numbers or names or break the fiction; the debrief matches the result) and 3 radio tests (server lines override per trigger; unknown speakers fall back; every operation kind fires its beats). 88 Rust and 452 web tests pass.
+
+**Not verified:** model-voiced lines. `NEAR_AI_API_KEY` is empty, so every story is authored (`source: authored`, served in 2–3 ms).
+
+**Not built:** recorded voice for per-mission lines (they play as radio static with a subtitle), branching dialogue, and a camera cinematic. The insertion is a briefing card.

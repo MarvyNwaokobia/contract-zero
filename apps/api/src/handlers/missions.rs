@@ -17,6 +17,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
+use crate::services::story;
 use crate::services::world::{log_event, summarize, WorldError};
 use crate::AppState;
 
@@ -97,19 +98,33 @@ pub async fn start(state: web::Data<AppState>, req: HttpRequest, body: web::Json
                 cz_economy::OpKind::Sabotage => 2.0 * PLANT_SECS + MIN_TRAVERSAL_SECS,
                 _ => load_seconds(plan.manifest) as f64 + MIN_TRAVERSAL_SECS,
             };
+            let mut facts = story::facts(w, &plan, &body.player);
+            facts.callsign = sqlx::query_scalar("SELECT callsign FROM player_profiles WHERE account = $1").bind(&body.player).fetch_optional(db).await?;
+            if let Some(sponsor) = &facts.sponsor {
+                // The sponsor's own logged reason for posting this contract.
+                facts.sponsor_reason = sqlx::query_scalar(
+                    "SELECT payload->>'rationale' FROM world_events
+                     WHERE kind = 'agent_decision' AND source = $1 AND payload->>'validation' = 'accepted'
+                       AND payload->'action'->>'target' = $2 AND payload->'action'->>'resource' = $3
+                       AND payload->'action'->>'action' IN ('post_bounty', 'post_contract')
+                     ORDER BY seq DESC LIMIT 1",
+                ).bind(sponsor).bind(&plan.target).bind(plan.resource.name()).fetch_optional(db).await?.flatten();
+            }
+            let tale = story::authored(&facts);
             sqlx::query(
-                "INSERT INTO mission_sessions (id, player, raid_id, min_secs, expires_at)
-                 VALUES ($1, $2, $3, $4, now() + make_interval(secs => $5))",
+                "INSERT INTO mission_sessions (id, player, raid_id, min_secs, expires_at, story)
+                 VALUES ($1, $2, $3, $4, now() + make_interval(secs => $5), $6)",
             )
             .bind(session)
             .bind(&body.player)
             .bind(raid as i64)
             .bind(min_secs)
             .bind(SESSION_TTL_SECS as f64)
+            .bind(json!({ "facts": facts, "story": tale, "voiced": false }))
             .execute(db)
             .await?;
             log_event(db, w.tick, &format!("player:{}", body.player), "mission", &json!({ "phase": "start", "session": session, "raid": raid, "plan": plan, "events": summarize(&ev) })).await?;
-            Ok(json!({ "session": session, "raid": raid, "min_secs": min_secs, "mission": crate::handlers::world::mission_json(w, &plan, Some(raid)) }))
+            Ok(json!({ "session": session, "raid": raid, "min_secs": min_secs, "mission": crate::handlers::world::mission_json(w, &plan, Some(raid)), "story": tale }))
         })
         .await;
     respond(res)
@@ -208,6 +223,13 @@ pub async fn complete(state: web::Data<AppState>, req: HttpRequest, path: web::P
                 "events": summarize(&ev).into_iter().filter(|e| !matches!(e, Event::Transfer(_))).collect::<Vec<_>>(),
                 "settlement": settlement,
             });
+            let mut result = result;
+            let stored_story: Option<Value> = sqlx::query_scalar("SELECT story FROM mission_sessions WHERE id = $1").bind(session).fetch_one(db).await?;
+            if let Some(f) = stored_story.as_ref().and_then(|s| serde_json::from_value::<story::Facts>(s["facts"].clone()).ok()) {
+                let after = w.memory.get(&plan.target).and_then(|m| m.players.get(&player));
+                result["debrief"] = json!(story::debrief(&f, &result, after));
+                result["codename"] = stored_story.as_ref().map(|s| s["story"]["codename"].clone()).unwrap_or(Value::Null);
+            }
             sqlx::query("UPDATE mission_sessions SET completed_at = now(), outcome = $2, result = $3 WHERE id = $1")
                 .bind(session)
                 .bind(outcome)
@@ -219,6 +241,42 @@ pub async fn complete(state: web::Data<AppState>, req: HttpRequest, path: web::P
         })
         .await;
     respond(res)
+}
+
+/// The mission's story. With the NEAR AI planner configured, the first request asks
+/// the model to voice the authored lines (checked line by line, outside the world
+/// lock) and stores the result, so every later request sees the same story.
+pub async fn story(state: web::Data<AppState>, req: HttpRequest, path: web::Path<Uuid>) -> HttpResponse {
+    let who = match crate::handlers::auth::player(&state, &req).await {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
+    let session = path.into_inner();
+    let db = state.world.db();
+    let row: Option<(String, Option<Value>)> = match sqlx::query_as("SELECT player, story FROM mission_sessions WHERE id = $1").bind(session).fetch_optional(db).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("story lookup failed: {e}");
+            return HttpResponse::InternalServerError().json(json!({ "error": "storage error" }));
+        }
+    };
+    let Some((player, Some(stored))) = row else { return HttpResponse::NotFound().json(json!({ "error": "no story for this session" })) };
+    if player != who.account {
+        return HttpResponse::Forbidden().json(json!({ "error": "session belongs to another player" }));
+    }
+    let (Ok(mut tale), Ok(facts)) = (serde_json::from_value::<story::Story>(stored["story"].clone()), serde_json::from_value::<story::Facts>(stored["facts"].clone())) else {
+        return HttpResponse::InternalServerError().json(json!({ "error": "story unreadable" }));
+    };
+    if stored["voiced"] != true {
+        if let Some(planner) = crate::services::planner::Planner::from_env() {
+            let call = story::rewrite(&planner, &mut tale, &facts).await;
+            let tick = state.world.read(|w| w.tick).await;
+            let _ = log_event(db, tick, &format!("player:{player}"), "story_call", &json!({ "session": session, "model": planner.model, "call": call, "rewrites": tale.rewrites })).await;
+            let _ = sqlx::query("UPDATE mission_sessions SET story = $2 WHERE id = $1")
+                .bind(session).bind(json!({ "facts": facts, "story": tale, "voiced": true })).execute(db).await;
+        }
+    }
+    HttpResponse::Ok().json(json!({ "story": tale, "facts": facts }))
 }
 
 /// Fail raids whose session timed out, so the depot is not held forever.

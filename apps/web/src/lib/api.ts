@@ -1,5 +1,6 @@
 // Typed client for the CONTRACT ZERO API (apps/api).
 import type { ConvoyContract } from '@/engine/fps/convoy';
+import type { MissionStory, StoryLine } from '@/engine/story/presence';
 
 /** The API base URL. Sessions are a SameSite cookie, so in local development the API
  *  must be on the same site as the page: `localhost` and `127.0.0.1` are different
@@ -81,7 +82,7 @@ export interface WorldView {
   flows: Record<string, { issued: number; destroyed: number; conserved: boolean }>;
 }
 
-export interface MissionStart { session: string; raid: number; min_secs: number; mission: ConvoyContract }
+export interface MissionStart { session: string; raid: number; min_secs: number; mission: ConvoyContract; story?: MissionStory }
 
 export interface MissionResult {
   outcome: 'extracted' | 'killed' | 'rejected';
@@ -96,6 +97,10 @@ export interface MissionResult {
   player_holdings: { credits: number; cargo: number };
   /** Present when NEAR settlement is enabled. 'queued' here is NOT settlement. */
   settlement: { op_id: string; status: string } | null;
+  kind?: OpKind;
+  /** The cast's account of what happened, written from the result. */
+  debrief?: StoryLine[];
+  codename?: string | null;
 }
 
 export interface SettlementView {
@@ -235,6 +240,7 @@ export const api = {
   // The player is the signed-in session; the server never takes it from the body.
   startMission: (target: string, resource: ResourceName, kind: OpKind = 'raid') =>
     req<MissionStart>('/missions/start', { method: 'POST', body: JSON.stringify({ target, resource, kind }) }),
+  missionStory: (session: string) => req<{ story: MissionStory }>(`/missions/${session}/story`).then((r) => r.story),
   settlement: (opId: string) => req<SettlementView>(`/settlements/${encodeURIComponent(opId)}`),
   completeMission: (session: string, outcome: 'extracted' | 'killed', kills: number) =>
     req<{ replayed: boolean; result: MissionResult }>(`/missions/${session}/complete`, { method: 'POST', body: JSON.stringify({ outcome, kills }) }),

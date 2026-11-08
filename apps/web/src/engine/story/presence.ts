@@ -9,6 +9,12 @@
  *              it notices, and it talks about what it will do next.
  *   VEX      — the independent merchant who buys what you take. Friendly in the
  *              way a business is friendly.
+ *   ASHEN    — the Ashen Compact, fuel refiners and Vanguard's rival. Zealous,
+ *              short sentences, fire and ash.
+ *
+ * On a live contract the server writes the mission's lines from verified facts
+ * (apps/api/src/services/story.rs) and they replace these defaults per trigger;
+ * the defaults below still voice training and any trigger the server leaves out.
  *
  * Delivery: each line is a radio-styled subtitle + per-speaker static signature;
  * ids map 1:1 to optional VO files (public/vo/{id}.mp3) that
@@ -16,7 +22,7 @@
  * layer prefers the file and falls back to static-only.
  */
 
-export type Speaker = 'handler' | 'vanguard' | 'vex';
+export type Speaker = 'handler' | 'vanguard' | 'vex' | 'ashen';
 
 export interface PresenceLine {
   id: string;
@@ -45,6 +51,7 @@ export const SPEAKER_META: Record<Speaker, { name: string; color: string }> = {
   handler: { name: 'KESTREL', color: '#8fd6e8' },
   vanguard: { name: 'VANGUARD COMMAND', color: '#e0455a' },
   vex: { name: 'VEX', color: '#e6c766' },
+  ashen: { name: 'ASHEN COMPACT', color: '#f08a4b' },
 };
 
 export const PRESENCE_LINES: PresenceLine[] = [
@@ -63,6 +70,26 @@ export const PRESENCE_LINES: PresenceLine[] = [
   { id: 'handler-boss-enrage', speaker: 'handler', trigger: 'bossEnrage', text: 'Almost done. This is when they are worst. Finish it.' },
 ];
 
-export function linesFor(trigger: PresenceTrigger): PresenceLine[] {
+/** A mission's own lines from the server, by trigger. */
+export interface StoryLine { id: string; speaker: string; text: string }
+export type MissionRadio = Partial<Record<PresenceTrigger, StoryLine[]>>;
+
+/** The full story the server briefs a contract with. */
+export interface MissionStory {
+  codename: string;
+  location: string;
+  time: string;
+  briefing: StoryLine[];
+  radio: MissionRadio;
+  /** "authored", or "llm:<model>" when checked model rewrites were accepted. */
+  source: string;
+}
+
+const known = (s: string): s is Speaker => s in SPEAKER_META;
+
+/** Lines for a trigger: the mission's own when it has them, else the defaults. */
+export function linesFor(trigger: PresenceTrigger, radio?: MissionRadio): PresenceLine[] {
+  const own = radio?.[trigger]?.filter((l) => known(l.speaker) && l.text.trim());
+  if (own?.length) return own.map((l) => ({ id: l.id, speaker: l.speaker as Speaker, text: l.text, trigger }));
   return PRESENCE_LINES.filter((l) => l.trigger === trigger);
 }

@@ -52,14 +52,20 @@ impl Planner {
     }
 
     async fn complete(&self, system: &str, user: &str) -> Result<(String, Value), String> {
+        self.complete_json("plan", schema(), system, user, 900, self.timeout).await
+    }
+
+    /// One chat completion constrained to a JSON schema. Returns the raw content and
+    /// the usage block; the caller parses and validates.
+    pub async fn complete_json(&self, name: &str, schema: Value, system: &str, user: &str, max_tokens: u32, timeout: Duration) -> Result<(String, Value), String> {
         let body = json!({
             "model": self.model,
             "messages": [{ "role": "system", "content": system }, { "role": "user", "content": user }],
-            "response_format": { "type": "json_schema", "json_schema": { "name": "plan", "schema": schema() } },
-            "max_tokens": 900,
+            "response_format": { "type": "json_schema", "json_schema": { "name": name, "schema": schema } },
+            "max_tokens": max_tokens,
             "temperature": 0.4,
         });
-        let r = self.http.post(format!("{}/chat/completions", self.base)).bearer_auth(&self.key).timeout(self.timeout).json(&body).send().await.map_err(|e| format!("request: {e}"))?;
+        let r = self.http.post(format!("{}/chat/completions", self.base)).bearer_auth(&self.key).timeout(timeout).json(&body).send().await.map_err(|e| format!("request: {e}"))?;
         let status = r.status();
         let v: Value = r.json().await.map_err(|e| format!("response: {e}"))?;
         if !status.is_success() {

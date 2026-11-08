@@ -2506,7 +2506,16 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
         // story beats keyed to the objective just completed. The "troops cleared"
         // and push-in lines are doorkicker beats — only fire them after a real room
         // clear, so a defend/rescue op doesn't announce "Four down".
-        if (objective.current === 0) say('opBreach');
+        if (obj.beats) {
+          // Contract operations name their own beats; a live contract (with the
+          // server's radio) hears its target every time, training only once.
+          for (const beat of obj.beats) {
+            if (beat !== 'rivalFirstWord' || mission.radio) { say(beat); continue }
+            try {
+              if (!window.localStorage.getItem('cz_heard')) { say('rivalFirstWord'); window.localStorage.setItem('cz_heard', '1'); }
+            } catch { say('rivalFirstWord'); }
+          }
+        } else if (objective.current === 0) say('opBreach');
         else if (objective.current === 1 && obj.kind === 'clear') {
           say('troopsCleared');
           // The convoy owner comes on the channel ONCE per session.
@@ -2982,7 +2991,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
   function say(trigger: PresenceTrigger) {
     if (storyFired.current.has(trigger)) return;
     storyFired.current.add(trigger);
-    for (const line of linesFor(trigger)) voQueue.current.push(line);
+    for (const line of linesFor(trigger, mission.radio)) voQueue.current.push(line);
   }
 
   /** One line at a time: radio static + subtitle, held long enough to read. */

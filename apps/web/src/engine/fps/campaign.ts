@@ -27,6 +27,8 @@ export interface Objective {
   reinforceRoom?: number;  // defend: the room reinforcements are drawn from (defaults to `room`)
   reinforceEvery?: number; // defend: seconds between reinforcement drops (default 3.5)
   reinforceCount?: number; // defend: enemies per drop (default 2)
+  /** Radio beats fired when this objective completes (contract operations). */
+  beats?: import('../story/presence').PresenceTrigger[];
 }
 
 export interface Mission {
@@ -57,6 +59,8 @@ export interface Mission {
   /** A structured environment (fps/levels): its own geometry, art, lights and
    *  navigation. Absent on the authored training compounds. */
   level?: import('./levels').LevelId;
+  /** A live contract's radio lines from the server, replacing the defaults per trigger. */
+  radio?: import('../story/presence').MissionRadio;
 }
 
 /** Survival escalation: how many attackers and how tough, by 1-based wave. */

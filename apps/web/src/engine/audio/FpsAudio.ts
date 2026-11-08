@@ -383,6 +383,8 @@ export class FpsAudio {
       this.radioSignature(speaker);
       this.duck(0.8, 1.8);
     }
+    // A contract's own lines are written per mission and never have a recording.
+    if (id.startsWith('dyn-')) return;
     const known = this.voAvailable.get(id);
     if (known === false) return;
     if (known === true) { this.playVoFile(id); return; }
@@ -419,6 +421,9 @@ export class FpsAudio {
       this.noiseBand(1400, 0.07, 0.09);
     } else if (speaker === 'vanguard') { // low — the channel drops to make room for command
       this.noiseBand(520, 0.16, 0.16);
+    } else if (speaker === 'ashen') {   // harsh, overdriven: a refinery set
+      this.noiseBand(760, 0.13, 0.15);
+      this.noiseBand(2600, 0.09, 0.08);
     } else {
       this.noiseBand(1150, 0.11, 0.12);
     }

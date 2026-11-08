@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { Rajdhani } from 'next/font/google'
 import { useSearchParams } from 'next/navigation'
 import { Suspense, useMemo, useState } from 'react'
+import { Briefing, Debrief } from '@/components/story/Briefing'
+import type { MissionStory } from '@/engine/story/presence'
 import { Panel, Shell, Stat } from '@/components/ui/Shell'
 import { buildOperationMission } from '@/engine/fps/convoy'
 import { GUN_CATALOG, gunDps, type GunId } from '@/engine/combat/GunStats'
@@ -28,7 +30,8 @@ const ISSUE: GunId[] = ['smg', 'assault_rifle', 'marksman']
 type Phase =
   | { kind: 'loadout' }
   | { kind: 'starting' }
-  | { kind: 'fighting'; start: MissionStart; before: WorldView }
+  | { kind: 'briefing'; start: MissionStart; before: WorldView; story: MissionStory | null }
+  | { kind: 'fighting'; start: MissionStart; before: WorldView; story: MissionStory | null }
   | { kind: 'reporting' }
   | { kind: 'results'; result: MissionResult; before: WorldView; after: WorldView }
   | { kind: 'error'; message: string }
@@ -81,7 +84,15 @@ function Deploy() {
     try {
       const before = await api.world()
       const start = await api.startMission(target, resource, kind)
-      setPhase({ kind: 'fighting', start, before })
+      setPhase({ kind: 'briefing', start, before, story: null })
+      // The voiced story when the server has a model (checked line by line), else
+      // the authored one it started with. Never wait more than 12 s for it.
+      const authored = start.story ?? null
+      const voiced = await Promise.race([
+        api.missionStory(start.session).catch(() => authored),
+        new Promise<MissionStory | null>((r) => setTimeout(() => r(authored), 12_000)),
+      ])
+      setPhase((p) => (p.kind === 'briefing' && p.start.session === start.session ? { ...p, story: voiced ?? authored } : p))
     } catch (e) {
       setPhase({ kind: 'error', message: (e as Error).message })
     }
@@ -100,7 +111,21 @@ function Deploy() {
     }
   }
 
-  const mission = useMemo(() => (phase.kind === 'fighting' ? buildOperationMission(phase.start.mission, gun) : null), [phase, gun])
+  const mission = useMemo(() => {
+    if (phase.kind !== 'fighting') return null
+    const m = buildOperationMission(phase.start.mission, gun)
+    return phase.story ? { ...m, radio: phase.story.radio } : m
+  }, [phase, gun])
+
+  if (phase.kind === 'briefing') {
+    const { start, before, story } = phase
+    // An older server sends no story: brief from the contract alone.
+    const shown: MissionStory = story ?? start.story ?? {
+      codename: `${kind.toUpperCase()} · ${target.toUpperCase()}`, location: start.mission.zone ?? 'DUSTLINE', time: '', source: 'authored', radio: {},
+      briefing: [{ id: 'fallback', speaker: 'handler', text: `${start.mission.cargo.units} units of ${RESOURCE_LABEL[resource].toLowerCase()} at ${target}'s site. Get in, do the job, get out.` }],
+    }
+    return <Briefing story={shown} pending={!story} onDeploy={() => setPhase({ kind: 'fighting', start, before, story: shown })} />
+  }
 
   if (phase.kind === 'fighting' && mission) {
     const { start, before } = phase
@@ -120,7 +145,7 @@ function Deploy() {
   if (!player) {
     return (
       <Shell title="Deploy" back={{ href: '/', label: 'Hub' }}>
-        <Panel><p>{loading ? 'Checking your sign-in…' : <><Link href="/signin" className="text-cyan-400">Sign in</Link> to take contracts.</>}</p></Panel>
+        <Panel><p>{loading ? 'Checking your sign-in…' : <><Link href="/signin" className="text-amber-hi">Sign in</Link> to take contracts.</>}</p></Panel>
       </Shell>
     )
   }
@@ -147,8 +172,13 @@ function Deploy() {
             <Stat label="You now hold" value={`${result.player_holdings.cargo} ${result.resource}`} hint={`${result.player_holdings.credits} credits`} />
           </div>
         </Panel>
+        {result.debrief && result.debrief.length > 0 && (
+          <Panel title={result.codename ? `DEBRIEF · ${result.codename}` : 'DEBRIEF'} className="mt-4">
+            <Debrief lines={result.debrief} />
+          </Panel>
+        )}
         <div className="mt-4 grid gap-4 md:grid-cols-2">
-          <Panel title="WHAT IT DID TO VANGUARD">
+          <Panel title={`WHAT IT DID TO ${(vgAfter?.name ?? result.target).toUpperCase()}`}>
             {vgBefore && vgAfter && (
               <div className="grid grid-cols-3 gap-3">
                 {(['ammo', 'med', 'fuel'] as const).map((r) => (
@@ -164,7 +194,7 @@ function Deploy() {
           </Panel>
         </div>
         <div className="mt-6 flex gap-3">
-          <Link href="/contracts" className="rounded bg-cyan-500 px-5 py-2 text-sm font-semibold text-slate-950">Back to the board</Link>
+          <Link href="/contracts" className="cz-btn cz-btn-primary px-5 py-2 text-sm">Back to the board</Link>
           <Link href="/" className="cz-btn cz-btn-ghost px-5 py-2 text-sm">Hub</Link>
         </div>
       </Shell>
@@ -182,7 +212,7 @@ function Deploy() {
                 <button
                   key={id}
                   onClick={() => setGun(id)}
-                  className={`rounded border px-4 py-3 text-left ${gun === id ? 'border-cyan-500 bg-cyan-950/30' : 'border-slate-800 hover:bg-slate-900'}`}
+                  className={`rounded border px-4 py-3 text-left ${gun === id ? 'border-amber bg-amber/10' : 'border-slate-800 hover:bg-slate-900'}`}
                 >
                   <div className="font-semibold text-slate-100">{g.name}</div>
                   <div className="text-xs text-slate-500">damage {g.damage} · {g.fireRate} rpm · mag {g.magazine} · {Math.round(gunDps(g))} dps</div>
@@ -198,7 +228,7 @@ function Deploy() {
       <button
         onClick={deploy}
         disabled={phase.kind === 'starting' || phase.kind === 'reporting'}
-        className="mt-6 rounded bg-cyan-500 px-6 py-3 font-semibold text-slate-950 disabled:opacity-50"
+        className="cz-btn cz-btn-primary mt-6 px-6 py-3"
       >
         {phase.kind === 'starting' ? 'Locking in the mission…' : phase.kind === 'reporting' ? 'Reporting to command…' : 'Deploy'}
       </button>

@@ -34,3 +34,31 @@ describe('presence lines', () => {
     }
   });
 });
+
+describe('mission radio from the server', () => {
+  it("uses a contract's own lines for a trigger and the defaults for the rest", async () => {
+    const radio = { rivalFirstWord: [{ id: 'dyn-rival', speaker: 'ashen', text: 'This is the Ashen Compact.' }] }
+    const own = linesFor('rivalFirstWord', radio)
+    expect(own).toHaveLength(1)
+    expect(own[0]).toMatchObject({ id: 'dyn-rival', speaker: 'ashen', trigger: 'rivalFirstWord' })
+    expect(SPEAKER_META.ashen.name).toBe('ASHEN COMPACT')
+    expect(linesFor('opBreach', radio)).toEqual(linesFor('opBreach'))
+  })
+
+  it('ignores lines from a speaker the client cannot voice, or empty ones', () => {
+    const radio = { opStart: [{ id: 'x', speaker: 'halcyon', text: 'hi' }, { id: 'y', speaker: 'handler', text: '  ' }] }
+    expect(linesFor('opStart', radio)).toEqual(linesFor('opStart'))
+  })
+
+  it('gives every operation kind its beats, with the target speaking in each', async () => {
+    const { buildOperationMission } = await import('../../fps/convoy')
+    const base = { id: 't', target: 'vanguard', cargo: { resource: 'ammo' as const, units: 40 }, defense: 3, seed: 4, zone: 'DUSTLINE' as const, issuer: 'Vex Exchange' }
+    for (const kind of ['raid', 'sabotage', 'recovery'] as const) {
+      const beats = buildOperationMission({ ...base, kind }).objectives.flatMap((o) => o.beats ?? [])
+      expect(beats, kind).toContain('opBreach')
+      expect(beats, kind).toContain('rivalFirstWord')
+      expect(beats, kind).toContain('opPushIn')
+      for (const b of beats) expect(linesFor(b).length, `${kind}: ${b}`).toBeGreaterThan(0)
+    }
+  })
+})

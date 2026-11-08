@@ -166,9 +166,9 @@ export function buildConvoyMission(c: ConvoyContract, gun: GunId = 'assault_rifl
       ...placeEscorts(2, lv.rooms[2], esc.yard, esc.hp, geometry, rng),
     ],
     objectives: [
-      { text: night ? 'BREACH THE COURTYARD' : 'HIT THE MOTOR POOL', kind: 'reach', pos: p.entry, activateRoom: 1 },
-      { text: night ? 'CLEAR THE COURTYARD' : 'CLEAR THE MOTOR POOL', kind: 'clear', room: 1, pos: p.entry },
-      { text: night ? 'ENTER THE FACILITY' : 'CROSS INTO THE YARD', kind: 'reach', pos: p.push, activateRoom: 2 },
+      { text: night ? 'BREACH THE COURTYARD' : 'HIT THE MOTOR POOL', kind: 'reach', pos: p.entry, activateRoom: 1, beats: ['opBreach'] },
+      { text: night ? 'CLEAR THE COURTYARD' : 'CLEAR THE MOTOR POOL', kind: 'clear', room: 1, pos: p.entry, beats: ['troopsCleared', 'rivalFirstWord'] },
+      { text: night ? 'ENTER THE FACILITY' : 'CROSS INTO THE YARD', kind: 'reach', pos: p.push, activateRoom: 2, beats: ['opPushIn'] },
       {
         text: `LOAD THE ${label}`, kind: 'defend', pos: p.cargo, holdSecs: loadSeconds(c.cargo.units),
         reinforceRoom: 2, reinforceEvery: esc.reinforceEvery, reinforceCount: esc.reinforceCount,
@@ -201,9 +201,9 @@ export function buildSabotageMission(c: ConvoyContract, gun: GunId = 'assault_ri
     brief: `plant two charges · knock out ${c.target}'s ${label} production · get clear`,
     story: `${c.issuer ?? 'A sponsor'} wants ${c.target}'s ${label} line down. Plant one charge ${night ? 'on the APC motor bay' : 'at the fuel depot'} and one ${night ? 'in the server room' : 'on the munitions line inside the warehouse'}. You don't have to fight them all, just get out before they work out what you did.`,
     objectives: [
-      { text: night ? 'BREACH THE COURTYARD' : 'HIT THE MOTOR POOL', kind: 'reach', pos: p.entry, activateRoom: 1 },
-      { text: night ? 'PLANT CHARGE · MOTOR BAY' : 'PLANT CHARGE · FUEL DEPOT', kind: 'defend', pos: p.charges[0], holdSecs: PLANT_SECS },
-      { text: night ? 'GET INSIDE' : 'CROSS INTO THE YARD', kind: 'reach', pos: p.push, activateRoom: 2 },
+      { text: night ? 'BREACH THE COURTYARD' : 'HIT THE MOTOR POOL', kind: 'reach', pos: p.entry, activateRoom: 1, beats: ['opBreach'] },
+      { text: night ? 'PLANT CHARGE · MOTOR BAY' : 'PLANT CHARGE · FUEL DEPOT', kind: 'defend', pos: p.charges[0], holdSecs: PLANT_SECS, beats: ['rivalFirstWord'] },
+      { text: night ? 'GET INSIDE' : 'CROSS INTO THE YARD', kind: 'reach', pos: p.push, activateRoom: 2, beats: ['opPushIn'] },
       { text: night ? 'PLANT CHARGE · SERVER ROOM' : 'PLANT CHARGE · MUNITIONS LINE', kind: 'defend', pos: p.charges[1], holdSecs: PLANT_SECS, reinforceRoom: 2, reinforceEvery: esc.reinforceEvery, reinforceCount: esc.reinforceCount },
       { text: 'GET CLEAR', kind: 'reach', pos: p.extract },
     ],
@@ -230,8 +230,8 @@ export function buildRecoveryMission(c: ConvoyContract, gun: GunId = 'assault_ri
     brief: `find ${owner}'s seized ${label.toLowerCase()} · secure it · hand it over`,
     story: `${c.target} took ${owner}'s caravan on the road: ${c.cargo.units} units of ${label.toLowerCase()}, now held ${night ? 'in the control room' : 'in the container yard'}. ${owner} pays when it is back in their hands${night ? ' at the gate' : ', at their truck by the east fence'}.`,
     objectives: [
-      { text: night ? 'BREACH THE COURTYARD' : 'HIT THE MOTOR POOL', kind: 'reach', pos: p.entry, activateRoom: 1 },
-      { text: night ? 'GET INSIDE' : 'CROSS INTO THE YARD', kind: 'reach', pos: p.push, activateRoom: 2 },
+      { text: night ? 'BREACH THE COURTYARD' : 'HIT THE MOTOR POOL', kind: 'reach', pos: p.entry, activateRoom: 1, beats: ['opBreach'] },
+      { text: night ? 'GET INSIDE' : 'CROSS INTO THE YARD', kind: 'reach', pos: p.push, activateRoom: 2, beats: ['rivalFirstWord', 'opPushIn'] },
       { text: `SECURE THE ${label}`, kind: 'defend', pos: p.cache, holdSecs: loadSeconds(c.cargo.units), reinforceRoom: 2, reinforceEvery: esc.reinforceEvery, reinforceCount: esc.reinforceCount },
       { text: `DELIVER TO ${owner.toUpperCase()}`, kind: 'reach', pos: p.handover },
     ],

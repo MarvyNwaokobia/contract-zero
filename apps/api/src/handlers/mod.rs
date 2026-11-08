@@ -5,6 +5,7 @@ pub mod exchange;
 pub mod missions;
 pub mod profile;
 pub mod settlement;
+pub mod warroom;
 pub mod world;
 
 /// Liveness: the process is accepting connections.
@@ -32,6 +33,8 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         .route("/board", web::get().to(world::get_board))
         .route("/events", web::get().to(world::get_events))
         .route("/players/{player}", web::get().to(world::get_player))
+        .route("/warroom", web::get().to(warroom::overview))
+        .route("/warroom/timeline", web::get().to(warroom::timeline))
         .route("/observer/simulate", web::post().to(world::simulate))
         .route("/missions/start", web::post().to(missions::start))
         .route("/missions/{session}/complete", web::post().to(missions::complete))

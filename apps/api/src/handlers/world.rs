@@ -175,7 +175,11 @@ pub struct SimulateRequest {
 pub async fn simulate(state: web::Data<AppState>, body: web::Json<SimulateRequest>) -> HttpResponse {
     let ticks = body.ticks.min(14 * TICKS_PER_DAY);
     let mut w = match body.seed {
-        Some(seed) => cz_economy::genesis(seed),
+        Some(seed) => {
+            let mut w = cz_economy::genesis(seed);
+            cz_economy::add_rival(&mut w);
+            w
+        }
         None => state.world.read(|w| w.clone()).await,
     };
     let raid_pct = body.raid_chance_pct.unwrap_or(8).min(100);
@@ -211,6 +215,7 @@ pub async fn simulate(state: web::Data<AppState>, body: web::Json<SimulateReques
             "tick": w.tick,
             "vanguard": holdings(&w, &vg.account),
             "vanguard_defense": vg.defense,
+            "factions": w.actors.values().filter(|a| a.kind == cz_economy::ActorKind::Faction).map(|a| (a.id.clone(), json!({ "holdings": holdings(&w, &a.account), "defense": a.defense }))).collect::<std::collections::BTreeMap<_, _>>(),
             "merchant": holdings(&w, &w.merchant().account),
             "prices": Resource::ALL.iter().map(|r| (r.name(), w.price(*r).mid)).collect::<std::collections::BTreeMap<_, _>>(),
             "guards_next_raid": mission::raid_plan(&w, "vanguard", Resource::Ammo).map(|p| p.guards.deployed()),

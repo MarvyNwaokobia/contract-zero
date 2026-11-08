@@ -76,7 +76,7 @@ async fn main() -> anyhow::Result<()> {
     services::exchange::spawn_sweeper(app_state.clone());
     services::planner::spawn(app_state.clone());
 
-    // FRONTEND_ORIGIN: comma-separated allowed origins. localhost is always allowed.
+    // FRONTEND_ORIGIN: comma-separated allowed origins. localhost and 127.0.0.1 are always allowed.
     let allowed_origins: Vec<String> = std::env::var("FRONTEND_ORIGIN")
         .unwrap_or_default()
         .split(',')
@@ -94,6 +94,7 @@ async fn main() -> anyhow::Result<()> {
                 let s = origin.to_str().unwrap_or("");
                 s.starts_with("http://localhost:")
                     || s.starts_with("https://localhost:")
+                    || s.starts_with("http://127.0.0.1:")
                     || origins.iter().any(|o| s == o.as_str())
             })
             .allow_any_method()

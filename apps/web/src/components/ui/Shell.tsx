@@ -10,7 +10,7 @@ const NAV: { href: string; label: string; icon: ReactNode; soon?: boolean }[] = 
   { href: '/', label: 'Hub', icon: <path d="M3 11l9-7 9 7v9h-6v-6H9v6H3z" /> },
   { href: '/contracts', label: 'Contracts', icon: <><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="2.5" /><path d="M12 1v5M12 18v5M1 12h5M18 12h5" /></> },
   { href: '/exchange', label: 'Exchange', icon: <path d="M4 8h13l-3-3M20 16H7l3 3" /> },
-  { href: '/war-room', label: 'War Room', icon: <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />, soon: true },
+  { href: '/war-room', label: 'War Room', icon: <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /> },
   { href: '/training', label: 'Training', icon: <path d="M12 3l9 5-9 5-9-5zM6 11v5c0 1 3 3 6 3s6-2 6-3v-5" /> },
   { href: '/settings', label: 'Settings', icon: <><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1" /></> },
 ]

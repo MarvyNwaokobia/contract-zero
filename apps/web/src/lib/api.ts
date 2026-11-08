@@ -189,6 +189,44 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+// ── War Room ──
+
+export interface WarActor {
+  id: string; name: string; kind: 'faction' | 'merchant'; holdings: Holdings
+  production: Record<ResourceName, number>; requirement: Record<ResourceName, number>
+  credit_reserve: number; income_per_day: number; defense: number
+  doctrine: { base_defense: number; max_price_mult: number; aggression: number }
+  disrupted: { resource: ResourceName; until: number }[]
+  recent_raids: number
+  grudges: { player: string; raids: number; sabotage: number; recoveries: number; units_lost: number; last_tick: number }[]
+  rivals: { sponsor: string; sponsor_name: string; bounties_paid: number; last_tick: number | null }[]
+}
+export interface WarConvoy { id: number; owner: string; owner_name: string; resource: ResourceName; units: number; defense: number; dispatched_at: number; arrives_at: number; progress: number; status: { state: string; by?: string } }
+export interface WarContract { id: number; kind: OpKind; sponsor: string; sponsor_name: string; target: string; target_name: string; resource: ResourceName; amount: number; expires_at: number }
+export interface WarPrice { resource: ResourceName; ask: number; bid: number; mid: number; stock: number; target: number }
+export interface WarRoomView {
+  world: { tick: number; day: number; hour: number; actors: WarActor[]; convoys: WarConvoy[]; contracts: WarContract[]; contracts_paid: number; prices: WarPrice[]; merchant_insolvent: boolean }
+  history: { tick: number; prices: Record<ResourceName, { ask: number; bid: number; stock: number }>; holdings: Record<string, Holdings & { defense: number }> }[]
+  broadcasts: { tick: number; actor: string; text: string; model: string }[]
+  settlement: Record<string, number>
+  planner: { configured: boolean; last_call: { tick: number; model: string; ok: boolean; latency_ms: number } | null }
+}
+export interface ChainTx { op_id?: string; kind?: string; status: string; settled_on_chain?: boolean; tx_hashes?: string[]; explorer?: string[]; error?: string | null; note?: string }
+export interface CausalChain {
+  seq: number; tick: number; kind: 'decision' | 'operation'; actor: string; actor_name: string
+  trigger: string; observed: [string, unknown][] | null
+  proposal: { planner: string; source?: string; action?: Record<string, unknown> | null; summary?: string; rationale: string | null }
+  validation: { status: string; error: string | null; by: string }
+  transactions?: ChainTx[]; transaction?: ChainTx
+  world: string[]; gameplay: string[]
+}
+export interface SimulationView {
+  simulated: true; note: string; ticks: number; conserved: boolean
+  series: { tick: number; factions: Record<string, { holdings: Holdings; defense: number }>; merchant: Holdings; prices: Record<ResourceName, number>; shortages: number }[]
+  decisions: { tick: number; actor: string; trigger: string; rationale: string; validation: string }[]
+  simulated_raids: { id: number; resource: ResourceName; manifest: number; extracted: boolean }[]
+}
+
 export const api = {
   world: () => req<WorldView>('/world'),
   board: () => req<{ board: BoardEntry[] }>('/board').then((b) => b.board),
@@ -207,6 +245,10 @@ export const api = {
     req<QuoteCreated>('/exchange/quotes', { method: 'POST', body: JSON.stringify({ resource, side, qty }) }),
   quoteState: (id: number) => req<QuoteState>(`/exchange/quotes/${id}`),
   confirmQuote: (id: number, txHash?: string) => req<QuoteState>(`/exchange/quotes/${id}/confirm`, { method: 'POST', body: JSON.stringify({ tx_hash: txHash ?? null }) }),
+  warRoom: (hours = 96) => req<WarRoomView>(`/warroom?hours=${hours}`),
+  timeline: (limit = 40) => req<{ chains: CausalChain[] }>(`/warroom/timeline?limit=${limit}`).then((t) => t.chains),
+  simulate: (ticks: number, seed?: number, raidChancePct?: number) =>
+    req<SimulationView>('/observer/simulate', { method: 'POST', body: JSON.stringify({ ticks, seed: seed ?? null, raid_chance_pct: raidChancePct ?? null }) }),
   acceptOffChain: (id: number) => req<QuoteState>(`/exchange/quotes/${id}/accept`, { method: 'POST' }),
 };
 

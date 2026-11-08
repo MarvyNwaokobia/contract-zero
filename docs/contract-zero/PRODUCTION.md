@@ -143,3 +143,31 @@ In 30-day simulations, sabotage contracts appear every 2 to 3 days. Seizures, an
 **Not verified:** a live model call. `NEAR_AI_API_KEY` is empty in `apps/api/.env`, so the planner logs that it is off and the deterministic policies run alone.
 
 **Not built:** a second merchant (Halcyon). One merchant is enough for the two factions to compete through.
+
+### Milestone 6: the War Room (2026-11-08)
+
+`/war-room` (now enabled in the top bar) answers "what is happening and why":
+
+- **Region map.** Dustline Depot, Blacksite, the Ashen refinery, Vex Exchange and the outer markets, with supply routes, caravans in transit (seized ones in red), contract rings on targeted sites, and sabotaged lines with the hour they come back.
+- **Faction cards.** Treasury with history, stock against need (shelf against target for Vex), defense, stance from doctrine, contracts against and paid for, rivals remembered and player grudges.
+- **Prices.** Ask and bid for each resource, with a sparkline from `market_history` (migration 0009: one row per tick of prices, merchant stock and every actor's holdings).
+- **Why the world changed.** One card per decision or player operation: **trigger → observed state → proposal → validation → transaction → world consequence → gameplay consequence**.
+  - Each link is read from a record: the decision log, the settlement row joined by op id (`trade-N`, `sale-N`, `raid:N`, `op:N`) with explorer links, and the ledger events.
+  - Actions that don't move assets on chain (defense, escrowed bounties) say so rather than showing a transaction.
+  - The gameplay line is a fixed rule per event type, and the page says so.
+  - Only a confirmed row shows as "Settled on NEAR".
+  - NEAR AI decisions carry their own badge, with a filter.
+  - The default "strategic" view hides routine trades under 200 cr and counts them.
+- **Faction broadcasts** from the NEAR AI planner, with an honest empty state when the planner is off.
+- **Observer Mode.**
+  - Sits in a dashed panel badged SIMULATION: "nothing here is live, nothing is saved, and nothing settles on NEAR".
+  - Runs 3, 7 or 14 days from now or from a fresh seeded world (which now includes Ashen).
+  - Shows treasuries for every faction, mid prices, accepted decisions, simulated raids and the conservation check.
+
+API: `GET /warroom?hours=` and `GET /warroom/timeline?limit=&quiet=`. `/observer/simulate` series now carry every faction. CORS now also allows `http://127.0.0.1:*`, matching the web client's loopback rule.
+
+**Verified:**
+- `apps/web/probe-warroom.mjs` (system Chrome): map, faction cards, 16 strategic chains with all seven steps, 12 chains linked to confirmed NEAR transactions, Observer labelled and conservation holding, no failed requests, no horizontal scroll at 390 px.
+- Rust (84) and web (449) tests pass.
+
+**Not verified:** NEAR AI chains and broadcasts on the page. The planner key is not set, so they show their empty states.

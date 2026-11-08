@@ -128,6 +128,7 @@ impl WorldService {
             let mut decisions = 0usize;
             let mut notable = Vec::new();
             for _ in 0..ticks {
+                record_history(w, db).await?;
                 for e in w.tick() {
                     match e {
                         Event::Shortage { .. } => shortages += 1,
@@ -221,4 +222,19 @@ pub async fn log_decision(
 /// Domain events only; individual ledger transfers stay in the snapshot's ledger.
 pub fn summarize(ev: &[Event]) -> Vec<&Event> {
     ev.iter().filter(|e| !matches!(e, Event::Transfer(_))).collect()
+}
+
+/// Prices and holdings at this tick, for the War Room's history.
+async fn record_history(w: &World, db: &PgPool) -> Result<(), sqlx::Error> {
+    let prices: serde_json::Map<String, Value> = cz_economy::Resource::ALL.iter().map(|&r| { let p = w.price(r); (r.name().to_string(), json!({ "ask": p.ask, "bid": p.bid, "stock": w.merchant_stock(r) })) }).collect();
+    let holdings: serde_json::Map<String, Value> = w.actors.values().map(|a| (a.id.clone(), json!({
+        "credits": w.balance(&a.account, cz_economy::Asset::Credits),
+        "ammo": w.balance(&a.account, cz_economy::Asset::Res(cz_economy::Resource::Ammo)),
+        "med": w.balance(&a.account, cz_economy::Asset::Res(cz_economy::Resource::Med)),
+        "fuel": w.balance(&a.account, cz_economy::Asset::Res(cz_economy::Resource::Fuel)),
+        "defense": a.defense,
+    }))).collect();
+    sqlx::query("INSERT INTO market_history (tick, prices, holdings) VALUES ($1, $2, $3) ON CONFLICT (tick) DO NOTHING")
+        .bind(w.tick as i64).bind(Value::Object(prices)).bind(Value::Object(holdings)).execute(db).await?;
+    Ok(())
 }

@@ -172,7 +172,7 @@ export default function Exchange() {
   const q = ticket?.quote
 
   return (
-    <Shell title="Exchange" back={{ href: '/', label: 'Main Menu' }}>
+    <Shell title="Exchange" back={{ href: '/', label: 'Hub' }}>
       {ex.isError && <p className="mb-4 text-rose-400">The economy server is not reachable.</p>}
 
       {!session && (

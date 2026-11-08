@@ -3,6 +3,7 @@ use actix_web::{web, HttpResponse};
 pub mod auth;
 pub mod exchange;
 pub mod missions;
+pub mod profile;
 pub mod settlement;
 pub mod world;
 
@@ -38,6 +39,8 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         .route("/settlements/{op_id}", web::get().to(settlement::get))
         .route("/reconciliation", web::get().to(settlement::reconciliation))
         .route("/admin/advance", web::post().to(settlement::admin_advance))
+        .route("/me/profile", web::get().to(profile::get))
+        .route("/me/profile", web::post().to(profile::set))
         .route("/auth/config", web::get().to(auth::config))
         .route("/auth/challenge", web::post().to(auth::challenge))
         .route("/auth/wallet", web::post().to(auth::wallet))

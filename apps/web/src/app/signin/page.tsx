@@ -49,7 +49,7 @@ export default function SignIn() {
   const btn = 'flex w-full items-center justify-center gap-3 rounded-md px-4 py-3 text-sm font-semibold disabled:opacity-40'
 
   return (
-    <Shell title="Sign in" back={{ href: '/', label: 'Main Menu' }}>
+    <Shell title="Sign in" back={{ href: '/', label: 'Hub' }}>
       <div className="mx-auto max-w-md space-y-4">
         <Panel>
           <p className="mb-4 text-sm text-slate-400">Your account keeps what you extract and what you trade. No seed phrase, no extensions.</p>

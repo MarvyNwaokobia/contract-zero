@@ -1,6 +1,7 @@
 'use client'
 
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { api } from '@/lib/api'
 import { auth, type Session } from '@/lib/auth'
 
 /** The signed-in player (null when signed out). */
@@ -25,4 +26,19 @@ export function displayName(s: Session, label?: string | null): string {
   if (s.provider === 'apple') return 'Apple account'
   if (s.provider === 'email') return 'Email account'
   return s.account
+}
+
+/** The signed-in operator's profile (callsign), once they have one. */
+export function useProfile() {
+  const { session } = useSession()
+  const q = useQuery({ queryKey: ['profile', session?.account], queryFn: api.profile, enabled: !!session, staleTime: 60_000 })
+  return { profile: q.data ?? null, loading: !!session && q.isLoading, refetch: q.refetch }
+}
+
+/** The operator's credits and supplies (on-chain holdings when settlement is on). */
+export function useStash() {
+  const { session } = useSession()
+  const q = useQuery({ queryKey: ['exchange', session?.account], queryFn: () => api.exchange(session!.account), enabled: !!session, refetchInterval: 15_000 })
+  const x = q.data
+  return x ? (x.settlement === 'near' ? x.chain_holdings : x.engine_holdings) : null
 }

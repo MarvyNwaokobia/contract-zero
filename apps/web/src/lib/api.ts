@@ -195,6 +195,8 @@ export const api = {
   settlement: (opId: string) => req<SettlementView>(`/settlements/${encodeURIComponent(opId)}`),
   completeMission: (session: string, outcome: 'extracted' | 'killed', kills: number) =>
     req<{ replayed: boolean; result: MissionResult }>(`/missions/${session}/complete`, { method: 'POST', body: JSON.stringify({ outcome, kills }) }),
+  profile: () => req<{ account: string; method: string; provider: string | null; callsign: string | null; enlisted_at: string | null }>('/me/profile'),
+  setProfile: (callsign: string) => req<{ callsign: string }>('/me/profile', { method: 'POST', body: JSON.stringify({ callsign }) }),
   exchange: (player?: string | null) => req<ExchangeView>(`/exchange${player ? `?player=${encodeURIComponent(player)}` : ''}`),
   quote: (resource: ResourceName, side: 'buy' | 'sell', qty: number) =>
     req<QuoteCreated>('/exchange/quotes', { method: 'POST', body: JSON.stringify({ resource, side, qty }) }),

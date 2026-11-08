@@ -29,11 +29,11 @@ export type PbrMaps = {
   roughnessMap: THREE.Texture;
 };
 
-export function usePbr(base: string, repeat: [number, number]): PbrMaps {
+export function usePbr(base: string, repeat: [number, number], dir: string = T): PbrMaps {
   const maps = useTexture({
-    map: `${T}/${base}_diff_1k.jpg`,
-    normalMap: `${T}/${base}_nor_gl_1k.jpg`,
-    roughnessMap: `${T}/${base}_rough_1k.jpg`,
+    map: `${dir}/${base}_diff_1k.jpg`,
+    normalMap: `${dir}/${base}_nor_gl_1k.jpg`,
+    roughnessMap: `${dir}/${base}_rough_1k.jpg`,
   }) as unknown as PbrMaps;
 
   /**

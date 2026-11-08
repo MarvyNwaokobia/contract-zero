@@ -28,7 +28,7 @@ export default function ContractBoard() {
   const board = world.data?.board ?? []
 
   return (
-    <Shell title="Contract Board" back={{ href: '/', label: 'Main Menu' }}>
+    <Shell title="Contract Board" back={{ href: '/', label: 'Hub' }}>
       {world.isError && <p className="text-rose-400">The economy server is not reachable.</p>}
       {world.data && board.length === 0 && (
         <Panel><p className="text-slate-400">No depot is worth raiding right now. Vanguard may be out of fuel to stage one, or its stores are too thin.</p></Panel>

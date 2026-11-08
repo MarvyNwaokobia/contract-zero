@@ -13,7 +13,7 @@
 // app keeps one near-api-js version.
 import type { Auth0Client } from '@auth0/auth0-spa-js'
 import {
-  Account, JsonRpcProvider, KeyPair, KeyPairSigner, PublicKey, Signature, SignedDelegate, SignedTransaction,
+  Account, JsonRpcProvider, KeyPair, KeyPairSigner, PublicKey, Signature, SignedTransaction,
   actions, buildDelegateAction, createTransaction, encodeDelegateAction, encodeSignedDelegate, encodeTransaction, baseDecode,
 } from 'near-api-js'
 import { API } from '@/lib/api'
@@ -136,7 +136,8 @@ async function socialRelay(session: Session, receiverId: string, action: ReturnT
   const da = buildDelegateAction({ actions: [action], maxBlockHeight: BigInt(block.header.height) + 120n, nonce, publicKey: pk, receiverId, senderId: session.account })
   const bytes = encodeDelegateAction(da)
   const sig = await mpcSign({ delegateAction: Array.from(bytes) }, bytes)
-  const sd = new SignedDelegate({ delegateAction: da, signature: new Signature({ keyType: 0, data: sig }) })
+  // Borsh-encoded by schema; near-api-js 7 doesn't export the SignedDelegate class at runtime.
+  const sd = { delegateAction: da, signature: new Signature({ keyType: 0, data: sig }) } as unknown as Parameters<typeof encodeSignedDelegate>[0]
   return call('/relay/delegate', { method: 'POST', body: JSON.stringify({ signed_delegate: btoa(String.fromCharCode(...encodeSignedDelegate(sd))) }) })
 }
 

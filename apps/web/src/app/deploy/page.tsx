@@ -118,7 +118,7 @@ function Deploy() {
 
   if (!player) {
     return (
-      <Shell title="Deploy" back={{ href: '/', label: 'Main Menu' }}>
+      <Shell title="Deploy" back={{ href: '/', label: 'Hub' }}>
         <Panel><p>{loading ? 'Checking your sign-in…' : <><Link href="/signin" className="text-cyan-400">Sign in</Link> to take contracts.</>}</p></Panel>
       </Shell>
     )
@@ -164,7 +164,7 @@ function Deploy() {
         </div>
         <div className="mt-6 flex gap-3">
           <Link href="/contracts" className="rounded bg-cyan-500 px-5 py-2 text-sm font-semibold text-slate-950">Back to the board</Link>
-          <Link href="/" className="rounded border border-slate-700 px-5 py-2 text-sm">Main Menu</Link>
+          <Link href="/" className="cz-btn cz-btn-ghost px-5 py-2 text-sm">Hub</Link>
         </div>
       </Shell>
     )

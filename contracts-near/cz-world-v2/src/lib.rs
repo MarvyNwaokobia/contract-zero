@@ -21,7 +21,7 @@
 use near_sdk::json_types::U128;
 use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::store::{LookupMap, LookupSet};
-use near_sdk::{env, ext_contract, near, require, AccountId, BorshStorageKey, Gas, NearSchema, PanicOnDefault, Promise, PromiseError};
+use near_sdk::{env, ext_contract, near, require, AccountId, BorshStorageKey, Gas, NearSchema, NearToken, PanicOnDefault, Promise, PromiseError, PublicKey};
 
 pub const MAX_AMOUNT: u128 = 100_000;
 pub const MAX_TTL_SECS: u32 = 3_600;
@@ -62,6 +62,29 @@ enum Key {
     Quotes,
     Used,
     Pending,
+    /// Trading sessions (added in v2.2; created on demand, so no state migration).
+    Sessions,
+}
+
+/// Longest a trading session may last.
+pub const MAX_SESSION_SECS: u32 = 7 * 24 * 3_600;
+/// Storage deposit a player attaches to open a session; refunded when it is revoked.
+pub const SESSION_DEPOSIT: u128 = 1_000_000_000_000_000_000_000; // 0.001 NEAR
+
+/// A scoped, revocable permission for one of the player's keys (a "session key" the
+/// game client holds) to accept quotes without a wallet prompt, within budgets the
+/// player set when they opened it with their own full authority.
+#[near(serializers = [borsh, json])]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Session {
+    /// Credits the key may still spend on offers.
+    pub credit_budget: U128,
+    /// Units the key may still sell into bids.
+    pub unit_budget: U128,
+    pub expires_at_ns: u64,
+    /// A revoked session stays as a tombstone, so the key it names stays powerless
+    /// even before the player deletes the key itself.
+    pub revoked: bool,
 }
 
 #[near(serializers = [borsh, json])]
@@ -114,6 +137,31 @@ pub struct WorldV2 {
     pending: LookupSet<String>,
 }
 
+fn sessions() -> LookupMap<String, Session> {
+    LookupMap::new(Key::Sessions)
+}
+
+fn session_key(account: &AccountId, pk: &PublicKey) -> String {
+    format!("{account}|{}", String::from(pk))
+}
+
+/// If the transaction was signed by one of the account's session keys, enforce that
+/// session's expiry and budgets (and spend them). Any other key is the account's own
+/// authority (a wallet approval) and is not limited here.
+fn charge_session(account: &AccountId, credits: u128, units: u128) {
+    let mut map = sessions();
+    let k = session_key(account, &env::signer_account_pk());
+    let Some(mut s) = map.get(&k).cloned() else { return };
+    require!(!s.revoked, "this session was revoked");
+    require!(env::block_timestamp() <= s.expires_at_ns, "this session has expired");
+    require!(credits <= s.credit_budget.0, "over this session's credit budget");
+    require!(units <= s.unit_budget.0, "over this session's sale budget");
+    s.credit_budget = U128(s.credit_budget.0 - credits);
+    s.unit_budget = U128(s.unit_budget.0 - units);
+    map.insert(k, s);
+    map.flush();
+}
+
 fn require_amount(a: u128) {
     require!(a > 0 && a <= MAX_AMOUNT, "amount out of range");
 }
@@ -154,6 +202,48 @@ impl WorldV2 {
 
     pub fn is_pending(&self, op_id: String) -> bool {
         self.pending.contains(&op_id)
+    }
+
+    pub fn get_session(&self, account_id: AccountId, public_key: PublicKey) -> Option<Session> {
+        sessions().get(&session_key(&account_id, &public_key)).cloned()
+    }
+
+    // ── trading sessions ─────────────────────────────────────────────────────
+
+    /// Open a session for `public_key` (a key the caller has added to their own
+    /// account, scoped to this contract). Must be called with the account's own
+    /// authority, never by the session key itself, and with `SESSION_DEPOSIT`.
+    #[payable]
+    pub fn register_session(&mut self, public_key: PublicKey, credit_budget: U128, unit_budget: U128, ttl_secs: u32) {
+        require!(env::attached_deposit().as_yoctonear() >= SESSION_DEPOSIT, "attach 0.001 NEAR for the session's storage");
+        require!(env::signer_account_pk() != public_key, "a session key cannot open its own session");
+        require!((1..=MAX_SESSION_SECS).contains(&ttl_secs), "session length out of range");
+        let account = env::predecessor_account_id();
+        require!(self.roles.get(&account).is_none(), "sessions are for players");
+        let mut map = sessions();
+        let k = session_key(&account, &public_key);
+        if let Some(old) = map.get(&k) {
+            require!(!old.revoked, "this key was revoked; use a new key");
+        }
+        map.insert(k, Session { credit_budget, unit_budget, expires_at_ns: env::block_timestamp() + ttl_secs as u64 * 1_000_000_000, revoked: false });
+        map.flush();
+    }
+
+    /// End a session. The player may call it with any of their keys, including the
+    /// session key itself, so a game client can sign out without a wallet prompt.
+    /// Refunds the storage deposit.
+    pub fn revoke_session(&mut self, public_key: PublicKey) -> Promise {
+        let account = env::predecessor_account_id();
+        let mut map = sessions();
+        let k = session_key(&account, &public_key);
+        let mut s = map.get(&k).cloned().unwrap_or_else(|| env::panic_str("no such session"));
+        require!(!s.revoked, "already revoked");
+        s.revoked = true;
+        s.credit_budget = U128(0);
+        s.unit_budget = U128(0);
+        map.insert(k, s);
+        map.flush();
+        Promise::new(account).transfer(NearToken::from_yoctonear(SESSION_DEPOSIT))
     }
 
     pub fn config(&self) -> (AccountId, AccountId, AccountId) {
@@ -228,6 +318,7 @@ impl WorldV2 {
         let id = format!("offer:{offer_id}");
         let q = self.take_for_settlement(&id, QuoteKind::Offer);
         require!(q.total_credits.0 <= max_total.0, "price is above the buyer's limit");
+        charge_session(&q.counterparty, q.total_credits.0, 0);
         let legs = vec![
             Leg { from: q.merchant.clone(), to: q.counterparty.clone(), token_id: q.token_id.clone(), amount: q.amount },
             Leg { from: q.counterparty.clone(), to: q.merchant.clone(), token_id: "credits".into(), amount: q.total_credits },
@@ -240,6 +331,7 @@ impl WorldV2 {
         let id = format!("bid:{bid_id}");
         let q = self.take_for_settlement(&id, QuoteKind::Bid);
         require!(q.total_credits.0 >= min_total.0, "price is below the seller's limit");
+        charge_session(&q.counterparty, 0, q.amount.0);
         let legs = vec![
             Leg { from: q.counterparty.clone(), to: q.merchant.clone(), token_id: q.token_id.clone(), amount: q.amount },
             Leg { from: q.merchant.clone(), to: q.counterparty.clone(), token_id: "credits".into(), amount: q.total_credits },

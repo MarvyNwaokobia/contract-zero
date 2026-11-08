@@ -264,3 +264,131 @@ fn the_server_cannot_register_actors() {
     as_(SERVER);
     w.register_actor(acc(PLAYER), Role::Merchant);
 }
+
+// ── trading sessions ─────────────────────────────────────────────────────────
+
+const WALLET_PK: &str = "ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp";
+const SESSION_PK: &str = "ed25519:DcA2MzgpJbrUATQLLceocVckhhAqrkingax4oJ9kZ847";
+
+fn pk(s: &str) -> PublicKey {
+    s.parse().unwrap()
+}
+
+/// Act as `who`, signing with `key`, optionally attaching a deposit, at time `t_s` (s).
+fn signed(who: &str, key: &str, deposit: u128, t_s: u64) {
+    let mut b = VMContextBuilder::new();
+    b.predecessor_account_id(acc(who))
+        .signer_account_id(acc(who))
+        .signer_account_pk(pk(key))
+        .attached_deposit(NearToken::from_yoctonear(deposit))
+        .current_account_id(acc(WORLD))
+        .block_timestamp(t_s * 1_000_000_000)
+        .prepaid_gas(Gas::from_tgas(300));
+    testing_env!(b.build());
+}
+
+fn open_session(w: &mut WorldV2, credits: u128, units: u128, ttl: u32) {
+    signed(PLAYER, WALLET_PK, SESSION_DEPOSIT, 1_000);
+    w.register_session(pk(SESSION_PK), U128(credits), U128(units), ttl);
+}
+
+#[test]
+fn a_session_key_trades_within_its_budget_and_spends_it() {
+    let mut w = setup();
+    open_session(&mut w, 600, 50, 3_600);
+    offer(&mut w, "o1", PLAYER, 10, 250);
+    signed(PLAYER, SESSION_PK, 0, 1_000);
+    let _ = w.accept_offer("o1".into(), U128(250));
+    bid(&mut w, "b1", PLAYER, 20, 300);
+    signed(PLAYER, SESSION_PK, 0, 1_000);
+    let _ = w.accept_bid("b1".into(), U128(300));
+    let s = w.get_session(acc(PLAYER), pk(SESSION_PK)).unwrap();
+    assert_eq!((s.credit_budget, s.unit_budget), (U128(350), U128(30)));
+}
+
+#[test]
+#[should_panic(expected = "over this session's credit budget")]
+fn a_session_key_cannot_overspend() {
+    let mut w = setup();
+    open_session(&mut w, 200, 0, 3_600);
+    offer(&mut w, "o1", PLAYER, 10, 250);
+    signed(PLAYER, SESSION_PK, 0, 1_000);
+    let _ = w.accept_offer("o1".into(), U128(250));
+}
+
+#[test]
+#[should_panic(expected = "over this session's sale budget")]
+fn a_session_key_cannot_oversell() {
+    let mut w = setup();
+    open_session(&mut w, 0, 5, 3_600);
+    bid(&mut w, "b1", PLAYER, 20, 300);
+    signed(PLAYER, SESSION_PK, 0, 1_000);
+    let _ = w.accept_bid("b1".into(), U128(300));
+}
+
+#[test]
+#[should_panic(expected = "this session has expired")]
+fn an_expired_session_is_powerless() {
+    let mut w = setup();
+    open_session(&mut w, 1_000, 0, 60);
+    offer(&mut w, "o1", PLAYER, 1, 18);
+    signed(PLAYER, SESSION_PK, 0, 1_000 + 61);
+    let _ = w.accept_offer("o1".into(), U128(18));
+}
+
+#[test]
+#[should_panic(expected = "this session was revoked")]
+fn a_revoked_session_key_is_powerless_even_before_the_key_is_deleted() {
+    let mut w = setup();
+    open_session(&mut w, 1_000, 0, 3_600);
+    // The session key may sign itself out.
+    signed(PLAYER, SESSION_PK, 0, 1_000);
+    let _ = w.revoke_session(pk(SESSION_PK));
+    offer(&mut w, "o1", PLAYER, 1, 18);
+    signed(PLAYER, SESSION_PK, 0, 1_000);
+    let _ = w.accept_offer("o1".into(), U128(18));
+}
+
+#[test]
+fn the_wallet_key_is_not_limited_by_a_session() {
+    let mut w = setup();
+    open_session(&mut w, 0, 0, 3_600);
+    offer(&mut w, "o1", PLAYER, 10, 250);
+    signed(PLAYER, WALLET_PK, 0, 1_000);
+    let _ = w.accept_offer("o1".into(), U128(250));
+    assert!(w.is_pending("offer:o1".into()));
+}
+
+#[test]
+#[should_panic(expected = "a session key cannot open its own session")]
+fn a_session_key_cannot_widen_itself() {
+    let mut w = setup();
+    signed(PLAYER, SESSION_PK, SESSION_DEPOSIT, 1_000);
+    w.register_session(pk(SESSION_PK), U128(1_000_000), U128(1_000_000), 60);
+}
+
+#[test]
+#[should_panic(expected = "attach 0.001 NEAR")]
+fn a_session_needs_its_storage_deposit() {
+    let mut w = setup();
+    signed(PLAYER, WALLET_PK, 0, 1_000);
+    w.register_session(pk(SESSION_PK), U128(1), U128(1), 60);
+}
+
+#[test]
+#[should_panic(expected = "this key was revoked; use a new key")]
+fn a_revoked_key_cannot_be_reopened() {
+    let mut w = setup();
+    open_session(&mut w, 1_000, 0, 3_600);
+    signed(PLAYER, WALLET_PK, 0, 1_000);
+    let _ = w.revoke_session(pk(SESSION_PK));
+    open_session(&mut w, 1_000, 0, 3_600);
+}
+
+#[test]
+#[should_panic(expected = "session length out of range")]
+fn sessions_are_bounded_in_time() {
+    let mut w = setup();
+    signed(PLAYER, WALLET_PK, SESSION_DEPOSIT, 1_000);
+    w.register_session(pk(SESSION_PK), U128(1), U128(1), MAX_SESSION_SECS + 1);
+}

@@ -5,3 +5,4 @@ pub mod world;
 pub mod near;
 pub mod settlement;
 pub mod exchange;
+pub mod auth;

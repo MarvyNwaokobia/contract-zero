@@ -1,15 +1,14 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Panel, Shell, Stat } from '@/components/ui/Shell'
-import { api, loadPlayer, savePlayer, validAccountId } from '@/lib/api'
+import { accountLabel, api } from '@/lib/api'
+import { displayName, useSession } from '@/lib/useSession'
 
 export default function MainMenu() {
-  const [player, setPlayer] = useState<string | null>(null)
-  const [draft, setDraft] = useState('')
-  useEffect(() => { setPlayer(loadPlayer()) }, [])
+  const { session, loading, signOut } = useSession()
+  const player = session?.account ?? null
   const world = useQuery({ queryKey: ['world'], queryFn: api.world, refetchInterval: 10_000 })
   const vanguard = world.data?.actors.find((a) => a.kind === 'faction')
 
@@ -17,27 +16,21 @@ export default function MainMenu() {
     <Shell title="Main Menu">
       <div className="grid gap-4 md:grid-cols-2">
         <Panel title="OPERATOR">
-          {player ? (
+          {session ? (
             <div className="flex items-center justify-between gap-3">
               <div>
-                <div className="text-lg font-semibold text-slate-100">{player}</div>
-                <div className="text-xs text-slate-500">NEAR testnet account</div>
+                <div className="text-lg font-semibold text-slate-100">{displayName(session)}</div>
+                <div className="text-xs text-slate-500">
+                  {session.method === 'wallet' ? `Wallet ${accountLabel(session.account)}` : `Account ${accountLabel(session.account)}`}
+                </div>
               </div>
-              <button className="text-sm text-slate-400 hover:text-slate-200" onClick={() => { setPlayer(null); setDraft('') }}>change</button>
+              <button className="text-sm text-slate-400 hover:text-slate-200" onClick={() => signOut()}>sign out</button>
             </div>
           ) : (
-            <form
-              className="flex gap-2"
-              onSubmit={(e) => { e.preventDefault(); if (validAccountId(draft)) { savePlayer(draft); setPlayer(draft) } }}
-            >
-              <input
-                value={draft}
-                onChange={(e) => setDraft(e.target.value.trim().toLowerCase())}
-                placeholder="yourname.testnet"
-                className="flex-1 rounded border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-cyan-500"
-              />
-              <button disabled={!validAccountId(draft)} className="rounded bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-40">Set</button>
-            </form>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm text-slate-400">{loading ? 'Checking your sign-in…' : 'Sign in to take contracts and trade.'}</p>
+              <Link href="/signin" className="rounded bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400">Sign in</Link>
+            </div>
           )}
         </Panel>
 

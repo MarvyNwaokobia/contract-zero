@@ -1,8 +1,9 @@
 //! The Exchange API. See `services::exchange` for the trade lifecycle.
 //!
-//! Identity: the player is the NEAR account id in the request. Reserving a quote only
-//! holds merchant stock for a few minutes (one open quote per player, rate-limited);
-//! nothing moves until the account's own key signs the acceptance on chain.
+//! Identity: the player is the signed-in session's account (never a body field).
+//! Reserving a quote only holds merchant stock for a few minutes (one open quote per
+//! player, rate-limited); nothing moves until the account's own key signs the
+//! acceptance on chain.
 
 use actix_web::{web, HttpRequest, HttpResponse};
 use cz_economy::{Resource, Side};
@@ -42,6 +43,7 @@ pub async fn overview(state: web::Data<AppState>, q: web::Query<OverviewQuery>) 
 
 #[derive(Deserialize)]
 pub struct QuoteRequest {
+    #[serde(default)]
     pub player: String,
     pub resource: Resource,
     /// The player's side: `buy` from the merchant or `sell` to it.
@@ -57,10 +59,15 @@ pub async fn create(state: web::Data<AppState>, req: HttpRequest, body: web::Jso
     if !state.mission_limiter.check(&ip) {
         return HttpResponse::TooManyRequests().json(json!({ "error": "too many requests, slow down" }));
     }
-    let b = body.into_inner();
-    if !valid_account_id(&b.player) {
-        return HttpResponse::BadRequest().json(json!({ "error": "invalid NEAR account id" }));
+    let who = match crate::handlers::auth::player(&state, &req).await {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
+    if let Err(r) = crate::handlers::auth::same_player(&who, &body.player) {
+        return r;
     }
+    let mut b = body.into_inner();
+    b.player = who.account;
     if !(1..=10_000).contains(&b.qty) {
         return HttpResponse::BadRequest().json(json!({ "error": "qty must be 1..=10000" }));
     }
@@ -78,11 +85,30 @@ pub struct ConfirmRequest {
     pub tx_hash: Option<String>,
 }
 
-pub async fn confirm(state: web::Data<AppState>, path: web::Path<u64>, body: Option<web::Json<ConfirmRequest>>) -> HttpResponse {
-    let tx = body.and_then(|b| b.into_inner().tx_hash);
-    reply(exchange::resolve(&state, path.into_inner(), tx).await)
+/// The quote must belong to the signed-in player.
+async fn own_quote(state: &AppState, req: &HttpRequest, id: u64) -> Result<(), HttpResponse> {
+    let who = crate::handlers::auth::player(state, req).await?;
+    let owner = state.world.read(|w| w.quotes.get(&id).map(|q| q.player.clone())).await;
+    match owner {
+        None => Err(HttpResponse::NotFound().json(json!({ "error": format!("no quote {id}") }))),
+        Some(p) if p != who.account => Err(HttpResponse::Forbidden().json(json!({ "error": "that quote belongs to another player" }))),
+        Some(_) => Ok(()),
+    }
 }
 
-pub async fn accept(state: web::Data<AppState>, path: web::Path<u64>) -> HttpResponse {
-    reply(exchange::accept_offchain(&state, path.into_inner()).await)
+pub async fn confirm(state: web::Data<AppState>, req: HttpRequest, path: web::Path<u64>, body: Option<web::Json<ConfirmRequest>>) -> HttpResponse {
+    let id = path.into_inner();
+    if let Err(r) = own_quote(&state, &req, id).await {
+        return r;
+    }
+    let tx = body.and_then(|b| b.into_inner().tx_hash);
+    reply(exchange::resolve(&state, id, tx).await)
+}
+
+pub async fn accept(state: web::Data<AppState>, req: HttpRequest, path: web::Path<u64>) -> HttpResponse {
+    let id = path.into_inner();
+    if let Err(r) = own_quote(&state, &req, id).await {
+        return r;
+    }
+    reply(exchange::accept_offchain(&state, id).await)
 }

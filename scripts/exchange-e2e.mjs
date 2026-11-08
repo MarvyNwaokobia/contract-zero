@@ -13,6 +13,7 @@
 //   LAPSE=1          also wait out a quote's TTL and check it is released (~6 min)
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { loadKey, signIn } from './lib/cz-auth.mjs';
 import { Account, JsonRpcProvider } from 'near-api-js';
 
 const API = process.argv[2] ?? 'http://127.0.0.1:8080';
@@ -26,8 +27,12 @@ const player = new Account(PLAYER, new JsonRpcProvider({ url: RPC }), KEY.privat
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const get = async (p) => (await fetch(API + p)).json();
+// The player signs in with their own full key (NEP-413), like a wallet sign-in.
+const me = loadKey(process.env.PLAYER_FULL_KEY_FILE ?? `${homedir()}/.contract-zero/keys/players-full/${PLAYER}.json`);
+const login = await signIn(API, PLAYER, me.keyPair);
+if (login.status !== 200) throw new Error('sign-in failed: ' + JSON.stringify(login.body));
 const post = async (p, body) => {
-  const r = await fetch(API + p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) });
+  const r = await fetch(API + p, { method: 'POST', headers: { 'content-type': 'application/json', cookie: login.cookie }, body: JSON.stringify(body ?? {}) });
   return { status: r.status, body: await r.json() };
 };
 const R = { steps: [] };

@@ -27,7 +27,8 @@ Built for the NEAR Hackathon (November 2026), track **Games With Real Economies*
 | Exchange: firm merchant quotes, **signed by the player's own wallet**, settled on NEAR; market signals from faction shortages | **Working on testnet** ([NEAR.md](docs/contract-zero/NEAR.md#exchange-run-the-player-sells-buys-and-lets-a-quote-lapse-2026-11-08)) |
 | Armory (owned equipment tokens), War Room | In progress |
 | NEAR testnet settlement: `cz-assets` (NEP-245 ledger) + `cz-world` v2 (game controller), queue, FINAL verification, reconciliation | **Working on testnet.** The full acceptance sequence passed on chain ([docs/contract-zero/NEAR.md](docs/contract-zero/NEAR.md)) |
-| Wallet sign-in (NEAR Connect: HOT, Meteor, Intear, MyNearWallet, …) | **Working.** Social login via NEAR Auth (the new FastAuth) is evaluated in DESIGN.md §10 and planned as a second sign-in |
+| Sign-in: Google (default), email or passkey via NEAR Auth; existing NEAR wallets via NEAR Connect + NEP-413. Sessions bound to the proven on-chain account | **Wallet path verified on testnet.** Social login is built and reaches NEAR's hosted login; a complete Google sign-in hasn't been run yet ([AUTH.md](docs/contract-zero/AUTH.md)) |
+| Quick trade: a browser-held session key with budgets and an expiry enforced by the game contract | **Working on testnet** ([AUTH.md](docs/contract-zero/AUTH.md#3-quick-trade-scoped-revocable-sessions-enforced-on-chain)) |
 | LLM strategic planner (NEAR AI Cloud) with validated tool calls | In progress |
 
 ## Architecture
@@ -57,6 +58,10 @@ Combat AI is deterministic and runs in the client sim; no LLM is involved in a g
 | `POST /missions/start` | `{player, target, resource}`: locks the raid plan and issues a session |
 | `POST /missions/{session}/complete` | `{player, outcome, kills}`: validated against server time, then settled or failed. Idempotent |
 | `GET /players/{account}` | a player's holdings and raids |
+| `POST /auth/challenge`, `POST /auth/wallet` | NEP-413 wallet sign-in: a single-use nonce, then the signed message. Sets the session cookie |
+| `POST /auth/near-auth` | `{id_token}`: NEAR Auth (Google, email, passkey) sign-in. Derives and, the first time, sponsors the player's account |
+| `GET /auth/session`, `POST /auth/logout` | the current session, and sign-out |
+| `POST /relay/delegate` | relays one of the signed-in player's own signed delegate actions (quick-trade setup and sign-out only); the relayer pays the gas |
 | `GET /exchange?player=` | merchant prices with their factors, faction shortages, the player's holdings (on chain when settlement is on), open quote and trades |
 | `POST /exchange/quotes` | `{player, resource, side, qty, limit_total?}`: a firm 5-minute quote. Vex posts it on chain, and the response carries the exact call for the player's wallet to sign |
 | `POST /exchange/quotes/{id}/confirm` | `{tx_hash?}`: settles the quote once `cz-assets` shows value moved. `GET /exchange/quotes/{id}` shows its state |

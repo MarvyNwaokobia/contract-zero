@@ -4,13 +4,14 @@ import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { Rajdhani } from 'next/font/google'
 import { useSearchParams } from 'next/navigation'
-import { Suspense, useEffect, useMemo, useState } from 'react'
+import { Suspense, useMemo, useState } from 'react'
 import { Panel, Shell, Stat } from '@/components/ui/Shell'
 import { buildConvoyMission } from '@/engine/fps/convoy'
 import { GUN_CATALOG, gunDps, type GunId } from '@/engine/combat/GunStats'
 import type { ContractRunStats } from '@/engine/scene/ContractZeroScene'
 import { useQuery } from '@tanstack/react-query'
-import { api, loadPlayer, RESOURCE_LABEL, type BoardEntry, type MissionResult, type MissionStart, type ResourceName, type WorldView } from '@/lib/api'
+import { useSession } from '@/lib/useSession'
+import { api, RESOURCE_LABEL, type BoardEntry, type MissionResult, type MissionStart, type ResourceName, type WorldView } from '@/lib/api'
 import { retryImport } from '@/lib/retryImport'
 
 const tactical = Rajdhani({ subsets: ['latin'], weight: ['500', '600', '700'], variable: '--font-tactical', display: 'swap' })
@@ -68,17 +69,17 @@ function Deploy() {
   const params = useSearchParams()
   const target = params.get('target') ?? 'vanguard'
   const resource = (params.get('resource') ?? 'ammo') as ResourceName
-  const [player, setPlayer] = useState<string | null>(null)
+  const { session, loading } = useSession()
+  const player = session?.account ?? null
   const [gun, setGun] = useState<GunId>('assault_rifle')
   const [phase, setPhase] = useState<Phase>({ kind: 'loadout' })
-  useEffect(() => { setPlayer(loadPlayer()) }, [])
 
   const deploy = async () => {
     if (!player) return
     setPhase({ kind: 'starting' })
     try {
       const before = await api.world()
-      const start = await api.startMission(player, target, resource)
+      const start = await api.startMission(target, resource)
       setPhase({ kind: 'fighting', start, before })
     } catch (e) {
       setPhase({ kind: 'error', message: (e as Error).message })
@@ -89,7 +90,7 @@ function Deploy() {
     if (!player) return
     setPhase({ kind: 'reporting' })
     try {
-      const { result } = await api.completeMission(start.session, player, outcome, stats.kills)
+      const { result } = await api.completeMission(start.session, outcome, stats.kills)
       // Give the world clock a moment so the agents' response is visible.
       const after = await api.world()
       setPhase({ kind: 'results', result, before, after })
@@ -118,7 +119,7 @@ function Deploy() {
   if (!player) {
     return (
       <Shell title="Deploy" back={{ href: '/', label: 'Main Menu' }}>
-        <Panel><p>Set your operator account on the <Link href="/" className="text-cyan-400">Main Menu</Link> first.</p></Panel>
+        <Panel><p>{loading ? 'Checking your sign-in…' : <><Link href="/signin" className="text-cyan-400">Sign in</Link> to take contracts.</>}</p></Panel>
       </Shell>
     )
   }

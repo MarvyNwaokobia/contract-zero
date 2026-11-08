@@ -27,6 +27,11 @@ sentry = { version = "0.34", default-features = false, features = ["backtrace", 
 sentry-actix = "0.34"
 sentry-tracing = "0.34"
 near-api = "0.8"
+ed25519-dalek = "2"
+sha2 = "0.10"
+borsh = { version = "1", features = ["derive"] }
+bs58 = "0.5"
+base64 = "0.22"
 
 [dev-dependencies]
 actix-web = { version = "4", features = ["macros"] }

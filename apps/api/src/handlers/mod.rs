@@ -1,5 +1,6 @@
 use actix_web::{web, HttpResponse};
 
+pub mod auth;
 pub mod exchange;
 pub mod missions;
 pub mod settlement;
@@ -37,6 +38,15 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         .route("/settlements/{op_id}", web::get().to(settlement::get))
         .route("/reconciliation", web::get().to(settlement::reconciliation))
         .route("/admin/advance", web::post().to(settlement::admin_advance))
+        .route("/auth/config", web::get().to(auth::config))
+        .route("/auth/challenge", web::post().to(auth::challenge))
+        .route("/auth/wallet", web::post().to(auth::wallet))
+        .route("/auth/near-auth", web::post().to(auth::near_auth))
+        .route("/auth/dev", web::post().to(auth::dev))
+        .route("/auth/session", web::get().to(auth::session))
+        .route("/auth/logout", web::post().to(auth::logout))
+        .route("/relay/delegate", web::post().to(auth::relay))
+        .route("/relay/near-auth-sign", web::post().to(auth::near_auth_sign))
         .route("/exchange", web::get().to(exchange::overview))
         .route("/exchange/quotes", web::post().to(exchange::create))
         .route("/exchange/quotes/{id}", web::get().to(exchange::get))

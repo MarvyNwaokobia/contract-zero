@@ -1,10 +1,10 @@
-// NEAR wallet sign-in through NEAR Connect (@hot-labs/near-connect): HOT, Meteor,
-// Intear, MyNearWallet, Nightly and others, on testnet. The player's wallet signs
-// their own trades; the game never sees a player key.
+// The "existing NEAR users" path: NEAR Connect (@hot-labs/near-connect) — HOT,
+// Meteor, Intear, MyNearWallet, Nightly, Ledger and others, on testnet. Connecting a
+// wallet proves nothing by itself; sign-in is a NEP-413 signed message the server
+// verifies (lib/auth.ts). The game never sees a wallet key.
 //
 // Browser-only: the connector is created lazily on first use.
 import type { NearConnector } from '@hot-labs/near-connect'
-import { savePlayer } from '@/lib/api'
 
 export const NETWORK = (process.env.NEXT_PUBLIC_NEAR_NETWORK ?? 'testnet') as 'testnet' | 'mainnet'
 
@@ -20,9 +20,7 @@ function get(): Promise<NearConnector> {
     connector = import('@hot-labs/near-connect').then(({ NearConnector }) => {
       const c = new NearConnector({ network: NETWORK, features: { signAndSendTransaction: true, testnet: NETWORK === 'testnet' } })
       c.on('wallet:signIn', (e) => {
-        const id = e.accounts[0]?.accountId ?? null
-        if (id) savePlayer(id)
-        emit(id)
+        emit(e.accounts[0]?.accountId ?? null)
       })
       c.on('wallet:signOut', () => emit(null))
       return c
@@ -41,9 +39,7 @@ export function onAccount(cb: (account: string | null) => void): () => void {
 export async function restore(): Promise<string | null> {
   try {
     const { accounts } = await (await get()).getConnectedWallet()
-    const id = accounts[0]?.accountId ?? null
-    if (id) savePlayer(id)
-    return id
+    return accounts[0]?.accountId ?? null
   } catch {
     return null
   }
@@ -84,4 +80,16 @@ export async function signCall(call: ChainCall): Promise<{ hash: string; result:
   const hash = o.transaction?.hash ?? o.transaction_outcome?.id ?? ''
   const sv = o.status?.SuccessValue
   return { hash, result: sv === undefined ? null : atob(sv) }
+}
+
+/** NEP-413: the wallet signs a sign-in message for the server. */
+export async function signMessage(p: { message: string; recipient: string; nonce: Uint8Array }): Promise<{ accountId: string; publicKey: string; signature: string }> {
+  const wallet = await (await get()).wallet()
+  return wallet.signMessage({ ...p, network: NETWORK })
+}
+
+/** Several transactions under one wallet approval where the wallet supports it. */
+export async function signTransactions(txs: { receiverId: string; actions: unknown[] }[]): Promise<void> {
+  const wallet = await (await get()).wallet()
+  await wallet.signAndSendTransactions({ network: NETWORK, transactions: txs as Parameters<typeof wallet.signAndSendTransactions>[0]['transactions'] })
 }

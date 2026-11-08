@@ -1,7 +1,22 @@
 // Typed client for the CONTRACT ZERO API (apps/api).
 import type { ConvoyContract } from '@/engine/fps/convoy';
 
-export const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080';
+/** The API base URL. Sessions are a SameSite cookie, so in local development the API
+ *  must be on the same site as the page: `localhost` and `127.0.0.1` are different
+ *  sites to a browser, so a loopback API URL follows the page's own loopback form. */
+function apiBase(): string {
+  const configured = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080';
+  if (typeof window === 'undefined') return configured;
+  try {
+    const u = new URL(configured);
+    const loopback = (h: string) => h === 'localhost' || h === '127.0.0.1';
+    if (loopback(u.hostname) && loopback(window.location.hostname)) u.hostname = window.location.hostname;
+    return u.toString().replace(/\/$/, '');
+  } catch {
+    return configured;
+  }
+}
+export const API = apiBase();
 
 export type ResourceName = 'ammo' | 'med' | 'fuel';
 
@@ -163,7 +178,7 @@ export interface QuoteState {
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(`${API}${path}`, { ...init, headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) } });
+  const r = await fetch(`${API}${path}`, { credentials: 'include', ...init, headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) } });
   const body = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error((body as { error?: string }).error ?? `HTTP ${r.status}`);
   return body as T;
@@ -174,22 +189,21 @@ export const api = {
   board: () => req<{ board: BoardEntry[] }>('/board').then((b) => b.board),
   player: (id: string) => req<{ player: string; holdings: Holdings; active_raid: number | null }>(`/players/${encodeURIComponent(id)}`),
   decisions: (limit = 30) => req<{ events: AgentEvent[] }>(`/events?kind=agent_decision&limit=${limit}`).then((e) => e.events),
-  startMission: (player: string, target: string, resource: ResourceName) =>
-    req<MissionStart>('/missions/start', { method: 'POST', body: JSON.stringify({ player, target, resource }) }),
+  // The player is the signed-in session; the server never takes it from the body.
+  startMission: (target: string, resource: ResourceName) =>
+    req<MissionStart>('/missions/start', { method: 'POST', body: JSON.stringify({ target, resource }) }),
   settlement: (opId: string) => req<SettlementView>(`/settlements/${encodeURIComponent(opId)}`),
-  completeMission: (session: string, player: string, outcome: 'extracted' | 'killed', kills: number) =>
-    req<{ replayed: boolean; result: MissionResult }>(`/missions/${session}/complete`, { method: 'POST', body: JSON.stringify({ player, outcome, kills }) }),
+  completeMission: (session: string, outcome: 'extracted' | 'killed', kills: number) =>
+    req<{ replayed: boolean; result: MissionResult }>(`/missions/${session}/complete`, { method: 'POST', body: JSON.stringify({ outcome, kills }) }),
   exchange: (player?: string | null) => req<ExchangeView>(`/exchange${player ? `?player=${encodeURIComponent(player)}` : ''}`),
-  quote: (player: string, resource: ResourceName, side: 'buy' | 'sell', qty: number) =>
-    req<QuoteCreated>('/exchange/quotes', { method: 'POST', body: JSON.stringify({ player, resource, side, qty }) }),
+  quote: (resource: ResourceName, side: 'buy' | 'sell', qty: number) =>
+    req<QuoteCreated>('/exchange/quotes', { method: 'POST', body: JSON.stringify({ resource, side, qty }) }),
   quoteState: (id: number) => req<QuoteState>(`/exchange/quotes/${id}`),
   confirmQuote: (id: number, txHash?: string) => req<QuoteState>(`/exchange/quotes/${id}/confirm`, { method: 'POST', body: JSON.stringify({ tx_hash: txHash ?? null }) }),
   acceptOffChain: (id: number) => req<QuoteState>(`/exchange/quotes/${id}/accept`, { method: 'POST' }),
 };
 
-// ── the player's identity, until NEAR sign-in replaces it ───────────────────
-
-const PLAYER_KEY = 'cz_player';
+// ── account id format (display/validation only: identity comes from the session) ──
 
 /** Same rules the server applies (apps/api/src/handlers/missions.rs). */
 export function validAccountId(id: string): boolean {
@@ -199,12 +213,9 @@ export function validAccountId(id: string): boolean {
   return true;
 }
 
-export function loadPlayer(): string | null {
-  try { return window.localStorage.getItem(PLAYER_KEY); } catch { return null; }
-}
-
-export function savePlayer(id: string) {
-  try { window.localStorage.setItem(PLAYER_KEY, id); } catch { /* private mode */ }
+/** A short, friendly label for an account: implicit (64-hex) accounts are shortened. */
+export function accountLabel(id: string): string {
+  return /^[0-9a-f]{64}$/.test(id) ? `${id.slice(0, 6)}…${id.slice(-4)}` : id;
 }
 
 export const RESOURCE_LABEL: Record<ResourceName, string> = { ammo: 'Ammunition', med: 'Medical supplies', fuel: 'Fuel' };

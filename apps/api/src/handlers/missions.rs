@@ -6,8 +6,8 @@
 //! takes, and only then settles the raid (cargo to the player) or fails it.
 //! Completing twice returns the stored result: a replay can never settle twice.
 //!
-//! Identity: until NEAR sign-in lands, the player is the NEAR account id in the
-//! request, validated for format only.
+//! Identity: the player is the account of the signed-in session (see
+//! `handlers::auth`). A `player` in the body is optional and must match it.
 
 use actix_web::{web, HttpRequest, HttpResponse};
 use chrono::{DateTime, Utc};
@@ -55,6 +55,7 @@ pub fn validate_extraction(elapsed_secs: f64, min_secs: f64, kills: i64, max_kil
 
 #[derive(Deserialize)]
 pub struct StartRequest {
+    #[serde(default)]
     pub player: String,
     pub target: String,
     pub resource: Resource,
@@ -65,10 +66,15 @@ pub async fn start(state: web::Data<AppState>, req: HttpRequest, body: web::Json
     if !state.mission_limiter.check(&ip) {
         return HttpResponse::TooManyRequests().json(json!({ "error": "too many deployments, slow down" }));
     }
-    if !valid_account_id(&body.player) {
-        return HttpResponse::BadRequest().json(json!({ "error": "invalid NEAR account id" }));
+    let who = match crate::handlers::auth::player(&state, &req).await {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
+    if let Err(r) = crate::handlers::auth::same_player(&who, &body.player) {
+        return r;
     }
-    let body = body.into_inner();
+    let mut body = body.into_inner();
+    body.player = who.account;
     let session = Uuid::new_v4();
     let res = state
         .world
@@ -97,6 +103,7 @@ pub async fn start(state: web::Data<AppState>, req: HttpRequest, body: web::Json
 
 #[derive(Deserialize)]
 pub struct CompleteRequest {
+    #[serde(default)]
     pub player: String,
     pub outcome: Outcome,
     #[serde(default)]
@@ -112,9 +119,17 @@ pub enum Outcome {
 
 type SessionRow = (String, i64, f64, DateTime<Utc>, Option<DateTime<Utc>>, Option<Value>);
 
-pub async fn complete(state: web::Data<AppState>, path: web::Path<Uuid>, body: web::Json<CompleteRequest>) -> HttpResponse {
+pub async fn complete(state: web::Data<AppState>, req: HttpRequest, path: web::Path<Uuid>, body: web::Json<CompleteRequest>) -> HttpResponse {
+    let who = match crate::handlers::auth::player(&state, &req).await {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
+    if let Err(r) = crate::handlers::auth::same_player(&who, &body.player) {
+        return r;
+    }
     let session = path.into_inner();
-    let body = body.into_inner();
+    let mut body = body.into_inner();
+    body.player = who.account;
     let near = state.world.near();
     let res = state
         .world

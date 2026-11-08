@@ -17,6 +17,8 @@ pub struct AppState {
     /// Per-IP limiter for mission start/complete. Built once and shared (Arc) so
     /// every Actix worker draws from the same bucket.
     pub mission_limiter: std::sync::Arc<services::rate_limiter::RateLimiter>,
+    /// Sign-in, sessions and the gas relayer.
+    pub auth: std::sync::Arc<services::auth::AuthService>,
 }
 
 #[tokio::main]
@@ -53,11 +55,20 @@ async fn main() -> anyhow::Result<()> {
         Ok(None) => None,
         Err(e) => anyhow::bail!("NEAR settlement misconfigured: {e}"),
     };
+    let auth = services::auth::AuthService::from_env(near.as_ref().map(|n| n.contract.to_string())).map_err(|e| anyhow::anyhow!("auth misconfigured: {e}"))?;
+    if auth.dev_login && near.is_some() {
+        anyhow::bail!("AUTH_DEV_LOGIN cannot be enabled while settlement is on NEAR");
+    }
+    match &auth.relayer {
+        Some(r) => tracing::info!("auth: gas relayer {}", r.account),
+        None => tracing::info!("auth: no gas relayer (sessions keys and social sign-in sponsorship disabled)"),
+    }
     let world = services::world::WorldService::load(db, near.clone()).await?;
     let app_state = AppState {
         near,
         world,
-        mission_limiter: std::sync::Arc::new(services::rate_limiter::RateLimiter::new(10, 60)),
+        mission_limiter: std::sync::Arc::new(services::rate_limiter::RateLimiter::new(20, 60)),
+        auth: std::sync::Arc::new(auth),
     };
 
     services::scheduler::spawn(app_state.clone());
@@ -86,6 +97,7 @@ async fn main() -> anyhow::Result<()> {
             })
             .allow_any_method()
             .allow_any_header()
+            .supports_credentials()
             .max_age(3600);
 
         App::new()

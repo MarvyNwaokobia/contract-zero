@@ -13,7 +13,8 @@ The first version, a single contract (**CZ World v1**, `world.contract-zero.test
 |---|---|
 | `contract-zero.testnet` | Parent, and owner of `assets` and `world2` |
 | **`assets.contract-zero.testnet`** | **cz-assets**: NEP-245 ledger. Code `5o8uRxxLcHzC7vqYMRRDhr5AHSEcwCLsfbRD6EW2LU3L` |
-| **`world2.contract-zero.testnet`** | **cz-world v2**: the game controller, and the only controller of `assets`. Code `8ne76NEqj8Fn7CKDijNXEcLgjZQ8xf4WzSeonPMZYR6W`. Upgraded in place from `6c4sHyPg…` so accepting a quote also registers a new player's ledger storage; state was unchanged |
+| **`world2.contract-zero.testnet`** | **cz-world v2**: the game controller, and the only controller of `assets`. Code `2mxwU9PEbYbDuvsunxkPGBwcXPL88FPkpkgxVYLxUp5W`. Upgraded in place, with state unchanged each time: `6c4sHyPg…` → `8ne76NEq…` (accepting a quote registers a new player's ledger storage) → `2mxwU9PE…` (quick-trade sessions, [`7dkJtkBg…`](https://testnet.nearblocks.io/txns/7dkJtkBgVvwRmAp8QpgXQAVhuzP8Ejyyr9uJzsTHQwwN)) |
+| `cz-relayer-9abaff.testnet` | Gas relayer for players' signed delegate actions (quick-trade setup and sign-out) and for sponsoring new NEAR Auth accounts. Holds a gas float, no game assets. See [AUTH.md](AUTH.md) |
 | `server.contract-zero.testnet` | The game server: settles raids and applies flows |
 | `vanguard.contract-zero.testnet` | The Vanguard commander (a faction actor) |
 | `vex.contract-zero.testnet` | The Vex merchant (a merchant actor) |
@@ -34,6 +35,7 @@ No key is in the repository.
 | server | `ed25519:9hg6yCxYWuejzhwN23pmootDAe3ZyrDXU5bbo4WqMyAB` | `settle_raid`, `apply_flows` |
 | vanguard | `ed25519:EVB73ozU…` | `accept_offer`, `accept_bid` |
 | vex | `ed25519:7CUkGTCt…` | `post_offer`, `post_bid`, `cancel_quote` |
+| *a player's quick-trade key* | generated in their browser | `accept_offer`, `accept_bid`, `revoke_session`, held to the budgets and expiry the player registered on `world2` ([AUTH.md](AUTH.md)) |
 
 The test player holds a key of the kind a wallet grants: `ed25519:B92fjTuZ…`, limited to `world2`'s `accept_offer` and `accept_bid` ([added](https://testnet.nearblocks.io/txns/4Bsm6P2hcEZeoA1rbYxo21YVCtVcnDtZxRcWa4hRSr3G)). It's stored in `~/.contract-zero/keys/players/`. Real players sign with their own wallet, and the server never holds a player key.
 

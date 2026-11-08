@@ -8,6 +8,8 @@
 //
 // Usage: ADMIN_TOKEN_FILE=… node scripts/acceptance-e2e.mjs [apiUrl]
 import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { loadKey, signIn } from './lib/cz-auth.mjs';
 
 const API = process.argv[2] ?? 'http://127.0.0.1:8089';
 const RPC = 'https://rpc.testnet.near.org';
@@ -18,8 +20,13 @@ const TOKEN = readFileSync(process.env.ADMIN_TOKEN_FILE, 'utf8').trim();
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const get = async (p) => (await fetch(API + p)).json();
+// The player signs in with their own key (NEP-413); missions act for the session's
+// account only. PLAYER_FULL_KEY_FILE stands in for the player's wallet.
+const me = loadKey(process.env.PLAYER_FULL_KEY_FILE ?? `${homedir()}/.contract-zero/keys/players-full/${PLAYER}.json`);
+const login = await signIn(API, PLAYER, me.keyPair);
+if (login.status !== 200) throw new Error('sign-in failed: ' + JSON.stringify(login.body));
 const post = async (p, body, headers = {}) => {
-  const r = await fetch(API + p, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
+  const r = await fetch(API + p, { method: 'POST', headers: { 'content-type': 'application/json', cookie: login.cookie, ...headers }, body: JSON.stringify(body) });
   return { status: r.status, body: await r.json() };
 };
 

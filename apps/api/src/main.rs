@@ -62,6 +62,7 @@ async fn main() -> anyhow::Result<()> {
 
     services::scheduler::spawn(app_state.clone());
     services::settlement::spawn_worker(app_state.clone());
+    services::exchange::spawn_sweeper(app_state.clone());
 
     // FRONTEND_ORIGIN: comma-separated allowed origins. localhost is always allowed.
     let allowed_origins: Vec<String> = std::env::var("FRONTEND_ORIGIN")

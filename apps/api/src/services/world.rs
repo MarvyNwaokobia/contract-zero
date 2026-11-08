@@ -130,13 +130,12 @@ impl WorldService {
                     for (decision, result) in policy::run_fallback_agents(w) {
                         decisions += 1;
                         log_decision(db, w.tick, "fallback", &decision, result.as_ref()).await?;
-                        // An accepted purchase from the merchant settles on NEAR.
+                        // An accepted trade with the merchant (a purchase or a sale)
+                        // settles on NEAR.
                         if let (Some(near), Some(Ok(events))) = (&near, &result) {
                             for e in events {
                                 if let Event::Traded(t) = e {
-                                    if t.side == cz_economy::Side::Buy {
-                                        super::settlement::queue_trade(w, db, near, t).await?;
-                                    }
+                                    super::settlement::queue_trade(w, db, near, t).await?;
                                 }
                             }
                         }

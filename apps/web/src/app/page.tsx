@@ -53,7 +53,7 @@ export default function MainMenu() {
         </Panel>
       </div>
 
-      <nav className="mt-6 grid gap-3 sm:grid-cols-3">
+      <nav className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Link href="/contracts" className={`rounded-md border px-4 py-5 ${player ? 'border-cyan-600 bg-cyan-950/30 hover:bg-cyan-950/60' : 'pointer-events-none border-slate-800 opacity-40'}`}>
           <div className="font-semibold text-slate-100">Contract Board</div>
           <div className="text-sm text-slate-400">Pick a depot to raid</div>
@@ -61,6 +61,10 @@ export default function MainMenu() {
         <Link href="/training" className="rounded-md border border-slate-800 px-4 py-5 hover:bg-slate-900">
           <div className="font-semibold text-slate-100">Training</div>
           <div className="text-sm text-slate-400">Practice ops, offline and unscored</div>
+        </Link>
+        <Link href="/exchange" className="rounded-md border border-slate-800 px-4 py-5 hover:bg-slate-900">
+          <div className="font-semibold text-slate-100">Exchange</div>
+          <div className="text-sm text-slate-400">Buy supplies, sell raid cargo</div>
         </Link>
         <div className="rounded-md border border-slate-800 px-4 py-5 opacity-40">
           <div className="font-semibold text-slate-100">War Room</div>

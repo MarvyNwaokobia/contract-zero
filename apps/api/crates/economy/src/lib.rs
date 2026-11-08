@@ -27,6 +27,11 @@ pub use mission::{GuardPlan, RaidPlan};
 pub use pricing::{PriceBreakdown, Side, Strategy};
 
 pub const WORLD: &str = "world";
+/// The boundary of the modelled economy: NEAR holdings outside this game (other
+/// wallets, other apps). Players own their tokens and may move them anywhere, so a
+/// player's balance is resynced from chain through this account. Like `WORLD` it may
+/// go negative; unlike `WORLD`, what crosses it is a transfer, never issuance.
+pub const OUTSIDE: &str = "outside";
 pub const TICKS_PER_DAY: u64 = 24;
 /// Escort wages per supply shipment, by defense level (index = level). Destroyed.
 pub const DEFENSE_COST: [i64; 6] = [0, 0, 80, 200, 360, 560];
@@ -125,6 +130,12 @@ pub enum Reason {
     Refund { bounty: u64 },
     BountyPaid { bounty: u64, raid: u64 },
     Raid { raid: u64 },
+    /// The merchant's side of a player quote, held so no one else can buy or spend it.
+    QuoteHold { quote: u64 },
+    /// A quote that was not accepted in time: the hold goes back to the merchant.
+    QuoteRelease { quote: u64 },
+    /// Tokens a player moved into or out of the game on NEAR (resynced from chain).
+    External,
 }
 
 impl Reason {
@@ -341,6 +352,47 @@ pub enum Event {
     Traded(TradeRecord),
     DefenseChanged { actor: String, level: u8 },
     StrategyChanged { strategy: Strategy },
+    QuoteReserved(PlayerQuote),
+    QuoteSettled { quote: u64, trade: u64 },
+    QuoteReleased { quote: u64 },
+    HoldingSynced { account: AccountId, asset: Asset, from: i64, to: i64 },
+}
+
+/// A firm price the merchant gave one player. The merchant's side (goods for a
+/// purchase, credits for a sale) is held in escrow until the player accepts or the
+/// quote is released.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlayerQuote {
+    pub id: u64,
+    pub player: String,
+    pub resource: Resource,
+    /// From the player's side: `Buy` = the player buys from the merchant.
+    pub side: Side,
+    pub qty: i64,
+    pub total: i64,
+    pub posted_at: u64,
+    pub status: QuoteStatus,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "status")]
+pub enum QuoteStatus {
+    Open,
+    Settled { trade: u64 },
+    Released,
+}
+
+impl PlayerQuote {
+    pub fn escrow(&self) -> AccountId {
+        format!("quote:{}", self.id)
+    }
+    /// What the merchant holds for this quote.
+    pub fn held(&self) -> (Asset, i64) {
+        match self.side {
+            Side::Buy => (Asset::Res(self.resource), self.qty),
+            Side::Sell => (Asset::Credits, self.total),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
@@ -372,6 +424,10 @@ pub enum EconError {
     RaidNotActive { raid: u64 },
     #[error("raid {raid} was already settled")]
     AlreadySettled { raid: u64 },
+    #[error("player already has an open quote")]
+    QuoteOpen,
+    #[error("quote {quote} is not open")]
+    QuoteNotOpen { quote: u64 },
     #[error("player already has an active raid")]
     RaidInProgress,
     #[error("defense level must be {DEFENSE_MIN}…{DEFENSE_MAX}")]
@@ -392,6 +448,8 @@ pub struct World {
     pub bounties: BTreeMap<u64, Bounty>,
     pub trades: Vec<TradeRecord>,
     pub ledger: Vec<LedgerEntry>,
+    #[serde(default)]
+    pub quotes: BTreeMap<u64, PlayerQuote>,
     next_id: u64,
 }
 
@@ -420,6 +478,7 @@ impl World {
             bounties: BTreeMap::new(),
             trades: Vec::new(),
             ledger: Vec::new(),
+            quotes: BTreeMap::new(),
             next_id: 0,
         }
     }
@@ -525,7 +584,7 @@ impl World {
             *net.entry((t.to.as_str(), t.asset)).or_default() += t.qty;
         }
         for (&(acct, asset), &delta) in &net {
-            if acct == WORLD || delta >= 0 {
+            if acct == WORLD || acct == OUTSIDE || delta >= 0 {
                 continue;
             }
             let have = self.balance(acct, asset);
@@ -839,6 +898,103 @@ impl World {
             return Err(unknown("trade", &trade_id.to_string()));
         }
         self.apply(&legs)
+    }
+
+    // ── player quotes ────────────────────────────────────────────────────────
+
+    pub fn open_quote_of(&self, player: &str) -> Option<&PlayerQuote> {
+        self.quotes.values().find(|q| q.player == player && q.status == QuoteStatus::Open)
+    }
+
+    /// What the merchant has held for open quotes, per asset (still its own on chain).
+    pub fn held_for_quotes(&self, asset: Asset) -> i64 {
+        self.quotes.values().filter(|q| q.status == QuoteStatus::Open).map(|q| self.balance(&q.escrow(), asset)).sum()
+    }
+
+    /// Give `player` a firm merchant price for `qty` of `r`, within the player's limit.
+    /// The player must be able to pay (credits to buy, goods to sell) and may hold one
+    /// open quote at a time. The merchant's side moves into escrow.
+    pub fn reserve_quote(&mut self, player: &str, r: Resource, side: Side, qty: i64, limit_total: i64) -> Result<PlayerQuote, EconError> {
+        if self.open_quote_of(player).is_some() {
+            return Err(EconError::QuoteOpen);
+        }
+        // The player's side is the merchant's opposite: a player purchase is a merchant sale.
+        if side == Side::Sell && self.merchant_insolvent() {
+            return Err(EconError::MerchantInsolvent);
+        }
+        let q = self.quote(r, side, qty)?;
+        let ok = match side { Side::Buy => q.total <= limit_total, Side::Sell => q.total >= limit_total };
+        if !ok {
+            return Err(EconError::PriceMoved { total: q.total, limit: limit_total });
+        }
+        let account = player_account(player);
+        let (need_asset, need) = match side { Side::Buy => (Asset::Credits, q.total), Side::Sell => (Asset::Res(r), qty) };
+        let have = self.balance(&account, need_asset);
+        if have < need {
+            return Err(EconError::Insufficient { account, asset: need_asset, have, need });
+        }
+        let id = self.peek_id();
+        let pq = PlayerQuote { id, player: player.into(), resource: r, side, qty, total: q.total, posted_at: self.tick, status: QuoteStatus::Open };
+        let (asset, held) = pq.held();
+        let merchant = self.merchant().account.clone();
+        self.apply(&[Transfer { from: merchant, to: pq.escrow(), asset, qty: held, reason: Reason::QuoteHold { quote: id } }])?;
+        self.commit_id(id);
+        self.quotes.insert(id, pq.clone());
+        Ok(pq)
+    }
+
+    /// The player accepted: the held side goes to the player and the player's side to
+    /// the merchant, in one batch, recorded as a trade.
+    pub fn settle_quote(&mut self, id: u64) -> Result<Vec<Event>, EconError> {
+        let q = self.quotes.get(&id).cloned().ok_or_else(|| unknown("quote", &id.to_string()))?;
+        if q.status != QuoteStatus::Open {
+            return Err(EconError::QuoteNotOpen { quote: id });
+        }
+        let merchant = self.merchant().account.clone();
+        let player = player_account(&q.player);
+        let (held_asset, held) = q.held();
+        let (pay_asset, pay) = match q.side { Side::Buy => (Asset::Credits, q.total), Side::Sell => (Asset::Res(q.resource), q.qty) };
+        let trade = self.peek_id();
+        let mut ev = self.apply(&[
+            Transfer { from: q.escrow(), to: player.clone(), asset: held_asset, qty: held, reason: Reason::Trade { trade } },
+            Transfer { from: player.clone(), to: merchant, asset: pay_asset, qty: pay, reason: Reason::Trade { trade } },
+        ])?;
+        self.commit_id(trade);
+        let rec = TradeRecord { id: trade, tick: self.tick, party: player, resource: q.resource, side: q.side, qty: q.qty, total: q.total };
+        self.trades.push(rec.clone());
+        self.quotes.get_mut(&id).unwrap().status = QuoteStatus::Settled { trade };
+        ev.push(Event::Traded(rec));
+        ev.push(Event::QuoteSettled { quote: id, trade });
+        Ok(ev)
+    }
+
+    /// The quote lapsed: the hold returns to the merchant.
+    pub fn release_quote(&mut self, id: u64) -> Result<Vec<Event>, EconError> {
+        let q = self.quotes.get(&id).cloned().ok_or_else(|| unknown("quote", &id.to_string()))?;
+        if q.status != QuoteStatus::Open {
+            return Err(EconError::QuoteNotOpen { quote: id });
+        }
+        let (asset, held) = q.held();
+        let merchant = self.merchant().account.clone();
+        let mut ev = self.apply(&[Transfer { from: q.escrow(), to: merchant, asset, qty: held, reason: Reason::QuoteRelease { quote: id } }])?;
+        self.quotes.get_mut(&id).unwrap().status = QuoteStatus::Released;
+        ev.push(Event::QuoteReleased { quote: id });
+        Ok(ev)
+    }
+
+    /// Set a player's holding of `asset` to what the chain says it is, moving the
+    /// difference across the `OUTSIDE` boundary. Only player accounts: actors are
+    /// mirrored the other way (engine → chain). Never reachable from `execute`.
+    pub fn sync_holding(&mut self, player: &str, asset: Asset, chain: i64) -> Result<Vec<Event>, EconError> {
+        let account = player_account(player);
+        let have = self.balance(&account, asset);
+        if chain < 0 || chain == have {
+            return Ok(vec![]);
+        }
+        let (from, to, qty) = if chain > have { (OUTSIDE.to_string(), account.clone(), chain - have) } else { (account.clone(), OUTSIDE.to_string(), have - chain) };
+        let mut ev = self.apply(&[Transfer { from, to, asset, qty, reason: Reason::External }])?;
+        ev.push(Event::HoldingSynced { account, asset, from: have, to: chain });
+        Ok(ev)
     }
 
     /// Credit an account from `WORLD` when building a starting state. Never reachable

@@ -13,11 +13,12 @@ The first version, a single contract (**CZ World v1**, `world.contract-zero.test
 |---|---|
 | `contract-zero.testnet` | Parent, and owner of `assets` and `world2` |
 | **`assets.contract-zero.testnet`** | **cz-assets**: NEP-245 ledger. Code `5o8uRxxLcHzC7vqYMRRDhr5AHSEcwCLsfbRD6EW2LU3L` |
-| **`world2.contract-zero.testnet`** | **cz-world v2**: the game controller, and the only controller of `assets`. Code `6c4sHyPgZq3qYkgH4F61tJ3MEM41k3qjDo3BoFD8TzeD` |
+| **`world2.contract-zero.testnet`** | **cz-world v2**: the game controller, and the only controller of `assets`. Code `8ne76NEqj8Fn7CKDijNXEcLgjZQ8xf4WzSeonPMZYR6W`. Upgraded in place from `6c4sHyPg…` so accepting a quote also registers a new player's ledger storage; state was unchanged |
 | `server.contract-zero.testnet` | The game server: settles raids and applies flows |
 | `vanguard.contract-zero.testnet` | The Vanguard commander (a faction actor) |
 | `vex.contract-zero.testnet` | The Vex merchant (a merchant actor) |
 | `world.contract-zero.testnet` | CZ World v1, **frozen** (code `66e5xsBm1WpwtmuDhPLBxzXTRGg5ZDGHTyRz9knnvKcJ`) |
+| `player.contract-zero.testnet` | A test player ([created](https://testnet.nearblocks.io/txns/FUErvSMYZJF9CBPQEMvdzv9vdjELTJAG29cKzgjwU8Dv) so the raid cargo it already held is now owned by a real account). Its keys play the part of a wallet in `scripts/exchange-e2e.mjs` |
 
 Each code hash matches the SHA-256 (base58) of the local `cargo near build non-reproducible-wasm` output.
 
@@ -33,6 +34,8 @@ No key is in the repository.
 | server | `ed25519:9hg6yCxYWuejzhwN23pmootDAe3ZyrDXU5bbo4WqMyAB` | `settle_raid`, `apply_flows` |
 | vanguard | `ed25519:EVB73ozU…` | `accept_offer`, `accept_bid` |
 | vex | `ed25519:7CUkGTCt…` | `post_offer`, `post_bid`, `cancel_quote` |
+
+The test player holds a key of the kind a wallet grants: `ed25519:B92fjTuZ…`, limited to `world2`'s `accept_offer` and `accept_bid` ([added](https://testnet.nearblocks.io/txns/4Bsm6P2hcEZeoA1rbYxo21YVCtVcnDtZxRcWa4hRSr3G)). It's stored in `~/.contract-zero/keys/players/`. Real players sign with their own wallet, and the server never holds a player key.
 
 None of these keys can call `assets` at all. Value moves only when `world2` asks `assets` to move it, and only within the rules `world2` enforces. Under those rules:
 - a quote can be accepted only by the counterparty it names;
@@ -53,6 +56,7 @@ The economy commits a change first, then queues the matching on-chain operation 
 | Raid extracted | server `settle_raid` → `assets.controller_settle`: the faction's depot pays the player |
 | Agent buys from Vex | vex `post_offer` (attempt-scoped ID) → agent `accept_offer(max_total)` → atomic two-leg `controller_settle` |
 | Agent sells to Vex | vex `post_bid` → agent `accept_bid(min_total)` → atomic two-leg `controller_settle` |
+| **Player** buys / sells (Exchange) | vex `post_offer` / `post_bid` addressed to the player → **the player's own wallet** signs `accept_offer` / `accept_bid` → `controller_register` (sponsored storage) + atomic `controller_settle`. The economy settles the quote only once `cz-assets` shows the operation applied. An unsigned quote is cancelled by Vex after its TTL |
 | Income, upkeep, consumption | server `apply_flows` (batched, within the daily budget) |
 
 **When a crash leaves an operation half-done,** the worker checks whether it actually applied by asking `assets.is_used("ctl:<op>")`. That flag is set only when value moved, so a cancelled or expired quote never counts as settled (the [v1 incident](MIGRATION.md#incident-found-during-migration-a-settlement-marked-confirmed-that-never-settled)).
@@ -84,8 +88,26 @@ Each transaction was then checked again by a separate script (final status, call
 The player's ledger balance is 120 ammo: 60 migrated from v1 plus 60 from this raid.
 
 **Not yet exercised on testnet.** Each item below is implemented and unit-tested but hasn't run live:
+- **(Fixed during the Exchange work.)** The world clock queued only agent *purchases* for settlement, so an agent sale would have stayed off chain. It now queues both.
 - **The bid path** (the commander selling surplus to Vex): economy policy tests, plus `cz-world-v2` bid tests. It triggers only when a faction holds more than twice its target, and that doesn't happen in the acceptance scenario.
 - **The worker's retry and compensation path on v2.**
+
+## Exchange run: the player sells, buys, and lets a quote lapse (2026-11-08)
+
+`scripts/exchange-e2e.mjs` (`LAPSE=1`) ran against the live API with settlement on and the world clock running.
+- The player signs with their own restricted key, built and sent with `near-api-js` exactly as a wallet would. The server only posts and cancels Vex's quotes.
+- After each trade, the script checks every leg on chain and checks that the player's engine balances equal their chain balances.
+- Each transaction was then checked again separately (final status, callback value, failed receipts).
+
+| Step | Evidence |
+|---|---|
+| Starting point | The player owns 120 ammo on chain: 60 migrated from v1, 60 raided on v2. The engine knew 60. The first quote resynced the other 60 across the `OUTSIDE` boundary |
+| **Sell 30 ammo for 548 cr** | Vex `post_bid` [`62tfZnJx…`](https://testnet.nearblocks.io/txns/62tfZnJxG87C3njDbMwiH1vJzKN9zFKP48bssK4wQgC3). **The player signs** `accept_bid` [`4Kxu9JG3…`](https://testnet.nearblocks.io/txns/4Kxu9JG3gpVBYcSC6AHzASyCtFy7BLts5pt4JnSCb5tf) (receipts on `world2` and `assets`; final `Success(true)`). Player 120 → 90 ammo, 0 → 548 cr. Vex 76 → 106 ammo, 1,017 → 469 cr |
+| **Buy 5 med for 242 cr** | Vex `post_offer` [`7JmWpLkd…`](https://testnet.nearblocks.io/txns/7JmWpLkd1cvRXncxMq3zPNGnD681gtKQ42FABjxNoBS2). **The player signs** `accept_offer` [`BMujWMxQ…`](https://testnet.nearblocks.io/txns/BMujWMxQ5zr93Z3SW4zXwj7MJwBtoY4rPHQvAQihXY5U) (final `Success(true)`). Player 548 → 306 cr, 0 → 5 med |
+| A quote left unsigned | After its 5-minute TTL, Vex `cancel_quote` [`72LPNbej…`](https://testnet.nearblocks.io/txns/72LPNbejdAU6vZPLgb1hQ65cGgPyPY9VDxkMqurPWLsB). The hold was released, and Vex's balances were unchanged. An earlier abandoned bid was cleaned up the same way ([`BZQBjVXW…`](https://testnet.nearblocks.io/txns/BZQBjVXWVAdsvugttTjYD7HWn4Dviab95CmbA8U4zHFo)) |
+| Reconciled | Player: engine = chain (90 ammo, 306 cr, 5 med). Vex: no difference. Vanguard differed only by 14 world-clock ledger entries not yet mirrored. After the next flow sync, `GET /reconciliation` was `in_sync: true`, with 0 unsynced entries, 0 open settlements, and no difference for Vanguard or Vex |
+
+**Gas.** An accept burns about 10 TGas. The player attaches 60 TGas, which covers the controller's 50 TGas of follow-up calls. Prepaid gas is reserved from the player's balance up front (about 0.06 NEAR) and mostly refunded.
 
 ## History: CZ World v1 (frozen)
 

@@ -23,9 +23,11 @@ Built for the NEAR Hackathon (November 2026), track **Games With Real Economies*
 | Economy: ledger, pricing, raids, bounties, insolvency, economy-to-battlefield rules (`apps/api/crates/economy`) | **Built and tested.** Includes the acceptance scenario |
 | Fallback policies for both agents, with logged decisions | **Built and tested** |
 | API: raid board, mission sessions with server-side validation, world clock, decision feed, Observer Mode | **Built.** Verified end to end against a local Postgres |
-| Main Menu, Contract Board, Armory, Deployment, Extraction, War Room, Exchange | In progress |
+| Main Menu, Contract Board, Deployment, Extraction, Exchange | **Working** |
+| Exchange: firm merchant quotes, **signed by the player's own wallet**, settled on NEAR; market signals from faction shortages | **Working on testnet** ([NEAR.md](docs/contract-zero/NEAR.md#exchange-run-the-player-sells-buys-and-lets-a-quote-lapse-2026-11-08)) |
+| Armory (owned equipment tokens), War Room | In progress |
 | NEAR testnet settlement: `cz-assets` (NEP-245 ledger) + `cz-world` v2 (game controller), queue, FINAL verification, reconciliation | **Working on testnet.** The full acceptance sequence passed on chain ([docs/contract-zero/NEAR.md](docs/contract-zero/NEAR.md)) |
-| Social login (FastAuth) | In progress |
+| Wallet sign-in (NEAR Connect: HOT, Meteor, Intear, MyNearWallet, …) | **Working.** Social login via NEAR Auth (the new FastAuth) is evaluated in DESIGN.md §10 and planned as a second sign-in |
 | LLM strategic planner (NEAR AI Cloud) with validated tool calls | In progress |
 
 ## Architecture
@@ -55,6 +57,9 @@ Combat AI is deterministic and runs in the client sim; no LLM is involved in a g
 | `POST /missions/start` | `{player, target, resource}`: locks the raid plan and issues a session |
 | `POST /missions/{session}/complete` | `{player, outcome, kills}`: validated against server time, then settled or failed. Idempotent |
 | `GET /players/{account}` | a player's holdings and raids |
+| `GET /exchange?player=` | merchant prices with their factors, faction shortages, the player's holdings (on chain when settlement is on), open quote and trades |
+| `POST /exchange/quotes` | `{player, resource, side, qty, limit_total?}`: a firm 5-minute quote. Vex posts it on chain, and the response carries the exact call for the player's wallet to sign |
+| `POST /exchange/quotes/{id}/confirm` | `{tx_hash?}`: settles the quote once `cz-assets` shows value moved. `GET /exchange/quotes/{id}` shows its state |
 | `POST /observer/simulate` | `{ticks, seed?}`: Observer Mode on a copy of the world, marked simulated |
 
 The economy's formulas, sources and sinks are in [docs/contract-zero/ECONOMY.md](docs/contract-zero/ECONOMY.md).

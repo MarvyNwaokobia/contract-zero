@@ -1,5 +1,6 @@
 use actix_web::{web, HttpResponse};
 
+pub mod exchange;
 pub mod missions;
 pub mod settlement;
 pub mod world;
@@ -35,5 +36,10 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         .route("/settlements", web::get().to(settlement::list))
         .route("/settlements/{op_id}", web::get().to(settlement::get))
         .route("/reconciliation", web::get().to(settlement::reconciliation))
-        .route("/admin/advance", web::post().to(settlement::admin_advance));
+        .route("/admin/advance", web::post().to(settlement::admin_advance))
+        .route("/exchange", web::get().to(exchange::overview))
+        .route("/exchange/quotes", web::post().to(exchange::create))
+        .route("/exchange/quotes/{id}", web::get().to(exchange::get))
+        .route("/exchange/quotes/{id}/confirm", web::post().to(exchange::confirm))
+        .route("/exchange/quotes/{id}/accept", web::post().to(exchange::accept));
 }

@@ -105,6 +105,63 @@ export interface AgentEvent {
   };
 }
 
+export interface ExchangePrice {
+  resource: ResourceName
+  stock: number
+  target: number
+  ask: number
+  bid: number
+  mid: number
+  scarcity_bp: number
+  demand_bp: number
+  net_demand_24h: number
+  buy_10: number | null
+  sell_10: number | null
+}
+
+export interface PlayerQuote {
+  id: number
+  player: string
+  resource: ResourceName
+  side: 'buy' | 'sell'
+  qty: number
+  total: number
+  unit: number
+  status: { status: 'open' | 'released' } | { status: 'settled'; trade: number }
+}
+
+export interface ExchangeView {
+  tick: number
+  settlement: 'near' | 'off_chain'
+  quote_ttl_secs: number
+  merchant: { id: string; name: string; insolvent: boolean; credits: number }
+  prices: ExchangePrice[]
+  shortages: { actor: string; name: string; resource: ResourceName; have: number; target: number; short: number }[]
+  engine_holdings: Holdings | null
+  chain_holdings: Holdings | null
+  open_quote: PlayerQuote | null
+  trades: { id: number; tick: number; resource: ResourceName; side: 'buy' | 'sell'; qty: number; total: number }[]
+}
+
+export interface QuoteCreated {
+  quote: PlayerQuote
+  expires_in_secs: number
+  settled_on_chain: boolean
+  posted?: { tx_hash: string; explorer: string }
+  /** What the player's wallet signs (null when the economy runs off-chain). */
+  chain: { receiver_id: string; method: string; args: Record<string, string>; gas: string; deposit: string } | null
+}
+
+export interface QuoteState {
+  quote: PlayerQuote
+  status: 'open' | 'settled' | 'released'
+  chain_quote: string | null
+  expires_in_secs: number
+  settled_on_chain: boolean
+  tx_hashes: string[]
+  explorer: string[]
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(`${API}${path}`, { ...init, headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) } });
   const body = await r.json().catch(() => ({}));
@@ -122,6 +179,12 @@ export const api = {
   settlement: (opId: string) => req<SettlementView>(`/settlements/${encodeURIComponent(opId)}`),
   completeMission: (session: string, player: string, outcome: 'extracted' | 'killed', kills: number) =>
     req<{ replayed: boolean; result: MissionResult }>(`/missions/${session}/complete`, { method: 'POST', body: JSON.stringify({ player, outcome, kills }) }),
+  exchange: (player?: string | null) => req<ExchangeView>(`/exchange${player ? `?player=${encodeURIComponent(player)}` : ''}`),
+  quote: (player: string, resource: ResourceName, side: 'buy' | 'sell', qty: number) =>
+    req<QuoteCreated>('/exchange/quotes', { method: 'POST', body: JSON.stringify({ player, resource, side, qty }) }),
+  quoteState: (id: number) => req<QuoteState>(`/exchange/quotes/${id}`),
+  confirmQuote: (id: number, txHash?: string) => req<QuoteState>(`/exchange/quotes/${id}/confirm`, { method: 'POST', body: JSON.stringify({ tx_hash: txHash ?? null }) }),
+  acceptOffChain: (id: number) => req<QuoteState>(`/exchange/quotes/${id}/accept`, { method: 'POST' }),
 };
 
 // ── the player's identity, until NEAR sign-in replaces it ───────────────────

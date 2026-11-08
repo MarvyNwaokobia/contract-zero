@@ -4,3 +4,4 @@ pub mod scheduler;
 pub mod world;
 pub mod near;
 pub mod settlement;
+pub mod exchange;

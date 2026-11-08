@@ -359,6 +359,11 @@ pub async fn reconcile(state: &AppState) -> Result<Value, String> {
                     if asset == Asset::Credits {
                         v += escrowed_by(w, &a.id);
                     }
+                    // What the merchant holds for open player quotes is still its own
+                    // on chain until the player accepts.
+                    if a.id == w.market.merchant {
+                        v += w.held_for_quotes(asset);
+                    }
                     h.insert(asset.name().to_string(), v);
                 }
                 m.insert(a.account.clone(), h);

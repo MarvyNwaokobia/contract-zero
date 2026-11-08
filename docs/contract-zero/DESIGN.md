@@ -170,20 +170,27 @@ A mission is a pure function of live state, so the server validates exactly the 
 
 ## 8. The market and the Exchange
 
-**Exchange screen (Proposed).** Live bid and ask at each merchant, with the pricing factors behind them, plus your holdings and what they'd sell for at each. Actions:
+**Exchange screen (Built for merchant trades: `/exchange`, `GET /exchange`, `POST /exchange/quotes`).** Live bid and ask at each merchant, with the pricing factors behind them, plus your holdings and what they'd sell for at each. Actions:
 
 | Action | What happens | Who signs on chain |
 |---|---|---|
-| **Buy** | Ammo, medkits, fuel or equipment from a merchant's ask | The player authorizes the payment; the merchant's restricted key fills the order |
-| **Sell** | Extracted supplies to a merchant's bid | The player authorizes moving the goods; the merchant pays |
-| **List** (P2P) | Put an item up for another player; it sits in escrow in `cz-assets` | The seller |
-| **Buy listing** (P2P) | Another player's listing settles atomically | The buyer |
+| **Buy** (Built for supplies; equipment Proposed) | The merchant posts a firm offer addressed to you; you accept it with your price ceiling | Vex posts (`post_offer`); **you** sign `accept_offer`. Both legs settle atomically in `cz-assets` |
+| **Sell** (Built) | The merchant posts a firm bid addressed to you; you accept it with your price floor | Vex posts (`post_bid`); **you** sign `accept_bid` |
+| **List** (P2P, Proposed) | Put an item up for another player; it sits in escrow in `cz-assets` | The seller |
+| **Buy listing** (P2P, Proposed) | Another player's listing settles atomically | The buyer |
 
-**Shortage signals.** When a resource falls below target at every merchant, the Exchange flags it, and the Contract Board points to the depots that hold it. Players can see the opportunity and act on it.
+**How a player trade stays honest (Built).**
+- **The quote is firm.** While a quote stands (5 minutes), the merchant's side is held in escrow in the economy, so no agent can buy those goods out from under you. Reconciliation counts the hold as the merchant's, because on chain it still is.
+- **Players own their tokens.** The economy treats the chain as the truth for a player: before quoting, it resyncs your holdings from `cz-assets`. Tokens you moved in or out of the game cross an explicit `OUTSIDE` boundary account, which is never counted as issuance or destruction.
+- **The trade settles only once value has moved.** The economy settles the quote only after `cz-assets` reports that the operation applied.
+- **A lapsed quote is cleaned up.** A quote that isn't accepted in time is cancelled on chain by Vex, and the hold is released.
+- **Your trades move the market.** Player purchases and sales feed the same demand and stock terms in the price as agent trades.
 
-**Acceptance (Proposed):**
-- A player buys medkits and sells extracted ammo; both trades settle on NEAR, signed by the player's own key, and reconcile.
-- A player-to-player listing transfers atomically, or not at all.
+**Shortage signals (Built).** When a faction falls below its target, the Exchange flags it and links to the Contract Board. Players can see the opportunity and act on it: raid to deepen the shortage, or sell into the higher price.
+
+**Acceptance:**
+- *(Passed on testnet, `scripts/exchange-e2e.mjs`.)* A player sells extracted ammo and buys medkits. Both trades settle on NEAR, each signed by the player's own key, and the player's engine balances equal their chain balances. A quote left unsigned is cancelled and released.
+- *(Proposed.)* A player-to-player listing transfers atomically, or not at all.
 
 ## 9. On-chain architecture: `cz-assets` + `cz-world` v2
 
@@ -233,7 +240,22 @@ The settlement queue records the contract each row belongs to, so the old and ne
 
 **Requirement:** a player signs in without seed phrases. Game actions that don't move the player's assets need no popups. Moving the player's own assets (selling, listing) takes their explicit authorization.
 
-**Approach (Proposed):** [FastAuth](https://auth.near.org) (email or social login creating a NEAR account), if its SDK supports adding a function-call key limited to `cz-world` v2's no-deposit methods. In that case gameplay calls are silent, and asset moves get an explicit signature. If FastAuth can't add such a key, the fallback is a NEAR wallet selector with a function-call key added at sign-in. The evaluation happens with the Exchange (§8), not before.
+**What a player must be able to do on chain:** sign `accept_offer` / `accept_bid` on `world2` as themselves. Both methods are deposit-free.
+- The controller pays the player's ledger storage from its sponsorship quota, so a player needs no NEAR deposit.
+- `cz-assets` debits a player only when the player is the transaction's signer.
+
+**FastAuth evaluation (2026-11-08).** FastAuth is now "NEAR Auth": Auth0 login (Google, Apple, email, passkey) with an MPC-derived key (`@fast-auth-near/react-sdk`, `@fast-auth-near/browser-sdk`).
+- **It can satisfy the authorization model.** It signs arbitrary transactions for the user, so it can sign an accept, and the relayer creates the account with gas and deposit covered.
+- **But every signature is an Auth0 popup or redirect.** The docs document no way to add a function-call key.
+- **It needs an Auth0 client ID.** Mainnet requires approved credentials.
+
+So it suits players without a wallet, but it isn't a drop-in. **Decision:** ship wallet sign-in now and add NEAR Auth as a second sign-in method once we have a client ID.
+
+**Built: NEAR Connect** (`@hot-labs/near-connect`). Wallet sign-in on testnet with HOT, Meteor, Intear, MyNearWallet, Nightly, Ledger, EVM wallets and NEAR CLI.
+- **Every trade is an explicit wallet confirmation.** That's deliberate: a trade moves the player's own assets.
+- **We don't use a silent function-call key for trading.** Vex is run by the game server. A key that accepts any quote addressed to the player, without a prompt, would let a compromised client accept a lowball bid on the player's behalf.
+- **Silent keys are reserved for actions that move none of the player's assets** (Proposed: none exist yet).
+- **Mission identity:** the player is still identified by the account ID in the request. Proposed: a NEP-413 signed message at sign-in, so the API can verify the player owns that account.
 
 ## 11. The War Room
 
@@ -272,7 +294,7 @@ These build on the working FPS engine; nothing here is a rewrite.
 | 4 | CZ World v1 on testnet, settlement, reconciliation, on-chain acceptance run | Built |
 | 5 | This design | Built |
 | 6 | `cz-assets` + `cz-world` v2, migration, acceptance re-run on v2 | Built (deployed on testnet; acceptance passed on v2) |
-| 7 | Merchant bids (commander selling), player ownership, Exchange, onboarding | In progress: bids are built in the contract, policy and worker; the rest is proposed |
+| 7 | Merchant bids (commander selling), player ownership, Exchange, onboarding | Built: commander selling via bids; the Exchange with player-signed buys and sells on testnet; wallet sign-in. Proposed: equipment tokens and owned-gear loadout, P2P listings, NEAR Auth sign-in, NEP-413 identity |
 | 8 | Second faction and merchant, strategy profiles, memory | Proposed |
 | 9 | LLM planner on NEAR AI Cloud with validated tool calls | Proposed |
 | 10 | War Room UI and the causal timeline | Proposed |

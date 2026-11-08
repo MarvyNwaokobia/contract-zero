@@ -208,7 +208,7 @@ pub async fn expire_stale_sessions(state: &AppState) -> Result<usize, WorldError
         .await
 }
 
-fn respond(res: Result<Value, WorldError>) -> HttpResponse {
+pub(crate) fn respond(res: Result<Value, WorldError>) -> HttpResponse {
     match res {
         Ok(v) => HttpResponse::Ok().json(v),
         Err(WorldError::Econ(e)) => HttpResponse::Conflict().json(json!({ "error": e.to_string(), "detail": e })),

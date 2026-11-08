@@ -232,7 +232,7 @@ impl WorldV2 {
             Leg { from: q.merchant.clone(), to: q.counterparty.clone(), token_id: q.token_id.clone(), amount: q.amount },
             Leg { from: q.counterparty.clone(), to: q.merchant.clone(), token_id: "credits".into(), amount: q.total_credits },
         ];
-        self.settle_quote(id, legs)
+        self.settle_quote(id, q.counterparty, legs)
     }
 
     /// The named seller accepts a bid, receiving at least `min_total`.
@@ -244,7 +244,7 @@ impl WorldV2 {
             Leg { from: q.counterparty.clone(), to: q.merchant.clone(), token_id: q.token_id.clone(), amount: q.amount },
             Leg { from: q.merchant.clone(), to: q.counterparty.clone(), token_id: "credits".into(), amount: q.total_credits },
         ];
-        self.settle_quote(id, legs)
+        self.settle_quote(id, q.counterparty, legs)
     }
 
     // ── callbacks ────────────────────────────────────────────────────────────
@@ -316,10 +316,13 @@ impl WorldV2 {
         q
     }
 
-    fn settle_quote(&mut self, id: String, legs: Vec<Leg>) -> Promise {
+    /// Register the counterparty's ledger storage (a no-op once registered; a new
+    /// player is covered by the sponsorship quota), then settle both legs atomically.
+    fn settle_quote(&mut self, id: String, counterparty: AccountId, legs: Vec<Leg>) -> Promise {
         ext_assets::ext(self.assets.clone())
-            .with_static_gas(GAS_SETTLE)
-            .controller_settle(id.clone(), legs)
+            .with_static_gas(GAS_REGISTER)
+            .controller_register(counterparty)
+            .then(ext_assets::ext(self.assets.clone()).with_static_gas(GAS_SETTLE).controller_settle(id.clone(), legs))
             .then(Self::ext(env::current_account_id()).with_static_gas(GAS_CALLBACK).on_settled(id.clone(), Some(id)))
     }
 }

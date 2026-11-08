@@ -1,6 +1,7 @@
 use actix_web::{web, HttpResponse};
 
 pub mod missions;
+pub mod settlement;
 pub mod world;
 
 /// Liveness: the process is accepting connections.
@@ -30,5 +31,9 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         .route("/players/{player}", web::get().to(world::get_player))
         .route("/observer/simulate", web::post().to(world::simulate))
         .route("/missions/start", web::post().to(missions::start))
-        .route("/missions/{session}/complete", web::post().to(missions::complete));
+        .route("/missions/{session}/complete", web::post().to(missions::complete))
+        .route("/settlements", web::get().to(settlement::list))
+        .route("/settlements/{op_id}", web::get().to(settlement::get))
+        .route("/reconciliation", web::get().to(settlement::reconciliation))
+        .route("/admin/advance", web::post().to(settlement::admin_advance));
 }

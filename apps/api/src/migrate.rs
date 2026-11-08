@@ -15,6 +15,7 @@ use sqlx::PgPool;
 /// (filename, embedded SQL), in dependency order.
 const MIGRATIONS: &[(&str, &str)] = &[
     ("0001_init.sql", include_str!("../migrations/0001_init.sql")),
+    ("0002_settlement.sql", include_str!("../migrations/0002_settlement.sql")),
 ];
 
 /// Apply every migration not yet recorded, in order, each in its own transaction. Called

@@ -27,14 +27,20 @@ pub enum WorldError {
 pub struct WorldService {
     world: Arc<Mutex<World>>,
     db: PgPool,
+    /// NEAR settlement, when configured. `None` keeps the economy fully off-chain.
+    near: Option<Arc<super::near::NearClient>>,
 }
+
+/// Mirror issuance/destruction on chain every this many ticks (and always before a
+/// trade or raid settles).
+const FLOW_SYNC_TICKS: u64 = 12;
 
 /// Snapshots kept per world; older ones are pruned.
 const KEEP_SNAPSHOTS: i64 = 500;
 
 impl WorldService {
     /// Load the latest snapshot, or create the genesis world from `WORLD_SEED`.
-    pub async fn load(db: PgPool) -> anyhow::Result<Self> {
+    pub async fn load(db: PgPool, near: Option<Arc<super::near::NearClient>>) -> anyhow::Result<Self> {
         let latest: Option<(Value,)> =
             sqlx::query_as("SELECT state FROM world_snapshots ORDER BY id DESC LIMIT 1").fetch_optional(&db).await?;
         let world = match latest {
@@ -53,11 +59,15 @@ impl WorldService {
             }
         };
         tracing::info!("world: loaded at tick {} (version {})", world.tick, world.version);
-        Ok(Self { world: Arc::new(Mutex::new(world)), db })
+        Ok(Self { world: Arc::new(Mutex::new(world)), db, near })
     }
 
     pub fn db(&self) -> &PgPool {
         &self.db
+    }
+
+    pub fn near(&self) -> Option<Arc<super::near::NearClient>> {
+        self.near.clone()
     }
 
     /// Run a read-only view of the world.
@@ -103,6 +113,7 @@ impl WorldService {
     /// Advance `ticks` ticks, running the agents every `agents_every` ticks. Returns a
     /// summary of what happened. Used by the scheduler and by fast-forward.
     pub async fn advance(&self, ticks: u64, agents_every: u64) -> Result<Value, WorldError> {
+        let near = self.near.clone();
         self.transact(async move |w, db| {
             let mut shortages = 0usize;
             let mut decisions = 0usize;
@@ -119,7 +130,22 @@ impl WorldService {
                     for (decision, result) in policy::run_fallback_agents(w) {
                         decisions += 1;
                         log_decision(db, w.tick, "fallback", &decision, result.as_ref()).await?;
+                        // An accepted purchase from the merchant settles on NEAR.
+                        if let (Some(near), Some(Ok(events))) = (&near, &result) {
+                            for e in events {
+                                if let Event::Traded(t) = e {
+                                    if t.side == cz_economy::Side::Buy {
+                                        super::settlement::queue_trade(w, db, near, t).await?;
+                                    }
+                                }
+                            }
+                        }
                     }
+                }
+            }
+            if let Some(near) = &near {
+                if w.tick % FLOW_SYNC_TICKS == 0 {
+                    super::settlement::sync_flows(w, db, near).await?;
                 }
             }
             for e in &notable {

@@ -58,6 +58,22 @@ Every call below was signed with the restricted function-call key and verified i
 | Vanguard's key calls `post_offer` | Rejected before execution: "method name isn't allowed by the access key" |
 | Vex's key calls `settle_raid` | Rejected before execution, same reason |
 
+## Acceptance run: raid → shortage → autonomous purchase → NEAR → next mission (2026-11-08)
+
+`scripts/acceptance-e2e.mjs` against the live API (`WORLD_SCENARIO=acceptance`, settlement on). Balances are read back from the contract over RPC. A step counts only when its settlement row is `confirmed`, meaning each transaction was re-fetched at FINAL and every receipt succeeded.
+
+| Step | Evidence |
+|---|---|
+| Starting state, aligned on chain | Vanguard 100 ammo, 1,000 cr. Vex 100 ammo, 500 cr. Baseline [`FUifZSLUAG6YMGHhNA27nqUKJYGxh7c2rYCQxSms9Kw7`](https://testnet.nearblocks.io/txns/FUifZSLUAG6YMGHhNA27nqUKJYGxh7c2rYCQxSms9Kw7) |
+| Player raids the ammo depot (manifest 60; 5 rifle guards) | Mission session validated server-side; extracted after 37 s |
+| Raid settled | [`FqMfQZ2CGz2Gm6tBmUrFpxrEgwXBNHCucjtbXzym8XSZ`](https://testnet.nearblocks.io/txns/FqMfQZ2CGz2Gm6tBmUrFpxrEgwXBNHCucjtbXzym8XSZ) (server, `settle_raid`). On chain: **Vanguard 100 → 40 ammo**, player 60 |
+| Commander decides on its own (one world tick) | "ammo below target", have 41 of 84, budget 740. Quoted Vex at 18 cr/unit and chose to "Buy 24 ammo for 517 credits (24 of the 43 short; that is all the budget or stock allows)." The engine accepted it |
+| Funding flows mirrored | [`HgStXpKY6nfBHUGtiMTJqrYxEtDAt6oUKdxUzbS1hcyq`](https://testnet.nearblocks.io/txns/HgStXpKY6nfBHUGtiMTJqrYxEtDAt6oUKdxUzbS1hcyq) (`apply_flows`) |
+| Vex offers | [`444MctayLz9g9SMdZ7eUmf4Mw3nyjK6PyVCPovfhmTJC`](https://testnet.nearblocks.io/txns/444MctayLz9g9SMdZ7eUmf4Mw3nyjK6PyVCPovfhmTJC) (vex, `post_offer`) |
+| **Vanguard buys** | [`D276igARNKFQ5EZJMf6uzLBirxtyLGRNNaeQ714SowJX`](https://testnet.nearblocks.io/txns/D276igARNKFQ5EZJMf6uzLBirxtyLGRNNaeQ714SowJX) (vanguard, `accept_offer`): `mt_transfer` 24 ammo Vex → Vanguard, and 517 credits Vanguard → Vex |
+| Reconciled | `in_sync: true`. Engine and chain match exactly: Vanguard 65 ammo / 523 cr / 98 fuel / 30 med; Vex 76 ammo / 1,017 cr / 60 fuel / 50 med |
+| Next mission changed | Ammo raid before: 5 deployed (5 rifles), defense L2, manifest 60. **Now: defense L3 (11 planned), 4 deployed (3 rifles, 1 sidearm), manifest 39** |
+
 ## Rebuild and redeploy
 
 ```bash

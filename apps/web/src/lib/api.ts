@@ -74,6 +74,18 @@ export interface MissionResult {
   extracted_units: number;
   bounty: number;
   player_holdings: { credits: number; cargo: number };
+  /** Present when NEAR settlement is enabled. 'queued' here is NOT settlement. */
+  settlement: { op_id: string; status: string } | null;
+}
+
+export interface SettlementView {
+  op_id: string;
+  kind: string;
+  status: 'pending' | 'submitted' | 'confirmed' | 'failed' | 'compensated';
+  settled_on_chain: boolean;
+  tx_hashes: string[];
+  explorer: string[];
+  error: string | null;
 }
 
 export interface AgentEvent {
@@ -107,6 +119,7 @@ export const api = {
   decisions: (limit = 30) => req<{ events: AgentEvent[] }>(`/events?kind=agent_decision&limit=${limit}`).then((e) => e.events),
   startMission: (player: string, target: string, resource: ResourceName) =>
     req<MissionStart>('/missions/start', { method: 'POST', body: JSON.stringify({ player, target, resource }) }),
+  settlement: (opId: string) => req<SettlementView>(`/settlements/${encodeURIComponent(opId)}`),
   completeMission: (session: string, player: string, outcome: 'extracted' | 'killed', kills: number) =>
     req<{ replayed: boolean; result: MissionResult }>(`/missions/${session}/complete`, { method: 'POST', body: JSON.stringify({ player, outcome, kills }) }),
 };

@@ -10,6 +10,8 @@ mod services;
 
 #[derive(Clone)]
 pub struct AppState {
+    /// NEAR settlement client (None = off-chain only).
+    pub near: Option<std::sync::Arc<services::near::NearClient>>,
     /// The live economy (owns the database pool).
     pub world: services::world::WorldService,
     /// Per-IP limiter for mission start/complete. Built once and shared (Arc) so
@@ -43,13 +45,23 @@ async fn main() -> anyhow::Result<()> {
     // Apply pending migrations before serving; a failure aborts boot on purpose.
     migrate::run(&db).await?;
 
-    let world = services::world::WorldService::load(db).await?;
+    let near = match services::near::NearClient::from_env() {
+        Ok(Some(n)) => {
+            tracing::info!("settlement: CZ World at {} on NEAR testnet", n.contract);
+            Some(std::sync::Arc::new(n))
+        }
+        Ok(None) => None,
+        Err(e) => anyhow::bail!("NEAR settlement misconfigured: {e}"),
+    };
+    let world = services::world::WorldService::load(db, near.clone()).await?;
     let app_state = AppState {
+        near,
         world,
         mission_limiter: std::sync::Arc::new(services::rate_limiter::RateLimiter::new(10, 60)),
     };
 
     services::scheduler::spawn(app_state.clone());
+    services::settlement::spawn_worker(app_state.clone());
 
     // FRONTEND_ORIGIN: comma-separated allowed origins. localhost is always allowed.
     let allowed_origins: Vec<String> = std::env::var("FRONTEND_ORIGIN")

@@ -115,6 +115,7 @@ type SessionRow = (String, i64, f64, DateTime<Utc>, Option<DateTime<Utc>>, Optio
 pub async fn complete(state: web::Data<AppState>, path: web::Path<Uuid>, body: web::Json<CompleteRequest>) -> HttpResponse {
     let session = path.into_inner();
     let body = body.into_inner();
+    let near = state.world.near();
     let res = state
         .world
         .transact(async move |w, db| {
@@ -150,6 +151,14 @@ pub async fn complete(state: web::Data<AppState>, path: web::Path<Uuid>, body: w
                 RaidStatus::Extracted { units, bounty } => (*units, *bounty),
                 _ => (0, 0),
             };
+            // On-chain settlement is queued here and confirmed later by the worker; the
+            // response says "queued", never "settled".
+            let settlement = match (&near, outcome) {
+                (Some(n), "extracted") => crate::services::settlement::queue_raid(w, db, n, raid)
+                    .await?
+                    .map(|op| json!({ "op_id": op, "status": "queued" })),
+                _ => None,
+            };
             let result = json!({
                 "outcome": outcome,
                 "reason": verdict,
@@ -165,6 +174,7 @@ pub async fn complete(state: web::Data<AppState>, path: web::Path<Uuid>, body: w
                     "cargo": w.balance(&cz_economy::player_account(&player), cz_economy::Asset::Res(plan.resource)),
                 },
                 "events": summarize(&ev).into_iter().filter(|e| !matches!(e, Event::Transfer(_))).collect::<Vec<_>>(),
+                "settlement": settlement,
             });
             sqlx::query("UPDATE mission_sessions SET completed_at = now(), outcome = $2, result = $3 WHERE id = $1")
                 .bind(session)

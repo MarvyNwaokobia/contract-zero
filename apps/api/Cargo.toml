@@ -26,6 +26,7 @@ cz-economy = { path = "crates/economy" }
 sentry = { version = "0.34", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "rustls"] }
 sentry-actix = "0.34"
 sentry-tracing = "0.34"
+near-api = "0.8"
 
 [dev-dependencies]
 actix-web = { version = "4", features = ["macros"] }

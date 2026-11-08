@@ -1,0 +1,372 @@
+//! Mirrors the economy onto CZ World and proves it.
+//!
+//! **What settles.** Three kinds of operation are queued, in economic order, in the
+//! `settlements` table:
+//!
+//! - `flows`: the ledger's issuance and destruction on actor accounts since the last
+//!   sync (production, income, consumption, logistics, wages, imports, and shipments
+//!   as they arrive), netted per account and token into bounded `apply_flows` batches.
+//! - `raid`: a validated raid's cargo (and any sponsor bounty) via `settle_raid`.
+//! - `trade`: an agent purchase from the merchant, as Vex's `post_offer` followed by
+//!   the buyer's `accept_offer` with the agreed price as its ceiling.
+//!
+//! Before a trade or raid is queued, the flows that funded it are queued, so the
+//! worker (which submits strictly in id order) never asks the chain to spend what it
+//! has not yet been told exists.
+//!
+//! **What counts as settled.** A row becomes `confirmed` only after every transaction
+//! for it has been fetched from RPC at FINAL and every receipt succeeded
+//! ([`NearClient::verify`]). A trade that cannot settle is reversed in the economy
+//! (`compensated`) so the two never silently diverge.
+//!
+//! **Escrow.** Bounty escrow is an off-chain hold: on chain the sponsor keeps the
+//! credits until `settle_raid` pays them out, so reconciliation counts a sponsor's
+//! escrowed credits as still its own.
+
+use std::collections::BTreeMap;
+
+use cz_economy::{Asset, BountyStatus, Reason, TradeRecord, World};
+use serde_json::{json, Value};
+use sqlx::PgPool;
+
+use super::near::{NearClient, Role, Verified};
+use super::world::log_event;
+use crate::AppState;
+
+/// Contract limits (contracts-near/cz-world): entries per batch, amount per entry.
+const MAX_FLOWS: usize = 32;
+const MAX_AMOUNT: i64 = 100_000;
+
+/// The chain account for an engine account.
+pub fn chain_account(near: &NearClient, engine_account: &str) -> Option<String> {
+    match engine_account {
+        "faction:vanguard" => Some(near.account(Role::Vanguard).to_string()),
+        "merchant:vex" => Some(near.account(Role::Vex).to_string()),
+        a => a.strip_prefix("player:").map(str::to_string),
+    }
+}
+
+fn actor_accounts(w: &World) -> Vec<String> {
+    w.actors.values().map(|a| a.account.clone()).collect()
+}
+
+/// Credits `actor_id` has locked in open bounties (still its own on chain).
+pub fn escrowed_by(w: &World, actor_id: &str) -> i64 {
+    w.bounties.values().filter(|b| b.sponsor == actor_id && b.status == BountyStatus::Open).map(|b| b.amount).sum()
+}
+
+type Flows = BTreeMap<(String, Asset), i64>;
+
+/// Net issuance (mints) and destruction (burns) on actor accounts in `ledger[from..to]`.
+pub fn flows_between(w: &World, from: usize, to: usize) -> (Flows, Flows) {
+    let actors = actor_accounts(w);
+    let (mut mints, mut burns) = (Flows::new(), Flows::new());
+    for e in &w.ledger[from.min(w.ledger.len())..to.min(w.ledger.len())] {
+        let t = &e.transfer;
+        let arrived = matches!(t.reason, Reason::ShipmentArrived { .. });
+        match t.reason.class() {
+            "issuance" if actors.contains(&t.to) => *mints.entry((t.to.clone(), t.asset)).or_default() += t.qty,
+            "destruction" if actors.contains(&t.from) => *burns.entry((t.from.clone(), t.asset)).or_default() += t.qty,
+            _ if arrived && actors.contains(&t.to) => *mints.entry((t.to.clone(), t.asset)).or_default() += t.qty,
+            _ => {}
+        }
+    }
+    (mints, burns)
+}
+
+/// Contract-sized `apply_flows` batches (≤ 32 entries, each ≤ 100,000).
+fn batches(near: &NearClient, mints: &Flows, burns: &Flows) -> Vec<(Vec<Value>, Vec<Value>)> {
+    let expand = |m: &Flows| -> Vec<Value> {
+        let mut v = Vec::new();
+        for ((acct, asset), qty) in m {
+            let Some(account) = chain_account(near, acct) else { continue };
+            let mut left = *qty;
+            while left > 0 {
+                let n = left.min(MAX_AMOUNT);
+                v.push(json!({ "account_id": account, "token_id": asset.name(), "amount": n.to_string() }));
+                left -= n;
+            }
+        }
+        v
+    };
+    let (mut m, mut b) = (expand(mints), expand(burns));
+    let mut out = Vec::new();
+    while !m.is_empty() || !b.is_empty() {
+        let take_m = m.len().min(MAX_FLOWS);
+        let mm: Vec<Value> = m.drain(..take_m).collect();
+        let take_b = b.len().min(MAX_FLOWS - mm.len());
+        let bb: Vec<Value> = b.drain(..take_b).collect();
+        out.push((mm, bb));
+    }
+    out
+}
+
+pub async fn enqueue(db: &PgPool, kind: &str, op_id: &str, tick: u64, payload: &Value) -> Result<bool, sqlx::Error> {
+    let r = sqlx::query("INSERT INTO settlements (kind, op_id, tick, payload) VALUES ($1, $2, $3, $4) ON CONFLICT (op_id) DO NOTHING")
+        .bind(kind)
+        .bind(op_id)
+        .bind(tick as i64)
+        .bind(payload)
+        .execute(db)
+        .await?;
+    Ok(r.rows_affected() == 1)
+}
+
+/// Queue the flows since the cursor and advance it. Call inside a world transaction.
+pub async fn sync_flows(w: &World, db: &PgPool, near: &NearClient) -> Result<(), sqlx::Error> {
+    let (cursor,): (i64,) = sqlx::query_as("SELECT ledger_seq FROM chain_sync WHERE id = 1").fetch_one(db).await?;
+    let to = w.ledger.len();
+    if to as i64 <= cursor {
+        return Ok(());
+    }
+    let (mints, burns) = flows_between(w, cursor as usize, to);
+    for (i, (m, b)) in batches(near, &mints, &burns).into_iter().enumerate() {
+        let batch_id = format!("ledger-{cursor}-{to}-{i}");
+        enqueue(db, "flows", &format!("flows:{batch_id}"), w.tick, &json!({ "batch_id": batch_id, "mints": m, "burns": b })).await?;
+    }
+    sqlx::query("UPDATE chain_sync SET ledger_seq = $1, updated_at = now() WHERE id = 1").bind(to as i64).execute(db).await?;
+    Ok(())
+}
+
+/// Queue an agent's purchase from the merchant (after the flows that fund it).
+pub async fn queue_trade(w: &World, db: &PgPool, near: &NearClient, t: &TradeRecord) -> Result<(), sqlx::Error> {
+    let Some(buyer) = chain_account(near, &t.party) else { return Ok(()) };
+    sync_flows(w, db, near).await?;
+    let offer_id = format!("trade-{}", t.id);
+    let payload = json!({ "trade": t.id, "offer_id": offer_id, "buyer": buyer, "token_id": t.resource.name(), "amount": t.qty.to_string(), "total": t.total.to_string() });
+    enqueue(db, "trade", &format!("offer:{offer_id}"), w.tick, &payload).await.map(|_| ())
+}
+
+/// Queue a validated raid's settlement (after the flows that put the cargo there).
+pub async fn queue_raid(w: &World, db: &PgPool, near: &NearClient, raid: u64) -> Result<Option<String>, sqlx::Error> {
+    let r = &w.raids[&raid];
+    let cz_economy::RaidStatus::Extracted { units, bounty } = r.status else { return Ok(None) };
+    if units == 0 && bounty == 0 {
+        return Ok(None);
+    }
+    sync_flows(w, db, near).await?;
+    let faction = chain_account(near, &w.actors[&r.plan.target].account).unwrap_or_default();
+    let sponsor = w
+        .bounties
+        .values()
+        .find(|b| matches!(&b.status, BountyStatus::Paid { raid: id, .. } if *id == raid))
+        .and_then(|b| chain_account(near, &w.actors[&b.sponsor].account));
+    let op = format!("raid:{raid}");
+    let payload = json!({
+        "raid_id": raid.to_string(), "faction": faction, "player": r.player, "token_id": r.plan.resource.name(),
+        "amount": units.to_string(), "bounty": sponsor.map(|s| json!([s, bounty.to_string()])),
+    });
+    enqueue(db, "raid", &op, w.tick, &payload).await?;
+    Ok(Some(op))
+}
+
+/// One-time alignment when the chain already holds state the ledger cursor knows
+/// nothing about (a fresh economy against an existing contract): mint or burn the
+/// difference per actor, then start the cursor at the current ledger.
+pub async fn bootstrap(state: &AppState) -> Result<(), String> {
+    let Some(near) = state.near.clone() else { return Ok(()) };
+    let (cursor,): (i64,) = sqlx::query_as("SELECT ledger_seq FROM chain_sync WHERE id = 1").fetch_one(state.world.db()).await.map_err(|e| e.to_string())?;
+    if cursor > 0 {
+        return Ok(());
+    }
+    // Read the chain first (no lock held across RPC), then align under the lock.
+    let mut chain: BTreeMap<String, BTreeMap<String, i64>> = BTreeMap::new();
+    for role in [Role::Vanguard, Role::Vex] {
+        let acct = near.account(role).to_string();
+        chain.insert(acct.clone(), near.balances(&acct).await?.into_iter().collect());
+    }
+    state
+        .world
+        .transact(async move |w, db| {
+            let (mut mints, mut burns) = (Flows::new(), Flows::new());
+            for a in w.actors.values() {
+                let Some(acct) = chain_account(&near, &a.account) else { continue };
+                for asset in [Asset::Credits, Asset::Res(cz_economy::Resource::Ammo), Asset::Res(cz_economy::Resource::Med), Asset::Res(cz_economy::Resource::Fuel)] {
+                    let mut engine = w.balance(&a.account, asset);
+                    if asset == Asset::Credits {
+                        engine += escrowed_by(w, &a.id);
+                    }
+                    let on_chain = chain.get(&acct).and_then(|m| m.get(asset.name())).copied().unwrap_or(0);
+                    match engine - on_chain {
+                        d if d > 0 => { mints.insert((a.account.clone(), asset), d); }
+                        d if d < 0 => { burns.insert((a.account.clone(), asset), -d); }
+                        _ => {}
+                    }
+                }
+            }
+            let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%S");
+            for (i, (m, b)) in batches(&near, &mints, &burns).into_iter().enumerate() {
+                let batch_id = format!("baseline-{stamp}-{i}");
+                enqueue(db, "genesis", &format!("flows:{batch_id}"), w.tick, &json!({ "batch_id": batch_id, "mints": m, "burns": b, "note": "align the chain with the economy at startup" })).await?;
+            }
+            sqlx::query("UPDATE chain_sync SET ledger_seq = $1, updated_at = now() WHERE id = 1").bind(w.ledger.len() as i64).execute(db).await?;
+            Ok(())
+        })
+        .await
+        .map_err(|e| e.to_string())
+}
+
+type Row = (i64, String, String, Value, i32);
+
+/// Submit the oldest open settlement. Returns whether there was one.
+pub async fn process_next(state: &AppState) -> Result<bool, String> {
+    let Some(near) = state.near.clone() else { return Ok(false) };
+    let db = state.world.db();
+    let row: Option<Row> = sqlx::query_as("SELECT id, kind, op_id, payload, attempts FROM settlements WHERE status IN ('pending', 'submitted') ORDER BY id LIMIT 1")
+        .fetch_optional(db)
+        .await
+        .map_err(|e| e.to_string())?;
+    let Some((id, kind, op_id, payload, attempts)) = row else { return Ok(false) };
+    sqlx::query("UPDATE settlements SET status = 'submitted', attempts = attempts + 1 WHERE id = $1").bind(id).execute(db).await.map_err(|e| e.to_string())?;
+
+    // Already applied on chain (e.g. a crash after submit)? Then it is done.
+    let already = near.view("is_used", json!({ "op_id": op_id })).await.ok().and_then(|v| v.as_bool()).unwrap_or(false);
+    let result: Result<Vec<Verified>, String> = if already {
+        Ok(vec![])
+    } else {
+        match kind.as_str() {
+            "genesis" | "flows" => near
+                .call(Role::Server, "apply_flows", json!({ "batch_id": payload["batch_id"], "mints": payload["mints"], "burns": payload["burns"] }), 0)
+                .await
+                .map(|v| vec![v]),
+            "raid" => near
+                .call(Role::Server, "settle_raid", json!({
+                    "raid_id": payload["raid_id"], "faction": payload["faction"], "player": payload["player"],
+                    "token_id": payload["token_id"], "amount": payload["amount"], "bounty": payload["bounty"],
+                }), 0)
+                .await
+                .map(|v| vec![v]),
+            "trade" => settle_trade(&near, &payload).await,
+            other => Err(format!("unknown settlement kind {other}")),
+        }
+    };
+
+    match result {
+        Ok(verified) => {
+            let hashes: Vec<String> = verified.iter().map(|v| v.tx_hash.clone()).collect();
+            let evidence = json!({ "already_applied": already, "transactions": verified });
+            sqlx::query("UPDATE settlements SET status = 'confirmed', tx_hashes = $2, evidence = $3, error = NULL, confirmed_at = now() WHERE id = $1")
+                .bind(id).bind(&hashes).bind(&evidence).execute(db).await.map_err(|e| e.to_string())?;
+            let tick = state.world.read(|w| w.tick).await;
+            let _ = log_event(db, tick, "near", "settlement", &json!({ "op_id": op_id, "kind": kind, "status": "confirmed", "tx_hashes": hashes, "explorer": verified.iter().map(|v| v.explorer.clone()).collect::<Vec<_>>(), "payload": payload })).await;
+            tracing::info!("settlement {op_id} confirmed: {hashes:?}");
+        }
+        Err(e) => {
+            tracing::warn!("settlement {op_id} attempt {} failed: {e}", attempts + 1);
+            let give_up = attempts + 1 >= 3;
+            let status = if give_up { "failed" } else { "pending" };
+            sqlx::query("UPDATE settlements SET status = $2, error = $3 WHERE id = $1").bind(id).bind(status).bind(&e).execute(db).await.map_err(|e| e.to_string())?;
+            if give_up && kind == "trade" {
+                compensate_trade(state, id, &payload).await;
+            }
+            let tick = state.world.read(|w| w.tick).await;
+            let _ = log_event(db, tick, "near", "settlement", &json!({ "op_id": op_id, "kind": kind, "status": status, "error": e })).await;
+        }
+    }
+    Ok(true)
+}
+
+async fn settle_trade(near: &NearClient, p: &Value) -> Result<Vec<Verified>, String> {
+    let offer_id = p["offer_id"].as_str().unwrap_or_default().to_string();
+    let mut out = Vec::new();
+    // The offer may already be posted from an earlier attempt.
+    let posted = near.view("get_offer", json!({ "offer_id": offer_id })).await.ok().map(|v| !v.is_null()).unwrap_or(false);
+    if !posted {
+        out.push(near.call(Role::Vex, "post_offer", json!({
+            "offer_id": offer_id, "buyer": p["buyer"], "token_id": p["token_id"], "amount": p["amount"], "total_credits": p["total"], "ttl_secs": 600,
+        }), 0).await?);
+    }
+    let buyer = Role::for_actor(p["buyer"].as_str().unwrap_or_default().split('.').next().unwrap_or_default()).unwrap_or(Role::Vanguard);
+    match near.call(buyer, "accept_offer", json!({ "offer_id": offer_id, "max_total": p["total"] }), 0).await {
+        Ok(v) => {
+            out.push(v);
+            Ok(out)
+        }
+        Err(e) => {
+            let _ = near.call(Role::Vex, "cancel_offer", json!({ "offer_id": offer_id }), 0).await;
+            Err(e)
+        }
+    }
+}
+
+/// The trade could not settle on chain: reverse it in the economy.
+async fn compensate_trade(state: &AppState, id: i64, p: &Value) {
+    let Some(trade) = p["trade"].as_u64() else { return };
+    let res = state.world.transact(async move |w, _db| Ok(w.reverse_trade(trade)?)).await;
+    let db = state.world.db();
+    match res {
+        Ok(_) => {
+            let _ = sqlx::query("UPDATE settlements SET status = 'compensated' WHERE id = $1").bind(id).execute(db).await;
+            tracing::warn!("trade {trade} reversed in the economy after its settlement failed");
+        }
+        Err(e) => tracing::error!("trade {trade} failed on chain AND could not be reversed: {e}"),
+    }
+}
+
+/// Engine vs chain balances for each actor, with what is still in flight.
+pub async fn reconcile(state: &AppState) -> Result<Value, String> {
+    let Some(near) = state.near.clone() else { return Ok(json!({ "enabled": false })) };
+    let open: Vec<(String,)> = sqlx::query_as("SELECT op_id FROM settlements WHERE status IN ('pending', 'submitted') ORDER BY id")
+        .fetch_all(state.world.db())
+        .await
+        .map_err(|e| e.to_string())?;
+    let (cursor,): (i64,) = sqlx::query_as("SELECT ledger_seq FROM chain_sync WHERE id = 1").fetch_one(state.world.db()).await.map_err(|e| e.to_string())?;
+    let (engine, ledger_len) = state
+        .world
+        .read(|w| {
+            let mut m = BTreeMap::new();
+            for a in w.actors.values() {
+                let mut h = BTreeMap::new();
+                for asset in [Asset::Credits, Asset::Res(cz_economy::Resource::Ammo), Asset::Res(cz_economy::Resource::Med), Asset::Res(cz_economy::Resource::Fuel)] {
+                    let mut v = w.balance(&a.account, asset);
+                    if asset == Asset::Credits {
+                        v += escrowed_by(w, &a.id);
+                    }
+                    h.insert(asset.name().to_string(), v);
+                }
+                m.insert(a.account.clone(), h);
+            }
+            (m, w.ledger.len())
+        })
+        .await;
+    let mut actors = Vec::new();
+    let mut in_sync = open.is_empty() && cursor as usize == ledger_len;
+    for (acct, eng) in &engine {
+        let Some(chain_acct) = chain_account(&near, acct) else { continue };
+        let chain = near.balances(&chain_acct).await?;
+        let diff: BTreeMap<_, _> = eng.iter().map(|(t, v)| (t.clone(), v - chain.get(t).copied().unwrap_or(0))).filter(|(_, d)| *d != 0).collect();
+        in_sync &= diff.is_empty();
+        actors.push(json!({ "engine_account": acct, "chain_account": chain_acct, "engine": eng, "chain": chain, "difference": diff }));
+    }
+    Ok(json!({
+        "enabled": true,
+        "contract": near.contract.to_string(),
+        "in_sync": in_sync,
+        "unsynced_ledger_entries": ledger_len as i64 - cursor,
+        "open_settlements": open.into_iter().map(|(o,)| o).collect::<Vec<_>>(),
+        "actors": actors,
+        "note": "Differences are expected while settlements are open or ledger entries are unsynced; they must reach zero once both are drained.",
+    }))
+}
+
+pub fn spawn_worker(state: AppState) {
+    if state.near.is_none() {
+        tracing::info!("settlement: disabled (CZ_CONTRACT not set): the economy runs off-chain only");
+        return;
+    }
+    tokio::spawn(async move {
+        if let Err(e) = bootstrap(&state).await {
+            tracing::error!("settlement bootstrap failed: {e}");
+        }
+        loop {
+            match process_next(&state).await {
+                Ok(true) => continue,
+                Ok(false) => tokio::time::sleep(std::time::Duration::from_secs(3)).await,
+                Err(e) => {
+                    tracing::error!("settlement worker: {e}");
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                }
+            }
+        }
+    });
+}

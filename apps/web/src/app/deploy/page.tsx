@@ -9,6 +9,7 @@ import { Panel, Shell, Stat } from '@/components/ui/Shell'
 import { buildConvoyMission } from '@/engine/fps/convoy'
 import { GUN_CATALOG, gunDps, type GunId } from '@/engine/combat/GunStats'
 import type { ContractRunStats } from '@/engine/scene/ContractZeroScene'
+import { useQuery } from '@tanstack/react-query'
 import { api, loadPlayer, RESOURCE_LABEL, type BoardEntry, type MissionResult, type MissionStart, type ResourceName, type WorldView } from '@/lib/api'
 import { retryImport } from '@/lib/retryImport'
 
@@ -37,6 +38,30 @@ function guardsLine(e?: BoardEntry) {
   if (!e) return 'no depot (not worth raiding, or no fuel to stage it)'
   const g = e.guards
   return `${plural(g.hall.rifles + g.yard.rifles, "rifle")}, ${plural(g.hall.sidearms + g.yard.sidearms, "sidearm")}, ${g.reinforce_per_drop} reinforcements per wave, defense L${e.defense}`
+}
+
+/** Shows on-chain settlement only once it is confirmed (verified FINAL on NEAR). */
+function SettlementStatus({ opId }: { opId: string }) {
+  const q = useQuery({
+    queryKey: ['settlement', opId],
+    queryFn: () => api.settlement(opId),
+    refetchInterval: (query) => (query.state.data && ['confirmed', 'failed', 'compensated'].includes(query.state.data.status) ? false : 3000),
+  })
+  const s = q.data
+  if (!s || !s.settled_on_chain) {
+    if (s && (s.status === 'failed' || s.status === 'compensated')) {
+      return <p className="text-sm text-rose-400">On-chain settlement failed: {s.error}</p>
+    }
+    return <p className="text-sm text-slate-400">Settling on NEAR… ({s?.status ?? 'queued'}). Not settled until confirmed.</p>
+  }
+  return (
+    <p className="text-sm text-emerald-400">
+      Settled on NEAR testnet:{' '}
+      {s.explorer.map((url, i) => (
+        <a key={url} href={url} target="_blank" rel="noreferrer" className="underline">{s.tx_hashes[i].slice(0, 10)}…</a>
+      ))}
+    </p>
+  )
 }
 
 function Deploy() {
@@ -112,6 +137,7 @@ function Deploy() {
             {won ? 'CARGO EXTRACTED' : result.outcome === 'killed' ? 'KILLED IN ACTION' : 'RUN REJECTED'}
           </div>
           {result.reason && <p className="mt-1 text-sm text-amber-400">The server rejected the run: {result.reason}.</p>}
+          {result.settlement && <div className="mt-2"><SettlementStatus opId={result.settlement.op_id} /></div>}
           <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
             <Stat label="Extracted" value={`${result.extracted_units} ${result.resource}`} />
             <Stat label="Bounty" value={`${result.bounty} cr`} />

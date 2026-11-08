@@ -1,0 +1,266 @@
+use super::*;
+use near_sdk::test_utils::VMContextBuilder;
+use near_sdk::{testing_env, PromiseResult};
+
+const WORLD: &str = "world2.contract-zero.testnet";
+const ASSETS: &str = "assets.contract-zero.testnet";
+const OWNER: &str = "contract-zero.testnet";
+const SERVER: &str = "server.contract-zero.testnet";
+const VANGUARD: &str = "vanguard.contract-zero.testnet";
+const VEX: &str = "vex.contract-zero.testnet";
+const PLAYER: &str = "player.contract-zero.testnet";
+
+fn acc(s: &str) -> AccountId {
+    s.parse().unwrap()
+}
+
+fn as_(who: &str) {
+    let mut b = VMContextBuilder::new();
+    b.predecessor_account_id(acc(who)).signer_account_id(acc(who)).current_account_id(acc(WORLD)).block_timestamp(1_000_000_000_000).prepaid_gas(Gas::from_tgas(300));
+    testing_env!(b.build());
+}
+
+fn callback(result: PromiseResult) {
+    let mut b = VMContextBuilder::new();
+    b.predecessor_account_id(acc(WORLD)).current_account_id(acc(WORLD)).prepaid_gas(Gas::from_tgas(300));
+    testing_env!(b.build(), near_sdk::test_vm_config(), near_sdk::RuntimeFeesConfig::test(), Default::default(), vec![result]);
+}
+
+fn ok() -> PromiseResult {
+    PromiseResult::Successful(vec![])
+}
+
+fn setup() -> WorldV2 {
+    as_(OWNER);
+    let mut w = WorldV2::new(acc(OWNER), acc(SERVER), acc(ASSETS));
+    w.register_actor(acc(VANGUARD), Role::Faction);
+    w.register_actor(acc(VEX), Role::Merchant);
+    w
+}
+
+fn offer(w: &mut WorldV2, id: &str, buyer: &str, amount: u128, total: u128) {
+    as_(VEX);
+    w.post_offer(id.into(), acc(buyer), "ammo".into(), U128(amount), U128(total), 600);
+}
+
+fn bid(w: &mut WorldV2, id: &str, seller: &str, amount: u128, total: u128) {
+    as_(VEX);
+    w.post_bid(id.into(), acc(seller), "ammo".into(), U128(amount), U128(total), 600);
+}
+
+// ── the async lifecycle ──────────────────────────────────────────────────────
+
+#[test]
+fn an_offer_settles_and_is_consumed() {
+    let mut w = setup();
+    offer(&mut w, "q1", VANGUARD, 24, 517);
+    as_(VANGUARD);
+    let _ = w.accept_offer("q1".into(), U128(517));
+    assert_eq!(w.get_quote("offer:q1".into()).unwrap().state, QuoteState::Settling);
+    assert!(w.is_pending("offer:q1".into()));
+    callback(ok());
+    assert!(w.on_settled("offer:q1".into(), Some("offer:q1".into()), Ok(())));
+    assert!(w.get_quote("offer:q1".into()).is_none());
+    assert!(w.is_used("offer:q1".into()));
+    assert!(!w.is_pending("offer:q1".into()));
+}
+
+#[test]
+fn a_failed_settlement_reopens_the_offer_without_consuming_it() {
+    let mut w = setup();
+    offer(&mut w, "q1", VANGUARD, 24, 517);
+    as_(VANGUARD);
+    let _ = w.accept_offer("q1".into(), U128(517));
+    callback(PromiseResult::Failed);
+    assert!(!w.on_settled("offer:q1".into(), Some("offer:q1".into()), Err(PromiseError::Failed)));
+    assert_eq!(w.get_quote("offer:q1".into()).unwrap().state, QuoteState::Open);
+    assert!(!w.is_used("offer:q1".into()) && !w.is_pending("offer:q1".into()));
+    // …and it can be accepted again.
+    as_(VANGUARD);
+    let _ = w.accept_offer("q1".into(), U128(517));
+}
+
+#[test]
+#[should_panic(expected = "the quote is already settling")]
+fn an_offer_cannot_be_accepted_twice_while_in_flight() {
+    let mut w = setup();
+    offer(&mut w, "q1", VANGUARD, 24, 517);
+    as_(VANGUARD);
+    let _ = w.accept_offer("q1".into(), U128(517));
+    let _ = w.accept_offer("q1".into(), U128(517));
+}
+
+#[test]
+#[should_panic(expected = "the quote is settling")]
+fn a_settling_quote_cannot_be_cancelled() {
+    let mut w = setup();
+    offer(&mut w, "q1", VANGUARD, 24, 517);
+    as_(VANGUARD);
+    let _ = w.accept_offer("q1".into(), U128(517));
+    as_(VEX);
+    w.cancel_quote("offer:q1".into());
+}
+
+#[test]
+fn a_raid_reserves_its_id_and_a_failure_frees_it_for_retry() {
+    let mut w = setup();
+    as_(SERVER);
+    let _ = w.settle_raid("1".into(), acc(VANGUARD), acc(PLAYER), "ammo".into(), U128(60), None);
+    assert!(w.is_pending("raid:1".into()));
+    callback(PromiseResult::Failed);
+    w.on_settled("raid:1".into(), None, Err(PromiseError::Failed));
+    assert!(!w.is_pending("raid:1".into()) && !w.is_used("raid:1".into()));
+    as_(SERVER);
+    let _ = w.settle_raid("1".into(), acc(VANGUARD), acc(PLAYER), "ammo".into(), U128(60), None);
+    callback(ok());
+    w.on_settled("raid:1".into(), None, Ok(()));
+    assert!(w.is_used("raid:1".into()));
+}
+
+#[test]
+#[should_panic(expected = "operation already in flight")]
+fn a_raid_cannot_be_submitted_twice_while_in_flight() {
+    let mut w = setup();
+    as_(SERVER);
+    let _ = w.settle_raid("1".into(), acc(VANGUARD), acc(PLAYER), "ammo".into(), U128(60), None);
+    let _ = w.settle_raid("1".into(), acc(VANGUARD), acc(PLAYER), "ammo".into(), U128(60), None);
+}
+
+#[test]
+#[should_panic(expected = "operation already applied")]
+fn a_settled_raid_cannot_be_replayed() {
+    let mut w = setup();
+    as_(SERVER);
+    let _ = w.settle_raid("1".into(), acc(VANGUARD), acc(PLAYER), "ammo".into(), U128(60), None);
+    callback(ok());
+    w.on_settled("raid:1".into(), None, Ok(()));
+    as_(SERVER);
+    let _ = w.settle_raid("1".into(), acc(VANGUARD), acc(PLAYER), "ammo".into(), U128(60), None);
+}
+
+// ── bids: the merchant buys ──────────────────────────────────────────────────
+
+#[test]
+fn the_named_seller_accepts_a_bid_with_a_price_floor() {
+    let mut w = setup();
+    bid(&mut w, "b1", VANGUARD, 20, 300);
+    as_(VANGUARD);
+    let _ = w.accept_bid("b1".into(), U128(300));
+    assert_eq!(w.get_quote("bid:b1".into()).unwrap().state, QuoteState::Settling);
+}
+
+#[test]
+#[should_panic(expected = "price is below the seller's limit")]
+fn a_seller_never_receives_less_than_its_floor() {
+    let mut w = setup();
+    bid(&mut w, "b1", VANGUARD, 20, 300);
+    as_(VANGUARD);
+    let _ = w.accept_bid("b1".into(), U128(301));
+}
+
+#[test]
+#[should_panic(expected = "no such quote")]
+fn an_offer_cannot_be_accepted_as_a_bid() {
+    // Offer and bid ids live in separate namespaces ("offer:x" vs "bid:x").
+    let mut w = setup();
+    offer(&mut w, "x", VANGUARD, 1, 18);
+    as_(VANGUARD);
+    let _ = w.accept_bid("x".into(), U128(0));
+}
+
+#[test]
+fn a_player_can_sell_to_a_bid_addressed_to_them() {
+    let mut w = setup();
+    bid(&mut w, "p1", PLAYER, 30, 400);
+    as_(PLAYER);
+    let _ = w.accept_bid("p1".into(), U128(400));
+    assert!(w.is_pending("bid:p1".into()));
+}
+
+// ── authorization ────────────────────────────────────────────────────────────
+
+#[test]
+#[should_panic(expected = "this quote is for another account")]
+fn only_the_named_counterparty_accepts() {
+    let mut w = setup();
+    offer(&mut w, "q", VANGUARD, 1, 18);
+    as_(PLAYER);
+    let _ = w.accept_offer("q".into(), U128(18));
+}
+
+#[test]
+#[should_panic(expected = "only a registered merchant posts quotes")]
+fn a_faction_cannot_post_quotes() {
+    let mut w = setup();
+    as_(VANGUARD);
+    w.post_bid("b".into(), acc(VEX), "ammo".into(), U128(1), U128(1), 60);
+}
+
+#[test]
+#[should_panic(expected = "only the game server can do this")]
+fn a_merchant_cannot_settle_raids() {
+    let mut w = setup();
+    as_(VEX);
+    let _ = w.settle_raid("1".into(), acc(VANGUARD), acc(VEX), "ammo".into(), U128(60), None);
+}
+
+#[test]
+#[should_panic(expected = "only the game server can do this")]
+fn a_faction_cannot_apply_flows() {
+    let mut w = setup();
+    as_(VANGUARD);
+    let _ = w.apply_flows("x".into(), vec![Flow { account_id: acc(VANGUARD), token_id: "credits".into(), amount: U128(1) }], vec![]);
+}
+
+#[test]
+#[should_panic(expected = "the receiver of raid cargo must be a player")]
+fn raid_cargo_cannot_be_routed_to_an_actor() {
+    let mut w = setup();
+    as_(SERVER);
+    let _ = w.settle_raid("1".into(), acc(VANGUARD), acc(VEX), "ammo".into(), U128(60), None);
+}
+
+#[test]
+#[should_panic(expected = "target is not a registered faction")]
+fn raids_target_factions_only() {
+    let mut w = setup();
+    as_(SERVER);
+    let _ = w.settle_raid("1".into(), acc(VEX), acc(PLAYER), "ammo".into(), U128(1), None);
+}
+
+#[test]
+#[should_panic(expected = "flows apply only to registered actors")]
+fn flows_cannot_touch_players() {
+    let mut w = setup();
+    as_(SERVER);
+    let _ = w.apply_flows("x".into(), vec![Flow { account_id: acc(PLAYER), token_id: "credits".into(), amount: U128(1) }], vec![]);
+}
+
+#[test]
+#[should_panic(expected = "quote expired")]
+fn expired_quotes_cannot_settle() {
+    let mut w = setup();
+    as_(VEX);
+    w.post_offer("q".into(), acc(VANGUARD), "ammo".into(), U128(1), U128(18), 1);
+    let mut b = VMContextBuilder::new();
+    b.predecessor_account_id(acc(VANGUARD)).current_account_id(acc(WORLD)).block_timestamp(1_000_000_000_000 + 2_000_000_000);
+    testing_env!(b.build());
+    let _ = w.accept_offer("q".into(), U128(18));
+}
+
+#[test]
+#[should_panic(expected = "quote id already used")]
+fn a_cancelled_quote_id_stays_consumed() {
+    let mut w = setup();
+    offer(&mut w, "q", VANGUARD, 1, 18);
+    w.cancel_quote("offer:q".into());
+    offer(&mut w, "q", VANGUARD, 1, 18);
+}
+
+#[test]
+#[should_panic(expected = "only the owner can do this")]
+fn the_server_cannot_register_actors() {
+    let mut w = setup();
+    as_(SERVER);
+    w.register_actor(acc(PLAYER), Role::Merchant);
+}

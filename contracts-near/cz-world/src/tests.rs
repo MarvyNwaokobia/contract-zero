@@ -532,3 +532,35 @@ fn a_full_flow_batch_stays_under_the_log_limit() {
     let total: usize = get_logs().iter().map(|l| l.len()).sum();
     assert!(total < 16_384 / 2, "logs {total} bytes leave headroom under the 16 KB receipt limit");
 }
+
+// ── migration freeze ─────────────────────────────────────────────────────────
+
+#[test]
+fn freezing_keeps_balances_readable_and_refuses_every_settlement() {
+    let mut w = setup();
+    as_(SERVER);
+    w.freeze();
+    assert!(w.is_frozen());
+    assert_eq!(bal(&w, VANGUARD, "ammo"), 100, "balances stay readable for the migration snapshot");
+    let attempts: Vec<Box<dyn Fn(&mut World)>> = vec![
+        Box::new(|w| w.settle_raid("1".into(), acc(VANGUARD), acc(PLAYER), "ammo".into(), U128(1), None)),
+        Box::new(|w| w.apply_flows("f".into(), vec![flow(VANGUARD, "ammo", 1)], vec![])),
+        Box::new(|w| w.register_player(acc(PLAYER))),
+    ];
+    for f in attempts {
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&mut w)));
+        assert!(r.is_err());
+    }
+    as_(VEX);
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| w.post_offer("q".into(), acc(VANGUARD), "ammo".into(), U128(1), U128(1), 60))).is_err());
+    as_with_yocto(VANGUARD);
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| w.mt_transfer(acc(VEX), "ammo".into(), U128(1), None, None))).is_err());
+}
+
+#[test]
+#[should_panic(expected = "only the game server can do this")]
+fn only_the_owner_can_freeze() {
+    let mut w = setup();
+    as_(VANGUARD);
+    w.freeze();
+}

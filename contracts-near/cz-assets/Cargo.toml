@@ -1,0 +1,25 @@
+[package]
+name = "cz-assets"
+version = "0.1.0"
+edition = "2021"
+description = "CONTRACT ZERO cz-assets"
+repository = "https://github.com/Psalmuel01/contract-zero"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = "5"
+
+[dev-dependencies]
+near-sdk = { version = "5", features = ["unit-testing"] }
+
+[profile.release]
+codegen-units = 1
+opt-level = "z"
+lto = true
+debug = false
+panic = "abort"
+overflow-checks = true
+

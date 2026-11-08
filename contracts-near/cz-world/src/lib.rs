@@ -32,6 +32,8 @@ use near_sdk::store::{LookupMap, LookupSet};
 use near_sdk::{env, ext_contract, near, require, AccountId, BorshStorageKey, Gas, NearSchema, PanicOnDefault, PromiseError, PromiseOrValue};
 
 pub const TOKENS: [&str; 4] = ["credits", "ammo", "med", "fuel"];
+/// Raw storage key of the migration freeze flag (outside the borsh state).
+const FROZEN_KEY: &[u8] = b"__frozen";
 /// Largest single mint, burn or raid settlement.
 pub const MAX_AMOUNT: u128 = 100_000;
 /// Most entries in one `apply_flows` batch (mints + burns).
@@ -161,6 +163,7 @@ impl World {
     // ── administration (owner) ───────────────────────────────────────────────
 
     pub fn register_actor(&mut self, account_id: AccountId, role: Role) {
+        self.require_live();
         self.only_owner();
         require!(account_id != self.owner && account_id != env::current_account_id(), "the server and the contract are not actors");
         self.roles.insert(account_id.clone(), role);
@@ -169,6 +172,7 @@ impl World {
 
     /// Allow a player account to hold tokens (the server does this before paying one).
     pub fn register_player(&mut self, account_id: AccountId) {
+        self.require_live();
         self.only_owner();
         require!(self.roles.get(&account_id).is_none(), "actors are not players");
         self.holders.insert(account_id);
@@ -192,6 +196,20 @@ impl World {
 
     pub fn storage_usage(&self) -> u64 {
         env::storage_usage()
+    }
+
+    /// Retire this contract after migrating to cz-assets + cz-world v2: every
+    /// value-moving method is refused from now on, so the old and new contracts can
+    /// never settle the same economic event. Stored as a raw flag so the state layout
+    /// (and therefore every balance) is untouched by this upgrade. Irreversible.
+    pub fn freeze(&mut self) {
+        self.only_owner();
+        env::storage_write(FROZEN_KEY, &[1]);
+        env::log_str("frozen: migrated to cz-assets + cz-world v2");
+    }
+
+    pub fn is_frozen(&self) -> bool {
+        env::storage_has_key(FROZEN_KEY)
     }
 
     // ── NEP-245 views ────────────────────────────────────────────────────────
@@ -223,6 +241,7 @@ impl World {
 
     #[payable]
     pub fn mt_transfer(&mut self, receiver_id: AccountId, token_id: String, amount: U128, approval: Option<(AccountId, u64)>, memo: Option<String>) {
+        self.require_live();
         near_sdk::assert_one_yocto();
         require!(approval.is_none(), "approvals are not supported");
         let sender = env::predecessor_account_id();
@@ -232,6 +251,7 @@ impl World {
 
     #[payable]
     pub fn mt_batch_transfer(&mut self, receiver_id: AccountId, token_ids: Vec<String>, amounts: Vec<U128>, approvals: Option<Vec<Option<(AccountId, u64)>>>, memo: Option<String>) {
+        self.require_live();
         near_sdk::assert_one_yocto();
         require!(approvals.is_none(), "approvals are not supported");
         require!(!token_ids.is_empty() && token_ids.len() == amounts.len(), "token_ids and amounts must be non-empty and the same length");
@@ -249,6 +269,7 @@ impl World {
 
     #[payable]
     pub fn mt_batch_transfer_call(&mut self, receiver_id: AccountId, token_ids: Vec<String>, amounts: Vec<U128>, approvals: Option<Vec<Option<(AccountId, u64)>>>, memo: Option<String>, msg: String) -> PromiseOrValue<Vec<U128>> {
+        self.require_live();
         near_sdk::assert_one_yocto();
         require!(approvals.is_none(), "approvals are not supported");
         require!(!token_ids.is_empty() && token_ids.len() == amounts.len(), "token_ids and amounts must be non-empty and the same length");
@@ -295,6 +316,7 @@ impl World {
     /// destruction. Only on registered actors, bounded per entry, per batch and per
     /// token supply, and each `batch_id` applies once.
     pub fn apply_flows(&mut self, batch_id: String, mints: Vec<Flow>, burns: Vec<Flow>) {
+        self.require_live();
         self.only_owner();
         require!(mints.len() + burns.len() <= MAX_FLOWS, "too many flows in one batch");
         require!(!mints.is_empty() || !burns.is_empty(), "empty batch");
@@ -319,6 +341,7 @@ impl World {
     /// sponsor's bounty if there is one. Once per raid; the player is registered as a
     /// holder if it was not already.
     pub fn settle_raid(&mut self, raid_id: String, faction: AccountId, player: AccountId, token_id: String, amount: U128, bounty: Option<(AccountId, U128)>) {
+        self.require_live();
         self.only_owner();
         require!(self.roles.get(&faction) == Some(&Role::Faction), "target is not a registered faction");
         require!(self.roles.get(&player).is_none(), "the receiver of raid cargo must be a player, not an actor");
@@ -341,6 +364,7 @@ impl World {
     /// The merchant offers `amount` of `token_id` to `buyer` for `total_credits`. The
     /// merchant must hold the goods now; the offer expires after `ttl_secs`.
     pub fn post_offer(&mut self, offer_id: String, buyer: AccountId, token_id: String, amount: U128, total_credits: U128, ttl_secs: u32) {
+        self.require_live();
         let seller = env::predecessor_account_id();
         require!(self.roles.get(&seller) == Some(&Role::Merchant), "only a registered merchant posts offers");
         require!(buyer != seller, "cannot sell to yourself");
@@ -363,6 +387,7 @@ impl World {
     /// The named buyer accepts, paying at most `max_total` credits: goods to the buyer,
     /// credits to the merchant, in one receipt. Either both legs happen or neither does.
     pub fn accept_offer(&mut self, offer_id: String, max_total: U128) {
+        self.require_live();
         let buyer = env::predecessor_account_id();
         let offer = self.offers.get(&offer_id).cloned().unwrap_or_else(|| env::panic_str("no such offer"));
         require!(offer.buyer == buyer, "this offer is for another buyer");
@@ -380,6 +405,7 @@ impl World {
 
     /// An unaccepted offer can be withdrawn by its merchant. Its id stays consumed.
     pub fn cancel_offer(&mut self, offer_id: String) {
+        self.require_live();
         let offer = self.offers.get(&offer_id).cloned().unwrap_or_else(|| env::panic_str("no such offer"));
         require!(offer.seller == env::predecessor_account_id(), "not your offer");
         self.offers.remove(&offer_id);
@@ -392,6 +418,10 @@ impl World {
 impl World {
     fn only_owner(&self) {
         require!(env::predecessor_account_id() == self.owner, "only the game server can do this");
+    }
+
+    fn require_live(&self) {
+        require!(!env::storage_has_key(FROZEN_KEY), "frozen: this contract migrated to cz-assets + cz-world v2");
     }
 
     fn require_holder(&self, account: &AccountId) {

@@ -18,7 +18,7 @@ import {
 } from 'near-api-js'
 import { API } from '@/lib/api'
 
-export const RPC = process.env.NEXT_PUBLIC_NEAR_RPC ?? 'https://rpc.testnet.near.org'
+export const RPC = process.env.NEXT_PUBLIC_NEAR_RPC ?? 'https://rpc.testnet.fastnear.com'
 const provider = () => new JsonRpcProvider({ url: RPC })
 
 export interface Session {

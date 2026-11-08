@@ -101,7 +101,7 @@ impl NearClient {
             signers.insert(role, signer);
             locks.insert(role, Arc::new(Mutex::new(())));
         }
-        let rpc_url = std::env::var("NEAR_RPC_URL").unwrap_or_else(|_| "https://rpc.testnet.near.org".into());
+        let rpc_url = std::env::var("NEAR_RPC_URL").unwrap_or_else(|_| "https://rpc.testnet.fastnear.com".into());
         Ok(Some(Self { contract, assets, rpc_url, accounts, signers, http: reqwest::Client::new(), locks }))
     }
 

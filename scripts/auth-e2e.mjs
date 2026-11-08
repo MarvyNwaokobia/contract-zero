@@ -19,7 +19,7 @@ import { Account, JsonRpcProvider, KeyPair, KeyPairSigner, actions, encodeSigned
 import { client, loadKey, signIn } from './lib/cz-auth.mjs';
 
 const API = process.argv[2] ?? 'http://127.0.0.1:8080';
-const RPC = 'https://rpc.testnet.near.org';
+const RPC = 'https://rpc.testnet.fastnear.com';
 const WORLD = 'world2.contract-zero.testnet';
 const K = `${homedir()}/.contract-zero/keys`;
 const full = loadKey(process.env.PLAYER_FULL_KEY_FILE ?? `${K}/players-full/player.contract-zero.testnet.json`);

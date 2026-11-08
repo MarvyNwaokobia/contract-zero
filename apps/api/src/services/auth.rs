@@ -156,7 +156,7 @@ struct SignClaims {
 
 impl AuthService {
     pub fn from_env(controller: Option<String>) -> Result<Self, String> {
-        let rpc_url = std::env::var("NEAR_RPC_URL").unwrap_or_else(|_| "https://rpc.testnet.near.org".into());
+        let rpc_url = std::env::var("NEAR_RPC_URL").unwrap_or_else(|_| "https://rpc.testnet.fastnear.com".into());
         let relayer = match (std::env::var("CZ_RELAYER_ACCOUNT"), std::env::var("CZ_RELAYER_KEY_FILE")) {
             (Ok(a), Ok(f)) => {
                 let account: AccountId = a.parse().map_err(|e| format!("CZ_RELAYER_ACCOUNT: {e}"))?;

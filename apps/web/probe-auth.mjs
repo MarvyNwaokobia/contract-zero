@@ -55,7 +55,7 @@ if (login.status !== 200) throw new Error('sign-in failed')
 // The player's own authority opens a quick-trade session (what the "Turn on" button
 // asks their wallet to approve).
 const sk = KeyPair.fromRandom('ed25519')
-const wallet = new Account(full.accountId, new JsonRpcProvider({ url: 'https://rpc.testnet.near.org' }), new KeyPairSigner(full.keyPair))
+const wallet = new Account(full.accountId, new JsonRpcProvider({ url: 'https://rpc.testnet.fastnear.com' }), new KeyPairSigner(full.keyPair))
 await wallet.signAndSendTransaction({ receiverId: full.accountId, actions: [actions.addFunctionCallAccessKey(sk.getPublicKey(), WORLD, ['accept_offer', 'accept_bid', 'revoke_session'], 250_000_000_000_000_000_000_000n)], waitUntil: 'FINAL' })
 await wallet.signAndSendTransaction({ receiverId: WORLD, actions: [actions.functionCall('register_session', { public_key: sk.getPublicKey().toString(), credit_budget: '400', unit_budget: '0', ttl_secs: 3600 }, 30_000_000_000_000n, 1_000_000_000_000_000_000_000n)], waitUntil: 'FINAL' })
 out.trade.session_key = sk.getPublicKey().toString()

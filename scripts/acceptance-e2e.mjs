@@ -12,7 +12,7 @@ import { homedir } from 'node:os';
 import { loadKey, signIn } from './lib/cz-auth.mjs';
 
 const API = process.argv[2] ?? 'http://127.0.0.1:8089';
-const RPC = 'https://rpc.testnet.near.org';
+const RPC = 'https://rpc.testnet.fastnear.com';
 // Balances live in the NEP-245 ledger (cz-assets) since the v2 split.
 const CONTRACT = process.env.CZ_ASSETS ?? 'assets.contract-zero.testnet';
 const PLAYER = 'player.contract-zero.testnet';

@@ -17,7 +17,7 @@ import { loadKey, signIn } from './lib/cz-auth.mjs';
 import { Account, JsonRpcProvider } from 'near-api-js';
 
 const API = process.argv[2] ?? 'http://127.0.0.1:8080';
-const RPC = 'https://rpc.testnet.near.org';
+const RPC = 'https://rpc.testnet.fastnear.com';
 const ASSETS = process.env.CZ_ASSETS ?? 'assets.contract-zero.testnet';
 const PLAYER = process.env.PLAYER ?? 'player.contract-zero.testnet';
 const VEX = 'vex.contract-zero.testnet';

@@ -2,7 +2,7 @@
 // Snapshot the frozen v1 contract for the given holders, prove the snapshot is
 // complete (per token, sum of holders == v1 mt_supply), and print the import entries.
 // Usage: node scripts/migrate-v1.mjs <holder>...   (read-only)
-const RPC = process.env.NEAR_RPC_URL ?? 'https://rpc.testnet.near.org';
+const RPC = process.env.NEAR_RPC_URL ?? 'https://rpc.testnet.fastnear.com';
 const V1 = 'world.contract-zero.testnet';
 const TOKENS = ['credits', 'ammo', 'med', 'fuel'];
 async function view(contract, method, args) {

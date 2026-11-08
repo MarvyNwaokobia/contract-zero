@@ -563,7 +563,9 @@ function PerfHud({ hud }: { hud: React.MutableRefObject<Hud> }) {
   return null;
 }
 
-function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, onComplete, onDeath, pausedRef, gateRef, accountRank, accountXp, equippedGun, equippedAmmo, equippedMods, fieldKit, endlessOpts, coop }: {
+function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, onComplete, onDeath, endOnDeath, pausedRef, gateRef, accountRank, accountXp, equippedGun, equippedAmmo, equippedMods, fieldKit, endlessOpts, coop }: {
+  /** Contract mode: a final death ends the run (the page shows the result) instead of restarting the op. */
+  endOnDeath?: boolean;
   hud: React.MutableRefObject<Hud>; controls: React.MutableRefObject<Controls>;
   // lowSpec = touch device (drives touch input/aim-assist). lightFx = drop the
   // expensive postprocessing. minimal = the aggressive tier for a struggling
@@ -2472,9 +2474,9 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
         if (holding) holdProgress.current += dt;
         const hold = obj.holdSecs ?? 20;
         // Keep the pressure up — trickle reinforcements in until the clock runs out.
-        if (holdProgress.current < hold && sim.time - lastReinforceAt.current > 3.5) {
+        if (holdProgress.current < hold && sim.time - lastReinforceAt.current > (obj.reinforceEvery ?? 3.5)) {
           lastReinforceAt.current = sim.time;
-          sim.reinforce(obj.reinforceRoom ?? obj.room ?? 0, 2);
+          sim.reinforce(obj.reinforceRoom ?? obj.room ?? 0, obj.reinforceCount ?? 2);
         }
         done = holdProgress.current >= hold;
       } else if (obj.kind === 'rescue') {
@@ -2547,7 +2549,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       }
     }
     // DOWN or COMPLETE → restart the operation after a beat
-    if (!snap.playerAlive && reviveAt.current === 0 && now - downAt.current > 2.2) restartMission();
+    if (!snap.playerAlive && reviveAt.current === 0 && now - downAt.current > 2.2 && !endOnDeath) restartMission();
     // MISSION COMPLETE holds for a beat, then hands off to the debrief interstitial.
     if (completeAt.current > 0 && performance.now() - completeWallAt.current > 2200 && !advanced.current) {
       advanced.current = true;
@@ -3485,11 +3487,26 @@ function MissionDebrief({ mode, cleared, next, reward, onDeploy, onRetry, onExit
   );
 }
 
-export function ValorScene({ onOpStart, onOpCleared, onOpFailed, startMission, resumeLevel, accountRank, accountXp, equippedGun, equippedAmmo, equippedMods, fieldKit, onExit, endless, seasonal, coop }: {
+/** Outcome stats for a contract run. `secs` is wall time from deploy to the end. */
+export interface ContractRunStats { kills: number; headshots: number; secs: number }
+
+export interface ContractRun {
+  mission: Mission;
+  /** Open the server mission session. Resolve false to hold the scene on Retry. */
+  onStart?: () => Promise<boolean>;
+  onExtracted: (stats: ContractRunStats) => void;
+  onKilled: (stats: ContractRunStats) => void;
+}
+
+export function ValorScene({ contract, onOpStart, onOpCleared, onOpFailed, startMission, resumeLevel, accountRank, accountXp, equippedGun, equippedAmmo, equippedMods, fieldKit, onExit, endless, seasonal, coop }: {
   /** Boot straight into an ENDLESS run on the generated room chain, bypassing the
    *  campaign entirely. Present for Campaign Endless and the Seasonal Campaign;
    *  absent everywhere else. */
   endless?: EndlessOpts;
+  /** CONTRACT ZERO: run exactly this one contract mission. The page owns the
+   *  flow around it (board → loadout → here → extraction results), so the scene
+   *  hands the outcome back instead of advancing a campaign. */
+  contract?: ContractRun;
   /** Co-op Endless (party mode) — present only when `endless` is also present
    *  AND the run is a party, not solo. See `CoopOpts`. */
   coop?: CoopOpts;
@@ -3590,7 +3607,9 @@ export function ValorScene({ onOpStart, onOpCleared, onOpFailed, startMission, r
     menuOpenRef.current = v; setSelectOpen(v);
     if (v) { try { document.exitPointerLock?.(); } catch { /* ignore */ } }
   };
-  const [mode, setMode] = useState<'campaign' | 'survival' | 'gauntlet' | 'endless'>(endless ? 'endless' : 'campaign');
+  const [mode, setMode] = useState<'campaign' | 'survival' | 'gauntlet' | 'endless' | 'contract'>(contract ? 'contract' : endless ? 'endless' : 'campaign');
+  const contractRef = useRef(contract);
+  contractRef.current = contract;
   const [debrief, setDebrief] = useState<null | 'next' | 'finale'>(null);
   const [lastReward, setLastReward] = useState<OpReward | null>(null); // real server reward for the debrief
   const missionStartWall = useRef(performance.now()); // for the op's clear time
@@ -3614,8 +3633,10 @@ export function ValorScene({ onOpStart, onOpCleared, onOpFailed, startMission, r
     missionStartWall.current = performance.now();
     // Only campaign ops carry a server session; survival/gauntlet aren't gated here, and
     // /dev/verb (no onOpStart) plays ungated too.
-    if (mode !== 'campaign' || !onOpStartRef.current) { setGate('ok'); gateRef.current = false; return; }
-    const level = missionIndex + 1;
+    const startFn = mode === 'contract'
+      ? contractRef.current?.onStart
+      : mode === 'campaign' ? (() => onOpStartRef.current?.(missionIndex + 1)) : undefined;
+    if (!startFn || (mode === 'campaign' && !onOpStartRef.current)) { setGate('ok'); gateRef.current = false; return; }
     let cancelled = false;
     const connect = () => {
       setGate('connecting'); gateRef.current = true;
@@ -3626,7 +3647,7 @@ export function ValorScene({ onOpStart, onOpCleared, onOpFailed, startMission, r
           await Promise.race([pendingClear.current.catch(() => {}), new Promise((r) => setTimeout(r, 12000))]);
         }
         if (cancelled) return;
-        const ok = await Promise.resolve(onOpStartRef.current?.(level));
+        const ok = await Promise.resolve(startFn());
         if (cancelled) return;
         if (ok === false) { setGate('error'); gateRef.current = true; }      // frozen, offer Retry
         else { setGate('ok'); gateRef.current = false; missionStartWall.current = performance.now(); }
@@ -3637,7 +3658,8 @@ export function ValorScene({ onOpStart, onOpCleared, onOpFailed, startMission, r
     return () => { cancelled = true; };
   }, [missionIndex, runNonce, mode]);
   const retryConnect = () => gateConnectRef.current?.();
-  const mission = mode === 'endless' ? (seasonal ? SEASONAL_MISSION : ENDLESS_MISSION)
+  const mission = mode === 'contract' && contract ? contract.mission
+    : mode === 'endless' ? (seasonal ? SEASONAL_MISSION : ENDLESS_MISSION)
     : mode === 'gauntlet' ? GAUNTLET_MISSION
     : mode === 'survival' ? SURVIVAL_MISSION
     : CAMPAIGN[Math.min(missionIndex, CAMPAIGN.length - 1)];
@@ -3684,6 +3706,12 @@ export function ValorScene({ onOpStart, onOpCleared, onOpFailed, startMission, r
   // ── Between-mission debrief: clear an op → story of the next → deploy/retry/exit ──
   const clearComplete = () => { if (hud.current.complete) hud.current.complete.style.opacity = '0'; };
   const handleComplete = (stats: { kills: number; headshots: number }) => {
+    if (mode === 'contract') {
+      menuOpenRef.current = true; // freeze the scene; the page takes over
+      try { document.exitPointerLock?.(); } catch { /* ignore */ }
+      contractRef.current?.onExtracted({ ...stats, secs: (performance.now() - missionStartWall.current) / 1000 });
+      return;
+    }
     unlock(missionIndex + 1); // the next op is unlocked the moment this one is cleared
     const last = missionIndex >= CAMPAIGN.length - 1;
     if (last) setCampaignDone(true);
@@ -3703,6 +3731,11 @@ export function ValorScene({ onOpStart, onOpCleared, onOpFailed, startMission, r
   // eventual clear still earns full reward. Only campaign runs record a loss; survival
   // and the gauntlet have their own (unsessioned) flows.
   const handleDeath = (stats: { kills: number; headshots: number }) => {
+    if (mode === 'contract') {
+      try { document.exitPointerLock?.(); } catch { /* ignore */ }
+      contractRef.current?.onKilled({ ...stats, secs: (performance.now() - missionStartWall.current) / 1000 });
+      return;
+    }
     if (mode !== 'campaign') return;
     onOpFailed?.(stats);
   };
@@ -3746,7 +3779,7 @@ export function ValorScene({ onOpStart, onOpCleared, onOpFailed, startMission, r
   // unlocked. Depends on the overlay states so it always sees the current one.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.code === 'KeyM') { e.preventDefault(); setSelect(!menuOpenRef.current); }
+      if (e.code === 'KeyM' && !contractRef.current) { e.preventDefault(); setSelect(!menuOpenRef.current); }
       else if (e.code === 'Escape') {
         e.preventDefault();
         if (selectOpen) setSelect(false);
@@ -4091,7 +4124,7 @@ export function ValorScene({ onOpStart, onOpCleared, onOpFailed, startMission, r
         <AdaptiveDpr />
         {perfOn && <PerfHud hud={hud} />}
         <Suspense fallback={null}>
-          <FpsWorld key={`${mode}-${missionIndex}-${runNonce}`} hud={hud} controls={controls} audio={audio} lowSpec={isTouch} lightFx={lightFx} minimal={minimal} mission={mission} onComplete={handleComplete} onDeath={handleDeath} pausedRef={menuOpenRef} gateRef={gateRef} accountRank={accountRank} accountXp={accountXp} equippedGun={equippedGun} equippedAmmo={equippedAmmo} equippedMods={equippedMods} fieldKit={fieldKit} endlessOpts={mode === 'endless' ? endless : undefined} coop={mode === 'endless' ? coop : undefined} />
+          <FpsWorld key={`${mode}-${missionIndex}-${runNonce}`} hud={hud} controls={controls} audio={audio} lowSpec={isTouch} lightFx={lightFx} minimal={minimal} mission={mission} onComplete={handleComplete} onDeath={handleDeath} endOnDeath={mode === 'contract'} pausedRef={menuOpenRef} gateRef={gateRef} accountRank={accountRank} accountXp={accountXp} equippedGun={equippedGun} equippedAmmo={equippedAmmo} equippedMods={equippedMods} fieldKit={fieldKit} endlessOpts={mode === 'endless' ? endless : undefined} coop={mode === 'endless' ? coop : undefined} />
         </Suspense>
       </Canvas>
 

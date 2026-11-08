@@ -25,6 +25,8 @@ export interface Objective {
   activateRoom?: number;
   holdSecs?: number;       // defend: seconds to hold the point
   reinforceRoom?: number;  // defend: the room reinforcements are drawn from (defaults to `room`)
+  reinforceEvery?: number; // defend: seconds between reinforcement drops (default 3.5)
+  reinforceCount?: number; // defend: enemies per drop (default 2)
 }
 
 export interface Mission {
@@ -190,6 +192,9 @@ const B_COVER: CoverBox[] = [
   { x: -3, z: -11, w: 1.6, d: 1.6, h: 1.4 }, { x: 4, z: -13, w: 1.0, d: 2.4, h: 1.5 }, { x: -6, z: -10, w: 1.4, d: 1.0, h: 1.3 },
 ];
 const B_OBJ = { breach: [-4, 6.5] as [number, number], push: [5, -5.5] as [number, number], extract: [0, -15] as [number, number] };
+
+/** Layout B, exported for missions generated outside this file (fps/convoy.ts). */
+export const LAYOUT_B = { start: B_START, walls: B_WALLS, cover: B_COVER, obj: B_OBJ } as const;
 
 // ── LAYOUT C · the Rift: tight, claustrophobic, a straight push through two
 //    centred doorways into the room where Valor waits. ──

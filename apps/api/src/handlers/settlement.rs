@@ -78,13 +78,19 @@ pub async fn admin_advance(state: web::Data<AppState>, req: actix_web::HttpReque
 }
 
 /// Operator-only: realign the chain with the economy (see `settlement::align`).
-pub async fn admin_realign(state: web::Data<AppState>, req: actix_web::HttpRequest) -> HttpResponse {
+#[derive(Deserialize)]
+pub struct RealignQuery {
+    /// Also retire queued agent trades and align straight to the economy.
+    pub full: Option<bool>,
+}
+
+pub async fn admin_realign(state: web::Data<AppState>, req: actix_web::HttpRequest, q: web::Query<RealignQuery>) -> HttpResponse {
     let Ok(token) = std::env::var("ADMIN_TOKEN") else { return HttpResponse::NotFound().finish() };
     let given = req.headers().get("x-admin-token").and_then(|v| v.to_str().ok()).unwrap_or_default();
     if token.is_empty() || given != token {
         return HttpResponse::Unauthorized().json(json!({ "error": "admin token required" }));
     }
-    match crate::services::settlement::align(&state, true).await {
+    match crate::services::settlement::align(&state, true, q.full.unwrap_or(false)).await {
         Ok(v) => HttpResponse::Ok().json(v),
         Err(e) => HttpResponse::Conflict().json(json!({ "error": e })),
     }

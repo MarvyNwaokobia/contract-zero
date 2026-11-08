@@ -210,7 +210,7 @@ pub async fn queue_operation(w: &World, db: &PgPool, near: &NearClient, raid: u6
 /// nothing about (a fresh economy against an existing contract): mint or burn the
 /// difference per actor, then start the cursor at the current ledger.
 pub async fn bootstrap(state: &AppState) -> Result<(), String> {
-    align(state, false).await.map(|_| ())
+    align(state, false, false).await.map(|_| ())
 }
 
 /// Bring the chain to the economy's current balances in one batch per actor/token
@@ -218,7 +218,12 @@ pub async fn bootstrap(state: &AppState) -> Result<(), String> {
 /// repairs a mirror that went out of order: the stranded flow batches it replaces
 /// are marked `superseded`. Refuses while any trade, raid or operation is still open,
 /// since those settle against the balances being aligned.
-pub async fn align(state: &AppState, force: bool) -> Result<Value, String> {
+///
+/// `full` is for a deep backlog: queued agent trades are retired as well and the chain
+/// is set straight to the economy. The economy already applied those trades; after a
+/// long stall the "economy minus queued trades" target can go negative (the merchant
+/// has resold or exported goods those trades were still bringing in on chain).
+pub async fn align(state: &AppState, force: bool, full: bool) -> Result<Value, String> {
     let Some(near) = state.near.clone() else { return Ok(json!({ "enabled": false })) };
     let contract = near.contract.to_string();
     if !force && cursor(state.world.db(), &contract).await.map_err(|e| e.to_string())? > 0 {
@@ -234,6 +239,10 @@ pub async fn align(state: &AppState, force: bool) -> Result<Value, String> {
             .bind(&contract).fetch_one(db).await.map_err(|e| e.to_string())?;
         if busy > 0 {
             return Err(format!("{busy} raid/operation settlement(s) still open; retry when they land"));
+        }
+        if full {
+            sqlx::query("UPDATE settlements SET status = 'superseded', error = 'replaced by a full realignment' WHERE contract = $1 AND status IN ('pending', 'submitted', 'failed') AND kind IN ('trade', 'sell')")
+                .bind(&contract).execute(db).await.map_err(|e| e.to_string())?;
         }
         let rows: Vec<(String, Value)> = sqlx::query_as("SELECT kind, payload FROM settlements WHERE contract = $1 AND status IN ('pending', 'submitted') AND kind IN ('trade', 'sell')")
             .bind(&contract).fetch_all(db).await.map_err(|e| e.to_string())?;
@@ -374,7 +383,7 @@ pub async fn process_next(state: &AppState) -> Result<bool, String> {
             // RPC outage must delay them, never leave a permanent gap.
             let give_up = (kind == "trade" || kind == "sell") && attempts + 1 >= 3;
             let status = if give_up { "failed" } else { "pending" };
-            sqlx::query("UPDATE settlements SET status = $2, error = $3 WHERE id = $1").bind(id).bind(status).bind(&e).execute(db).await.map_err(|e| e.to_string())?;
+            sqlx::query("UPDATE settlements SET status = $2, error = $3 WHERE id = $1 AND status <> 'superseded'").bind(id).bind(status).bind(&e).execute(db).await.map_err(|e| e.to_string())?;
             if give_up && (kind == "trade" || kind == "sell") {
                 compensate_trade(state, id, &payload).await;
             }

@@ -273,14 +273,21 @@ The setting, cast and writing rules are in `docs/contract-zero/STORY.md`.
 - All engine suites, 18 API tests and 452 web tests pass.
 - `apps/web/probe-gear.mjs`, signed in as the test player: the armory shows 776 / 1,261 / 2,328 cr, 3% off because the player is Known to Vex. Standing reads Ashen Neutral and Vanguard Neutral (1 job for, 1 against each). The loadout shows all three guns locked with prices. The service record lists 9 operations, 3 extracted and 1,583 cr in fees, with NEAR links. No page errors.
 
-**Blocked: on-chain purchase not yet verified.** The agent signing keys (Vex, Ashen, Vanguard and the server) are function-call keys with a gas allowance:
-- that allowance is spent by every transaction and never refunded;
-- each key has 0.10–0.14 NEAR left;
-- Vanguard's is too low for a 100 Tgas call, so its trades fail with `InvalidTransaction`, are reversed in the engine, and its chain balances drift;
-- a ledger batch that burns Vanguard med it doesn't hold on chain now blocks the queue.
+**Verified on chain** (`scripts/gear-e2e.mjs`):
+- Deploying with an unowned gun is refused (400, "you don't own the Dustline Carbine").
+- Vex quoted a Marksman Rifle at 776 cr, 3% off because the player is Known. Vex posted the offer (FUEWcpZX…) and the player signed `accept_offer` (BqUC2EBE…).
+- `gun:marksman` 0 → 1 in `player.contract-zero.testnet`; credits 1,743 → 967.
+- Deploying with the Marksman is accepted.
+- The loadout shows it as owned and selectable.
 
-The fix has two steps, both needing the owner's approval:
-1. Re-issue the four keys with the same public keys and methods, without the allowance cap.
-2. Run `POST /admin/realign` to bring the chain back to the engine.
+**Incident found and fixed during verification (2026-11-08):**
+1. **Agent keys ran out of gas allowance.** The Vex, Ashen, Vanguard and server function-call keys spend their allowance on every transaction and never get it back; Vanguard's reached 0.1 NEAR. Its trades failed with `InvalidTransaction` and were reversed in the engine, so the chain drifted, and a ledger batch burning med Vanguard didn't hold on chain blocked about 140 settlements.
+   - The owner approved re-issuing the four keys with no allowance cap: same public keys, same `world2` methods (Ce5EeU4M…, A2toHDKc…, 87Kgy5qK…, dvXBUTG1…).
+   - Each account was topped up with 1 testnet NEAR from the relayer.
+2. **Daily credit mint cap.** The realignment needed more credits than the 50,000 a day the asset contract allows. The owner raised it to 100,000.
+3. **Realign target went negative under a deep backlog.** "Economy minus queued trades" can't be met once the merchant has resold goods those trades were still bringing in on chain.
+   - New `POST /admin/realign?full=true` retires queued agent trades too and aligns straight to the economy, which has already applied them.
+4. **Worker race.** A failed attempt wrote `pending` over a batch the realignment had just marked `superseded`, so the dead batch kept retrying.
+   - The worker no longer overwrites a superseded row.
 
-`scripts/gear-e2e.mjs` then verifies the purchase on chain end to end.
+After the full realign the batch confirmed on its first attempt, and the queue drained from about 140 to 0 in under a minute.

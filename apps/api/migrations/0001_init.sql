@@ -16,19 +16,19 @@ CREATE INDEX IF NOT EXISTS idx_world_snapshots_version ON world_snapshots (versi
 CREATE TABLE IF NOT EXISTS world_events (
   seq        BIGSERIAL PRIMARY KEY,
   tick       BIGINT      NOT NULL,
-  source     TEXT        NOT NULL,   -- 'ironveil' | 'vex' | 'system' | 'player:<id>'
+  source     TEXT        NOT NULL,   -- 'vanguard' | 'vex' | 'system' | 'player:<id>'
   kind       TEXT        NOT NULL,   -- 'agent_decision' | 'economy' | 'mission'
   payload    JSONB       NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_world_events_kind ON world_events (kind, seq DESC);
 
--- One row per deployment. The server issues it when the player accepts a contract
--- and is the only thing that can settle it.
+-- One row per deployment. The server issues it when a raid starts and is the only
+-- thing that can settle it.
 CREATE TABLE IF NOT EXISTS mission_sessions (
   id           UUID PRIMARY KEY,
   player       TEXT        NOT NULL,
-  contract_id  BIGINT      NOT NULL,
+  raid_id      BIGINT      NOT NULL,
   min_secs     DOUBLE PRECISION NOT NULL,   -- fastest plausible clear for this mission
   started_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   expires_at   TIMESTAMPTZ NOT NULL,
@@ -36,7 +36,9 @@ CREATE TABLE IF NOT EXISTS mission_sessions (
   outcome      TEXT CHECK (outcome IN ('extracted', 'killed', 'expired', 'rejected')),
   result       JSONB
 );
--- At most one open session per contract, enforced by the database as well as the economy.
-CREATE UNIQUE INDEX IF NOT EXISTS uniq_open_session_per_contract
-  ON mission_sessions (contract_id) WHERE completed_at IS NULL;
+-- One session per raid, and at most one open session per player, enforced by the
+-- database as well as the economy.
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_session_per_raid ON mission_sessions (raid_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_open_session_per_player
+  ON mission_sessions (player) WHERE completed_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_mission_sessions_player ON mission_sessions (player, started_at DESC);

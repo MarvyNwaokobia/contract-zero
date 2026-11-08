@@ -10,7 +10,8 @@ mod services;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub db: sqlx::PgPool,
+    /// The live economy (owns the database pool).
+    pub world: services::world::WorldService,
     /// Per-IP limiter for mission start/complete. Built once and shared (Arc) so
     /// every Actix worker draws from the same bucket.
     pub mission_limiter: std::sync::Arc<services::rate_limiter::RateLimiter>,
@@ -42,8 +43,9 @@ async fn main() -> anyhow::Result<()> {
     // Apply pending migrations before serving; a failure aborts boot on purpose.
     migrate::run(&db).await?;
 
+    let world = services::world::WorldService::load(db).await?;
     let app_state = AppState {
-        db,
+        world,
         mission_limiter: std::sync::Arc::new(services::rate_limiter::RateLimiter::new(10, 60)),
     };
 

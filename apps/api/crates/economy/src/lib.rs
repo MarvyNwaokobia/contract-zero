@@ -64,11 +64,44 @@ impl Resource {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Asset {
     Credits,
     Res(Resource),
+}
+
+impl Asset {
+    pub fn name(self) -> &'static str {
+        match self {
+            Asset::Credits => "credits",
+            Asset::Res(r) => r.name(),
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Asset> {
+        Some(match s {
+            "credits" => Asset::Credits,
+            "ammo" => Asset::Res(Resource::Ammo),
+            "med" => Asset::Res(Resource::Med),
+            "fuel" => Asset::Res(Resource::Fuel),
+            _ => return None,
+        })
+    }
+}
+
+// Serialized as a plain string so it can key a JSON object (balances are maps of
+// asset → amount) and reads naturally in API responses.
+impl Serialize for Asset {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.name())
+    }
+}
+
+impl<'de> Deserialize<'de> for Asset {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Asset::parse(&s).ok_or_else(|| serde::de::Error::custom(format!("unknown asset {s}")))
+    }
 }
 
 pub type AccountId = String;

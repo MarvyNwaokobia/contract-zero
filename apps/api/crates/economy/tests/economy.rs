@@ -346,3 +346,17 @@ fn defense_is_bounded_and_paid_for_at_dispatch() {
     assert!(ev.iter().any(|e| matches!(e, Event::Transfer(l) if matches!(l.transfer.reason, Reason::EscortWages { .. }) && l.transfer.qty == DEFENSE_COST[4])));
     assert!(ev.iter().any(|e| matches!(e, Event::Transfer(l) if matches!(l.transfer.reason, Reason::Logistics { .. }) && l.transfer.qty == LOGISTICS_FUEL)));
 }
+
+#[test]
+fn the_world_round_trips_through_json() {
+    // The API snapshots the whole world as JSON; it must come back identical.
+    let mut w = genesis(5);
+    for _ in 0..30 {
+        w.tick();
+        run_fallback_agents(&mut w);
+    }
+    raid(&mut w, PLAYER, Resource::Ammo);
+    let json = serde_json::to_string(&w).expect("serializes");
+    let back: World = serde_json::from_str(&json).expect("deserializes");
+    assert_eq!(back, w);
+}

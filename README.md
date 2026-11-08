@@ -1,31 +1,30 @@
 # CONTRACT ZERO
 
-A first-person extraction shooter where the missions come from an economy, not a script. Two NPCs run it: a faction commander and an independent merchant. Both hold real inventories and treasuries, post bounties on each other's supply convoys, and react to every raid you pull off.
+A first-person extraction shooter where the missions come from an economy, not a script. A faction commander and an independent merchant hold real inventories and treasuries. They react to every raid you pull off, and their decisions shape the next fight.
 
 Built for the NEAR Hackathon (November 2026), track **Games With Real Economies**.
 
 ## The loop
 
-**Deploy → raid a convoy → extract → the economy shifts → the agents replan → new contracts appear.**
+**Raid a depot → extract → the economy shifts → the agents replan → the next mission changes.**
 
-1. **The convoys.** Ironveil Directorate runs fuel convoys, and Vex Exchange runs medical-supply caravans.
-2. **The contract.** When one side wants the other's cargo, it escrows a bounty on that convoy. That bounty is the contract you take.
-3. **The raid.** You fight through the escort, load the cargo under fire, and walk it out.
-4. **The settlement.** The bounty pays you, and the cargo goes to whoever posted the contract. The convoy's owner never receives it.
-5. **The fallout.** Ironveil falls short of fuel and has to buy it from Vex, whose prices respond to the shift in supply and demand. It also hires heavier escorts, so the next convoy fields more guards and they hit harder.
+1. **The depot.** Vanguard keeps 60% of each resource staged at a forward depot, guarded by however many soldiers its ammunition can arm.
+2. **The raid.** You fight through the guards, load the cargo under fire, and walk it out. The server checks the run against how long the mission physically takes.
+3. **The settlement.** The cargo moves from Vanguard to you, plus any bounty a sponsor escrowed on that depot.
+4. **The response.** Vanguard's commander sees the shortage, quotes the merchant, and buys what its spending policy allows. It also raises its escorts after raids. The merchant reprices from its stock and demand, and may sponsor a raid on whatever it's short of.
+5. **The consequences.** Vanguard's ammunition decides how many guards it can arm and with what. Its medicine decides the reinforcements. Its fuel decides whether a depot can be staged at all.
 
 ## Status
 
-This is being built during the hackathon. What exists today:
-
 | Part | State |
 |---|---|
-| FPS engine: movement, gunplay, enemy AI, weapons, attachments, audio | **Working.** Playable at `/training` |
-| Convoy raid mission generated from a contract (`apps/web/src/engine/fps/convoy.ts`) | **Built and tested.** Not yet reachable from a page |
-| Deterministic economy: ledger, pricing, convoys, contracts, settlement (`apps/api/crates/economy`) | **Built and tested** |
-| Fallback agent policies for the commander and merchant | **Built and tested** |
-| Contract Board, Armory, Deployment, Extraction Results, War Room, Exchange | In progress |
-| NEAR contracts (NEP-245 items, treasury, settlement) on testnet | In progress |
+| FPS engine, playable at `/training` | **Working** |
+| Raid mission built from the server's guard plan (`apps/web/src/engine/fps/convoy.ts`) | **Built and tested.** Not yet reachable from a page |
+| Economy: ledger, pricing, raids, bounties, insolvency, economy-to-battlefield rules (`apps/api/crates/economy`) | **Built and tested.** Includes the acceptance scenario |
+| Fallback policies for both agents, with logged decisions | **Built and tested** |
+| API: raid board, mission sessions with server-side validation, world clock, decision feed, Observer Mode | **Built.** Verified end to end against a local Postgres |
+| Main Menu, Contract Board, Armory, Deployment, Extraction, War Room, Exchange | In progress |
+| NEAR testnet contract (NEP-245 assets, settlement, receipt verification) | In progress |
 | Social login (FastAuth) | In progress |
 | LLM strategic planner (NEAR AI Cloud) with validated tool calls | In progress |
 
@@ -33,23 +32,40 @@ This is being built during the hackathon. What exists today:
 
 ```text
 apps/web    Next.js 15 + React Three Fiber
-            └─ engine/fps    headless FPS sim, missions, convoy builder
+            └─ engine/fps    headless FPS sim, missions, raid mission builder
             └─ engine/scene  the 3D scene (ContractZeroScene)
 apps/api    Rust / Actix-web + Postgres
             └─ crates/economy  the deterministic world (no I/O)
+            └─ src             world service, mission sessions, scheduler, API
 ```
 
-Combat AI is deterministic and runs in the client sim; no LLM is involved in a gunfight. The economy runs on the server, which is the only place mission outcomes are settled.
+Combat AI is deterministic and runs in the client sim; no LLM is involved in a gunfight. The economy runs on the server, which is the only place a mission outcome turns into goods.
+
+### API
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /board` | raidable depots, each with its guard plan, bounty and market value |
+| `GET /world` | War Room state: actors, prices with their factors, shipments, bounties, raids, issuance and destruction totals |
+| `GET /events?kind=agent_decision` | each agent decision: trigger, figures, action, rationale, validation |
+| `POST /missions/start` | `{player, target, resource}`: locks the raid plan and issues a session |
+| `POST /missions/{session}/complete` | `{player, outcome, kills}`: validated against server time, then settled or failed. Idempotent |
+| `GET /players/{account}` | a player's holdings and raids |
+| `POST /observer/simulate` | `{ticks, seed?}`: Observer Mode on a copy of the world, marked simulated |
 
 The economy's formulas, sources and sinks are in [docs/contract-zero/ECONOMY.md](docs/contract-zero/ECONOMY.md).
 
 ## Run it
 
-Requires Node 22+.
+Requires Node 22+, Rust stable and Postgres 15+.
 
 ```bash
 npm install
 npm run dev --workspace=apps/web    # open http://localhost:3000, which goes to /training
+
+createdb contract_zero
+cd apps/api && cp .env.example .env && cargo run    # API on :8080; migrates and seeds the world on first boot
+curl localhost:8080/board                           # the raid board
 ```
 
 | Control | Action |
@@ -73,15 +89,15 @@ cd apps/api && cargo test --workspace                # economy engine + API (Rus
 ```
 
 The economy tests cover:
-- conservation of every asset over a simulated week
-- ledger replay and determinism
+- conservation of every asset, and issuance and destruction accounting, over a simulated week
+- ledger replay, determinism and JSON round-trips
 - atomic batches
-- insufficient stock and credits
-- stale-quote races
-- escrow, refunds and bounty bounds
-- replayed settlements
+- insufficient stock and credits, stale-quote races and merchant insolvency
+- raids that settle once and pay only what the depot holds
+- bounties, escrow and refunds
 - authorization
-- the raid → replan loop
+- every economy-to-battlefield rule
+- the acceptance scenario in `tests/acceptance.rs`. Vanguard 100 → 40 ammo, then the commander quotes, buys within policy and reconciles, and the next mission is better armed. It also covers no stock, partial stock, over budget and rejected proposals
 
 ## Prior work
 

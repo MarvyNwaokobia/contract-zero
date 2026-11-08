@@ -57,9 +57,6 @@ export default function SignIn() {
             <button className={`${btn} bg-white text-slate-900 hover:bg-slate-100`} disabled={!!busy || !!blocked} onClick={() => social('google')}>
               <Google /> {busy === 'google' ? 'Opening Google…' : 'Continue with Google'}
             </button>
-            <button className={`${btn} border border-slate-700 bg-black text-white`} disabled title="Not offered by the current login provider">
-               Continue with Apple <span className="text-xs font-normal text-slate-500">(coming soon)</span>
-            </button>
             <button className={`${btn} border border-slate-700 text-slate-200 hover:bg-slate-900`} disabled={!!busy || !!blocked} onClick={() => social('email')}>
               {busy === 'email' ? 'Opening…' : 'Email or passkey'}
             </button>

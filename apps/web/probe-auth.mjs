@@ -1,7 +1,7 @@
 // Browser probe for sign-in and quick trade (real Chrome, live API, NEAR testnet).
 //
-//  A. /signin with no session: Google is the first, primary option; Apple is shown
-//     but unavailable; the wallet path is offered; clicking Google opens NEAR Auth's
+//  A. /signin with no session: Google is the first, primary option, then email or
+//     passkey; the wallet path is offered; clicking Google opens NEAR Auth's
 //     hosted login (checked: the page loads, offers Google, and is not a
 //     "Callback URL mismatch"). A real Google login needs a human, so it stops there.
 //  B. A signed-in player (session from a real NEP-413 sign-in) with quick trade on:
@@ -32,7 +32,7 @@ const browser = await chromium.launch({ channel: 'chrome' })
   const buttons = await page.$$eval('button', (bs) => bs.map((b) => ({ text: b.innerText.trim(), disabled: b.disabled })))
   out.signin.buttons = buttons
   out.signin.google_first = buttons[0]?.text.includes('Google') && !buttons[0].disabled
-  out.signin.apple_disabled = buttons.some((b) => b.text.includes('Apple') && b.disabled)
+  out.signin.no_apple = !buttons.some((b) => b.text.includes('Apple'))
   out.signin.blocker = await page.$eval('body', (b) => b.innerText.includes('only accepts'))
   await page.screenshot({ path: `${OUT}/signin.png`, fullPage: true })
   const [popup] = await Promise.all([ctx.waitForEvent('page', { timeout: 30_000 }), page.click('text=Continue with Google')])

@@ -12,7 +12,6 @@ Every claim below is marked:
 |---|---|---|---|
 | **Continue with Google** (default) | New players | NEAR Auth: Auth0 login → the server verifies the ID token (RS256, NEAR Auth's JWKS, issuer, audience, issued < 10 min ago) → MPC derives the player's key from the token's subject → the account is that key's implicit account, sponsored on first sign-in | Up to the hosted login: **Verified**. Completing a Google login: **not run** (needs a human Google account) |
 | **Email or passkey** | New players | Same as Google (same hosted page) | Same as above |
-| **Continue with Apple** | — | — | **Not available.** NEAR's testnet login page offers Google, email and passkey only (**Verified**). The button is shown but disabled |
 | **I already have a NEAR wallet** | Existing NEAR users | NEAR Connect (HOT, Meteor, Intear, MyNearWallet, Nightly, Ledger, …) → a NEP-413 signed sign-in message over a single-use server nonce → the server verifies the signature and that RPC lists the key as a **full-access** key of the account | **Verified** (`scripts/auth-e2e.mjs`; in-wallet UI not automated) |
 
 **A session is an HttpOnly, `SameSite=Lax` cookie** holding 32 random bytes; the database stores only its SHA-256. It lasts 7 days and is revoked on sign-out.

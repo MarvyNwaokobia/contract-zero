@@ -258,7 +258,7 @@ So it suits players without a wallet, but it isn't a drop-in. **Decision:** ship
 - **Mission identity:** *(superseded below)*.
 
 **Built (2026-11-08): sign-in with Google first, sessions bound to on-chain accounts, and quick trade.** See [AUTH.md](AUTH.md) for the design and for what is verified versus documented.
-- **Sign-in options:** Google (default), email or passkey via NEAR Auth, and "I already have a NEAR wallet" (NEP-413) as the fallback. Apple isn't offered by NEAR's testnet login.
+- **Sign-in options:** Google (default), email or passkey via NEAR Auth, and "I already have a NEAR wallet" (NEP-413) as the fallback.
 - **Sessions:** every player action now acts for the session's proven account; a supplied account ID is never accepted as proof.
 - **Quick trade:** a browser-held session key scoped to `world2`, with budgets and an expiry enforced by the contract, revocable by the key itself.
 - **Trades aren't gas-relayed:** in a meta-transaction the chain sees the relayer as the signer, so a relayed trade could never prove the player's consent (verified on testnet).

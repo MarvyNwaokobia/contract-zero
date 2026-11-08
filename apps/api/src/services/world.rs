@@ -40,10 +40,15 @@ impl WorldService {
         let world = match latest {
             Some((state,)) => serde_json::from_value(state)?,
             None => {
-                let seed = std::env::var("WORLD_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(2026);
-                let w = cz_economy::genesis(seed);
+                // WORLD_SCENARIO=acceptance starts from the end-to-end acceptance state.
+                let scenario = std::env::var("WORLD_SCENARIO").unwrap_or_default();
+                let w = if scenario == "acceptance" {
+                    cz_economy::acceptance()
+                } else {
+                    cz_economy::genesis(std::env::var("WORLD_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(2026))
+                };
                 persist(&db, &w).await?;
-                tracing::info!("world: created genesis world (seed {seed})");
+                tracing::info!("world: created {} world (seed {})", if scenario == "acceptance" { "acceptance" } else { "genesis" }, w.seed);
                 w
             }
         };

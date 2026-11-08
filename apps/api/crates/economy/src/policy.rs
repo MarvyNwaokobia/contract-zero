@@ -11,6 +11,10 @@
 //! shortage it requests a quote from the merchant and buys the largest amount that fits
 //! its spending policy (credits above its reserve). It tightens defense after recent
 //! raids and relaxes it when quiet, and drops to minimum when it can't pay escorts.
+//! It buys only once stock is below 75% of target (then back up to target), and won't
+//! pay over twice production cost unless critically short.
+//! It does not sell to the merchant: every agent trade settles on NEAR as a merchant
+//! offer, and the contract has no merchant-bid path.
 //!
 //! **Vex (merchant).** Suspends business while insolvent. Otherwise it sponsors
 //! bounties on Vanguard depots of resources its shelves are short of, and widens its
@@ -25,6 +29,9 @@ use crate::*;
 /// How far back a faction remembers raids on it.
 pub const RAID_MEMORY_TICKS: u64 = 48;
 pub const BASE_DEFENSE: u8 = 2;
+/// The commander won't pay more than this multiple of production cost unless its
+/// stock is critically low (below a quarter of target).
+pub const MAX_PRICE_MULT: i64 = 2;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Decision {
@@ -79,7 +86,9 @@ pub fn commander(w: &World, id: &str) -> Vec<Decision> {
     for r in Resource::ALL {
         let target = if r == Resource::Ammo { ammo_target(a) } else { a.requirement(r) };
         let have = w.balance(&a.account, Asset::Res(r));
-        if target == 0 || have >= target {
+        // Hysteresis: act only once stock falls below 75% of target, then restock to
+        // target in one order, rather than topping up a unit or two every tick.
+        if target == 0 || have * 4 >= target * 3 {
             continue;
         }
         let want = target - have;
@@ -92,6 +101,13 @@ pub fn commander(w: &World, id: &str) -> Vec<Decision> {
         };
         if stock == 0 {
             out.push(decision(id, &trigger, &ctx(&[]), None, format!("Short {want} {}, but the merchant has none to sell.", r.name())));
+            continue;
+        }
+        // Price discipline: above twice production cost, wait unless critically low.
+        let ask = w.price(r).ask;
+        let ceiling = pricing::production_cost(r) * MAX_PRICE_MULT;
+        if ask > ceiling && have * 4 >= target {
+            out.push(decision(id, &trigger, &ctx(&[("unit_ask", ask), ("price_ceiling", ceiling)]), None, format!("Short {want} {}, but the merchant asks {ask} cr (ceiling {ceiling}); waiting while stock lasts.", r.name())));
             continue;
         }
         match affordable_buy(w, r, want, budget) {
@@ -110,15 +126,6 @@ pub fn commander(w: &World, id: &str) -> Vec<Decision> {
                 let one = w.quote(r, Side::Buy, 1).map(|q| q.total).unwrap_or(0);
                 out.push(decision(id, &trigger, &ctx(&[("unit_ask", one)]), None, format!("Short {want} {}, but even one unit ({one} cr) is over the spending policy.", r.name())));
             }
-        }
-    }
-
-    // Sell ammunition beyond twice the target.
-    let ammo = w.balance(&a.account, Asset::Res(Resource::Ammo));
-    let keep = ammo_target(a) * 2;
-    if ammo > keep && !w.merchant_insolvent() {
-        if let Ok(q) = w.quote(Resource::Ammo, Side::Sell, ammo - keep) {
-            out.push(decision(id, "ammo surplus", &[("have", ammo), ("keep", keep), ("quote_total", q.total)], Some(Action::Trade { resource: Resource::Ammo, side: Side::Sell, qty: q.qty, limit_total: q.total }), format!("Sell {} surplus ammo for {} credits.", q.qty, q.total)));
         }
     }
 

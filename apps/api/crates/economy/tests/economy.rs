@@ -360,3 +360,22 @@ fn the_world_round_trips_through_json() {
     let back: World = serde_json::from_str(&json).expect("deserializes");
     assert_eq!(back, w);
 }
+
+#[test]
+fn a_trade_can_be_reversed_once_and_exactly() {
+    let mut w = genesis(1);
+    fund(&mut w, PLAYER, 5_000);
+    let before = w.clone();
+    let q = w.quote(Resource::Ammo, Side::Buy, 10).unwrap();
+    w.execute(&Caller::Player(PLAYER.into()), &Action::Trade { resource: Resource::Ammo, side: Side::Buy, qty: 10, limit_total: q.total }).unwrap();
+    let trade = w.trades.last().unwrap().id;
+    w.reverse_trade(trade).unwrap();
+    for acct in [player_account(PLAYER), "merchant:vex".to_string()] {
+        for asset in [Asset::Credits, Asset::Res(Resource::Ammo)] {
+            assert_eq!(w.balance(&acct, asset), before.balance(&acct, asset), "{acct} {asset:?}");
+        }
+    }
+    assert!(w.reverse_trade(trade).is_err(), "only once");
+    assert!(w.reverse_trade(9_999).is_err(), "unknown trade");
+    assert_conserved(&w);
+}

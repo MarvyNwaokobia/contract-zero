@@ -86,6 +86,8 @@ fn the_commander_cannot_buy_what_the_merchant_does_not_have() {
 fn the_commander_buys_only_what_the_merchant_has() {
     let mut w = after_raid();
     w.apply(&[Transfer { from: VEX_ACC.into(), to: WORLD.into(), asset: Asset::Res(Resource::Ammo), qty: 97, reason: Reason::Consumption }]).unwrap();
+    // Scarce stock prices high; Vanguard pays it only when critically short.
+    w.apply(&[Transfer { from: VG.into(), to: WORLD.into(), asset: Asset::Res(Resource::Ammo), qty: 30, reason: Reason::Consumption }]).unwrap();
     let d = policy::commander(&w, VANGUARD);
     let a = d.iter().find(|d| d.trigger == "ammo below target").and_then(|d| d.action.clone());
     assert!(matches!(a, Some(Action::Trade { qty: 3, .. })), "{a:?}");
@@ -115,4 +117,29 @@ fn a_rejected_proposal_changes_nothing() {
     let r = w.execute(&Caller::Agent(VANGUARD.into()), &Action::Trade { resource: Resource::Ammo, side: Side::Buy, qty: 90, limit_total: q.total });
     assert!(matches!(r, Err(EconError::Insufficient { asset: Asset::Credits, .. })));
     assert_eq!(w, before);
+}
+
+#[test]
+fn the_commander_waits_out_a_price_spike_unless_critically_short() {
+    let mut w = after_raid();
+    // Drain the merchant's ammunition so its price sits far above twice cost.
+    w.apply(&[Transfer { from: VEX_ACC.into(), to: WORLD.into(), asset: Asset::Res(Resource::Ammo), qty: 95, reason: Reason::Consumption }]).unwrap();
+    assert!(w.price(Resource::Ammo).ask > 2 * pricing::production_cost(Resource::Ammo));
+    // 40 of an 84 target is short but not critical (≥ a quarter): it waits.
+    let d = policy::commander(&w, VANGUARD);
+    let a = d.iter().find(|d| d.trigger == "ammo below target").unwrap();
+    assert_eq!(a.action, None, "{}", a.rationale);
+    assert!(a.rationale.contains("waiting"));
+    // Critically short (below a quarter of target): it pays up.
+    w.apply(&[Transfer { from: VG.into(), to: WORLD.into(), asset: Asset::Res(Resource::Ammo), qty: 30, reason: Reason::Consumption }]).unwrap();
+    let d = policy::commander(&w, VANGUARD);
+    assert!(matches!(d.iter().find(|d| d.trigger == "ammo below target").and_then(|d| d.action.clone()), Some(Action::Trade { .. })));
+}
+
+#[test]
+fn the_commander_does_not_top_up_a_nearly_full_store() {
+    let mut w = acceptance();
+    // 70 of an 84 target is above the 75% line: no purchase.
+    w.apply(&[Transfer { from: VG.into(), to: WORLD.into(), asset: Asset::Res(Resource::Ammo), qty: 30, reason: Reason::Consumption }]).unwrap();
+    assert!(policy::commander(&w, VANGUARD).iter().all(|d| d.trigger != "ammo below target"));
 }

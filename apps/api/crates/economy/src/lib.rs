@@ -119,6 +119,8 @@ pub enum Reason {
     Shipment { convoy: u64 },
     ShipmentArrived { convoy: u64 },
     Trade { trade: u64 },
+    /// Undoes a trade whose on-chain settlement failed.
+    TradeReversal { trade: u64 },
     Escrow { bounty: u64 },
     Refund { bounty: u64 },
     BountyPaid { bounty: u64, raid: u64 },
@@ -818,6 +820,25 @@ impl World {
         ev.push(Event::ShipmentDispatched { convoy: id, owner: actor_id.into(), resource: plan.resource, units, defense: level });
         self.convoys.insert(id, convoy);
         ev
+    }
+
+    /// Undo a committed trade (used when its on-chain settlement fails). Both legs go
+    /// back in one atomic batch; it fails cleanly if either side no longer holds what it
+    /// received. A trade is reversed at most once. Never reachable from `execute`.
+    pub fn reverse_trade(&mut self, trade_id: u64) -> Result<Vec<Event>, EconError> {
+        if self.ledger.iter().any(|e| e.transfer.reason == (Reason::TradeReversal { trade: trade_id })) {
+            return Err(EconError::AlreadySettled { raid: trade_id });
+        }
+        let legs: Vec<Transfer> = self
+            .ledger
+            .iter()
+            .filter(|e| e.transfer.reason == (Reason::Trade { trade: trade_id }))
+            .map(|e| Transfer { from: e.transfer.to.clone(), to: e.transfer.from.clone(), asset: e.transfer.asset, qty: e.transfer.qty, reason: Reason::TradeReversal { trade: trade_id } })
+            .collect();
+        if legs.len() != 2 {
+            return Err(unknown("trade", &trade_id.to_string()));
+        }
+        self.apply(&legs)
     }
 
     /// Credit an account from `WORLD` when building a starting state. Never reachable

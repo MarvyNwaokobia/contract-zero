@@ -31,10 +31,12 @@ type Phase =
   | { kind: 'results'; result: MissionResult; before: WorldView; after: WorldView }
   | { kind: 'error'; message: string }
 
+const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`
+
 function guardsLine(e?: BoardEntry) {
   if (!e) return 'no depot (not worth raiding, or no fuel to stage it)'
   const g = e.guards
-  return `${g.hall.rifles + g.yard.rifles} rifles, ${g.hall.sidearms + g.yard.sidearms} sidearms, ${g.reinforce_per_drop} reinforcements per wave, defense L${e.defense}`
+  return `${plural(g.hall.rifles + g.yard.rifles, "rifle")}, ${plural(g.hall.sidearms + g.yard.sidearms, "sidearm")}, ${g.reinforce_per_drop} reinforcements per wave, defense L${e.defense}`
 }
 
 function Deploy() {

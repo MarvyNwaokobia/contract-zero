@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+.next/
+dist/
+build/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# Rust
+target/
+
+# NEAR contract build output
+contracts-near/**/target/
+contracts-near/**/res/
+
+# Environment variables and keys
+.env
+.env.local
+.env.*.local
+*.pem
+**/near-credentials/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# Logs, coverage, scratch
+*.log
+coverage/
+lcov.info
+.tmp/
+apps/web/probe-out/
+.vercel
+.railway
+
+# Local Claude Code state (project skills under apps/web/.claude/skills ARE tracked)
+/.claude/
+
+# Large source art kept on disk only; the game loads the compressed .glb/.webp copies.
+apps/web/public/characters/raw/
+apps/web/public/models/characters/
+apps/web/public/models/environments/rpg_environment/
+apps/web/public/models/**/*.zip
+apps/web/assets/

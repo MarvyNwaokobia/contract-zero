@@ -1,0 +1,7 @@
+node_modules
+.next
+dist
+*.local
+.DS_Store
+public/characters/raw
+public/characters/Valor\ Characters

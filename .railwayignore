@@ -1,0 +1,22 @@
+# The Railway `valor` service builds only apps/api (service Root Directory = apps/api),
+# so exclude everything else from the upload to keep deploys fast. apps/api is a
+# standalone Cargo crate (its Dockerfile COPYs its own Cargo.toml/lock + src).
+*.mov
+*.mp4
+*.png
+*.jpg
+node_modules/
+.next/
+target/
+apps/api/target/
+apps/web/
+apps/game/
+packages/
+contracts/lib/
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+design/
+.tmp/
+.git/
+supabase/

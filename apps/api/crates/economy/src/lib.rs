@@ -264,6 +264,44 @@ pub struct Actor {
     /// Per resource: production is down (sabotaged) until this tick.
     #[serde(default)]
     pub disrupted_until: [u64; 3],
+    /// How this actor's commander behaves (factions).
+    #[serde(default)]
+    pub doctrine: Doctrine,
+}
+
+/// A faction's character: what it does with the same numbers another faction sees.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Doctrine {
+    /// Defense level in a quiet period.
+    pub base_defense: u8,
+    /// Most it will pay, as a multiple of production cost, unless critically short.
+    pub max_price_mult: i64,
+    /// 0 (holds ground, only retaliates) … 100 (pays to have rivals raided first).
+    pub aggression: u8,
+}
+
+impl Default for Doctrine {
+    fn default() -> Self {
+        Doctrine { base_defense: 2, max_price_mult: 2, aggression: 20 }
+    }
+}
+
+/// What a faction remembers about who hurt it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FactionMemory {
+    /// Per player: the operations they ran against this faction.
+    pub players: BTreeMap<String, Grievance>,
+    /// Per rival actor: the ticks at which it paid a bounty for a raid on this faction.
+    pub sponsors: BTreeMap<String, Vec<u64>>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Grievance {
+    pub raids: u32,
+    pub sabotage: u32,
+    pub recoveries: u32,
+    pub units_lost: i64,
+    pub last_tick: u64,
 }
 
 impl Actor {
@@ -543,6 +581,9 @@ pub struct World {
     pub ledger: Vec<LedgerEntry>,
     #[serde(default)]
     pub quotes: BTreeMap<u64, PlayerQuote>,
+    /// Per faction: what it remembers about players and rivals.
+    #[serde(default)]
+    pub memory: BTreeMap<String, FactionMemory>,
     next_id: u64,
 }
 
@@ -572,6 +613,7 @@ impl World {
             trades: Vec::new(),
             ledger: Vec::new(),
             quotes: BTreeMap::new(),
+            memory: BTreeMap::new(),
             next_id: 0,
         }
     }
@@ -948,6 +990,23 @@ impl World {
         }
         let mut ev = self.apply(&batch)?;
         let paid = bounty.as_ref().map_or(0, |b| b.amount);
+        // The target remembers who did this, and which rival paid for it.
+        {
+            let tick = self.tick;
+            let sponsor = bounty.as_ref().map(|b| b.sponsor.clone()).filter(|s| self.actors.get(s).is_some_and(|a| a.kind == ActorKind::Faction));
+            let mem = self.memory.entry(raid.plan.target.clone()).or_default();
+            let g = mem.players.entry(player.to_string()).or_default();
+            match kind {
+                OpKind::Raid => g.raids += 1,
+                OpKind::Sabotage => g.sabotage += 1,
+                OpKind::Recovery => g.recoveries += 1,
+            }
+            g.units_lost += units;
+            g.last_tick = tick;
+            if let Some(s) = sponsor {
+                mem.sponsors.entry(s).or_default().push(tick);
+            }
+        }
         if let Some(b) = bounty {
             self.bounties.get_mut(&b.id).unwrap().status = BountyStatus::Paid { raid: id, player: player.into() };
         }
@@ -1320,4 +1379,4 @@ pub fn splitmix(mut x: u64) -> u64 {
     x ^ (x >> 31)
 }
 
-pub use scenario::{acceptance, genesis, MERCHANT, VANGUARD};
+pub use scenario::{acceptance, add_rival, genesis, ASHEN, MERCHANT, VANGUARD};

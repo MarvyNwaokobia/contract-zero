@@ -115,3 +115,31 @@ In 30-day simulations, sabotage contracts appear every 2 to 3 days. Seizures, an
 **Not yet:**
 - A live recovery on testnet.
 - The other mission families: convoy interception, escort, defense, high-value target, blacksite infiltration.
+
+### Milestone 5: competing factions and the AI planner (2026-11-08)
+
+**Ashen Compact.** A second faction with a mirror economy. It refines fuel (72 a day) and needs ammunition, while Vanguard makes ammunition and needs fuel.
+
+| Doctrine | Vanguard | Ashen Compact |
+|---|---|---|
+| Base defense | 2 | 1 |
+| Price ceiling (× production cost) | 2 | 3 |
+| Aggression | 20 | 70 |
+
+**Built:**
+- **On chain:** `ashen.contract-zero.testnet` is an actor on `assets` and a faction on `world2`, with a restricted trading key. Existing live worlds gain it on load, minted on chain by the next flow sync.
+- **Memory:** each faction remembers, per player, raids, sabotages, recoveries, units lost and when, and which rival paid bounties for raids on it.
+- **Rivalry, through bounties the player chooses whether to take:**
+  - **Retaliation:** a faction strikes back at a rival that paid for raids on it in the last 72 hours.
+  - **Pre-emptive strike:** an aggressive faction pays to bleed a richer rival.
+  In 45-day simulations without players, Ashen posts 30 bounties on the richer Vanguard. In raided worlds, Vanguard is no longer richer, so Ashen stops.
+- **Selling:** any surplus is sold, so Ashen sells its fuel.
+- **Strategic planner** (`apps/api/src/services/planner.rs`) on NEAR AI Cloud (`cloud-api.near.ai/v1`, default model `anthropic/claude-haiku-5-5`), as described above. `POST /admin/plan` runs one round on demand.
+
+**Verified:**
+- 5 faction tests (doctrines, pre-emptive strike, memory and retaliation once per grudge, grudges fade, general selling, adding a rival to an older world) and 3 planner tests (policy validation, observation contents, plan parsing). 84 Rust tests in total.
+- Ashen reconciles on chain.
+
+**Not verified:** a live model call. `NEAR_AI_API_KEY` is empty in `apps/api/.env`, so the planner logs that it is off and the deterministic policies run alone.
+
+**Not built:** a second merchant (Halcyon). One merchant is enough for the two factions to compete through.

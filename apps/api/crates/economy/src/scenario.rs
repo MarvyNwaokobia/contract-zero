@@ -7,9 +7,10 @@
 //!   credits), with shipments off so nothing changes unless a test acts.
 
 use crate::pricing::Strategy;
-use crate::{Actor, ActorKind, Asset, Market, Resource, ShipmentPlan, World};
+use crate::{Actor, ActorKind, Asset, Doctrine, Market, Resource, ShipmentPlan, World};
 
 pub const VANGUARD: &str = "vanguard";
+pub const ASHEN: &str = "ashen";
 pub const MERCHANT: &str = "vex";
 
 fn vanguard(credit_reserve: i64, shipment: Option<ShipmentPlan>) -> Actor {
@@ -26,7 +27,44 @@ fn vanguard(credit_reserve: i64, shipment: Option<ShipmentPlan>) -> Actor {
         defense: 2,
         shipment,
         disrupted_until: [0; 3],
+        doctrine: Doctrine::default(),
     }
+}
+
+/// The Ashen Compact: a fuel-refining militia. It needs ammunition it doesn't make,
+/// sells the fuel it doesn't need, keeps a light garrison, and pays to have its rival
+/// raided before it gets the chance to be raided itself.
+fn ashen() -> Actor {
+    Actor {
+        id: ASHEN.into(),
+        name: "Ashen Compact".into(),
+        kind: ActorKind::Faction,
+        account: "faction:ashen".into(),
+        income_per_day: 900,
+        production: [0, 0, 72],
+        consumption: [30, 8, 24],
+        reserve_days: 2,
+        credit_reserve: 500,
+        defense: 1,
+        shipment: None,
+        disrupted_until: [0; 3],
+        doctrine: Doctrine { base_defense: 1, max_price_mult: 3, aggression: 70 },
+    }
+}
+
+/// Bring the Ashen Compact into a live world that predates it (genesis grants, like a
+/// new region coming online). No-op if it's already there.
+pub fn add_rival(w: &mut World) -> bool {
+    if w.actors.contains_key(ASHEN) {
+        return false;
+    }
+    let a = ashen();
+    let acct = a.account.clone();
+    w.actors.insert(ASHEN.into(), a);
+    for (asset, qty) in [(Asset::Credits, 3_500), (Asset::Res(Resource::Ammo), 70), (Asset::Res(Resource::Med), 20), (Asset::Res(Resource::Fuel), 160)] {
+        w.grant(&acct, asset, qty);
+    }
+    true
 }
 
 fn vex(credit_reserve: i64, shipment: Option<ShipmentPlan>) -> Actor {
@@ -43,6 +81,7 @@ fn vex(credit_reserve: i64, shipment: Option<ShipmentPlan>) -> Actor {
         defense: 1,
         shipment,
         disrupted_until: [0; 3],
+        doctrine: Doctrine::default(),
     }
 }
 
@@ -81,6 +120,7 @@ pub fn genesis(seed: u64) -> World {
         ],
     );
     w.market.living = true;
+    add_rival(&mut w);
     w
 }
 

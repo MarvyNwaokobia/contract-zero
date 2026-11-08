@@ -39,11 +39,11 @@ const MAX_AMOUNT: i64 = 100_000;
 
 /// The chain account for an engine account.
 pub fn chain_account(near: &NearClient, engine_account: &str) -> Option<String> {
-    match engine_account {
-        "faction:vanguard" => Some(near.account(Role::Vanguard).to_string()),
-        "merchant:vex" => Some(near.account(Role::Vex).to_string()),
-        a => a.strip_prefix("player:").map(str::to_string),
+    if let Some(p) = engine_account.strip_prefix("player:") {
+        return Some(p.to_string());
     }
+    let id = engine_account.strip_prefix("faction:").or_else(|| engine_account.strip_prefix("merchant:"))?;
+    near.actor_account(id).map(|a| a.to_string())
 }
 
 fn actor_accounts(w: &World) -> Vec<String> {
@@ -253,8 +253,8 @@ pub async fn align(state: &AppState, force: bool) -> Result<Value, String> {
     }
     // Read the chain first (no lock held across RPC), then align under the lock.
     let mut chain: BTreeMap<String, BTreeMap<String, i64>> = BTreeMap::new();
-    for role in [Role::Vanguard, Role::Vex] {
-        let acct = near.account(role).to_string();
+    for role in [Role::Vanguard, Role::Vex, Role::Ashen] {
+        let Some(acct) = near.actor_account(match role { Role::Vanguard => "vanguard", Role::Vex => "vex", _ => "ashen" }).map(|a| a.to_string()) else { continue };
         chain.insert(acct.clone(), near.balances(&acct).await?.into_iter().collect());
     }
     state

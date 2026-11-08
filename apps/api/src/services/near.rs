@@ -25,6 +25,7 @@ pub enum Role {
     Server,
     Vanguard,
     Vex,
+    Ashen,
 }
 
 impl Role {
@@ -33,12 +34,14 @@ impl Role {
             Role::Server => "CZ_SERVER_ACCOUNT",
             Role::Vanguard => "CZ_VANGUARD_ACCOUNT",
             Role::Vex => "CZ_VEX_ACCOUNT",
+            Role::Ashen => "CZ_ASHEN_ACCOUNT",
         }
     }
     pub fn for_actor(actor: &str) -> Option<Role> {
         match actor {
             "vanguard" => Some(Role::Vanguard),
             "vex" => Some(Role::Vex),
+            "ashen" => Some(Role::Ashen),
             _ => None,
         }
     }
@@ -112,6 +115,23 @@ impl NearClient {
             signers.insert(role, signer);
             locks.insert(role, Arc::new(Mutex::new(())));
         }
+        // The rival faction: CZ_ASHEN_ACCOUNT, or derived from Vanguard's account
+        // (ashen.<same parent>). Optional: without its key file the world runs without it.
+        let ashen: Option<AccountId> = std::env::var(Role::Ashen.env_key())
+            .ok()
+            .or_else(|| accounts.get(&Role::Vanguard).and_then(|v: &AccountId| v.as_str().split_once('.')).map(|(_, parent)| format!("ashen.{parent}")))
+            .and_then(|a| a.parse().ok());
+        if let Some(id) = ashen {
+            let file = keys_dir.join(format!("{id}.json"));
+            match Signer::from_access_keyfile(file.clone()) {
+                Ok(signer) => {
+                    accounts.insert(Role::Ashen, id);
+                    signers.insert(Role::Ashen, signer);
+                    locks.insert(Role::Ashen, Arc::new(Mutex::new(())));
+                }
+                Err(e) => tracing::warn!("ashen faction has no signing key ({}): {e}", file.display()),
+            }
+        }
         let rpc_url = std::env::var("NEAR_RPC_URL").unwrap_or_else(|_| "https://rpc.testnet.fastnear.com".into());
         let network = network(&rpc_url)?;
         Ok(Some(Self { contract, assets, rpc_url, network, accounts, signers, http: reqwest::Client::new(), locks }))
@@ -119,6 +139,11 @@ impl NearClient {
 
     pub fn account(&self, role: Role) -> &AccountId {
         &self.accounts[&role]
+    }
+
+    /// The chain account of an actor id ("vanguard", "vex", "ashen"), if configured.
+    pub fn actor_account(&self, actor: &str) -> Option<&AccountId> {
+        Role::for_actor(actor).and_then(|r| self.accounts.get(&r))
     }
 
     /// Sign and send one call as `role`, then verify it independently.

@@ -40,6 +40,7 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         .route("/reconciliation", web::get().to(settlement::reconciliation))
         .route("/admin/advance", web::post().to(settlement::admin_advance))
         .route("/admin/realign", web::post().to(settlement::admin_realign))
+        .route("/admin/plan", web::post().to(settlement::admin_plan))
         .route("/me/profile", web::get().to(profile::get))
         .route("/me/profile", web::post().to(profile::set))
         .route("/auth/config", web::get().to(auth::config))

@@ -58,6 +58,15 @@ impl WorldService {
                 w
             }
         };
+        // A live world that predates the Ashen Compact gains it, provided settlement
+        // (when on) can sign for it; its starting stock is genesis issuance and is
+        // mirrored on chain by the next flow sync.
+        let mut world: World = world;
+        let can_sign = near.as_ref().is_none_or(|n| n.actor_account("ashen").is_some());
+        if world.market.living && can_sign && cz_economy::add_rival(&mut world) {
+            persist(&db, &world).await?;
+            tracing::info!("world: the Ashen Compact joined at tick {}", world.tick);
+        }
         tracing::info!("world: loaded at tick {} (version {})", world.tick, world.version);
         Ok(Self { world: Arc::new(Mutex::new(world)), db, near })
     }

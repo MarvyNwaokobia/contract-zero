@@ -131,7 +131,7 @@ fn without_fuel_there_is_no_depot_to_raid_and_no_shipment() {
     let mut w = genesis(1);
     let fuel = w.balance(VG, Asset::Res(Resource::Fuel));
     w.apply(&[Transfer { from: VG.into(), to: WORLD.into(), asset: Asset::Res(Resource::Fuel), qty: fuel - (STAGING_FUEL - 1), reason: Reason::Consumption }]).unwrap();
-    assert!(mission::available_raids(&w).is_empty(), "no fuel to stage a depot");
+    assert!(!mission::available_raids(&w).iter().any(|p| p.target == VANGUARD), "no fuel to stage a depot");
     let r = w.execute(&Caller::Player(PLAYER.into()), &Action::StartRaid { target: VANGUARD.into(), resource: Resource::Ammo });
     assert!(matches!(r, Err(EconError::NoRaidTarget { .. })));
     // Burn the rest: the next shipment is grounded.

@@ -89,3 +89,17 @@ pub async fn admin_realign(state: web::Data<AppState>, req: actix_web::HttpReque
         Err(e) => HttpResponse::Conflict().json(json!({ "error": e })),
     }
 }
+
+/// Operator-only: run one strategic planning round now (for testing the planner).
+pub async fn admin_plan(state: web::Data<AppState>, req: actix_web::HttpRequest) -> HttpResponse {
+    let Ok(token) = std::env::var("ADMIN_TOKEN") else { return HttpResponse::NotFound().finish() };
+    let given = req.headers().get("x-admin-token").and_then(|v| v.to_str().ok()).unwrap_or_default();
+    if token.is_empty() || given != token {
+        return HttpResponse::Unauthorized().json(json!({ "error": "admin token required" }));
+    }
+    let Some(planner) = crate::services::planner::Planner::from_env() else {
+        return HttpResponse::Conflict().json(json!({ "error": "NEAR_AI_API_KEY is not set" }));
+    };
+    crate::services::planner::run(&state, &planner).await;
+    HttpResponse::Ok().json(json!({ "ran": true, "model": planner.model }))
+}

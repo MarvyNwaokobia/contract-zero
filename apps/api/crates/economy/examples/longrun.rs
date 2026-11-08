@@ -1,7 +1,7 @@
 //! Long-run health check of the live world: agents every tick, a player raiding the
 //! richest depot every `RAID_EVERY` ticks and selling the cargo back to the merchant.
 //! Prints one line per day.  cargo run -p cz-economy --example longrun -- [days] [raid_every]
-use cz_economy::mission::raid_plan;
+use cz_economy::mission::{self, raid_plan};
 use cz_economy::policy::run_fallback_agents;
 use cz_economy::*;
 
@@ -39,10 +39,17 @@ fn main() {
                 b(vex, Asset::Credits), b(vex, Asset::Res(Resource::Ammo)), b(vex, Asset::Res(Resource::Med)), b(vex, Asset::Res(Resource::Fuel)), if w.merchant_insolvent() { " INSOLVENT" } else { "" },
                 board.len(), w.price(Resource::Ammo).ask, w.price(Resource::Med).ask, w.price(Resource::Fuel).ask,
             );
+            let ash = "faction:ashen";
+            if w.actors.contains_key(ASHEN) {
+                let ab = mission::available_raids(&w).iter().filter(|p| p.target == ASHEN).count();
+                println!("        ASH cr {:>6} ammo {:>4} med {:>4} fuel {:>4} def {} | ashen depots {} | bounties open {}", b(ash, Asset::Credits), b(ash, Asset::Res(Resource::Ammo)), b(ash, Asset::Res(Resource::Med)), b(ash, Asset::Res(Resource::Fuel)), w.actors[ASHEN].defense, ab, w.open_bounties().count());
+            }
         }
     }
     println!("raids {raids}, ticks with an empty board {empty_board_ticks} of {}", days * TICKS_PER_DAY);
     let kinds = |k: OpKind| w.bounties.values().filter(|b| b.kind == k).count();
     let seized = w.convoys.values().filter(|c| matches!(c.status, ConvoyStatus::Seized { .. })).count();
     println!("contracts: raid {} sabotage {} recovery {}; caravans seized {seized}", kinds(OpKind::Raid), kinds(OpKind::Sabotage), kinds(OpKind::Recovery));
+    let by = |s: &str| w.bounties.values().filter(|b| b.sponsor == s && b.kind == OpKind::Raid).count();
+    println!("raid bounties by sponsor: vanguard {} ashen {} vex {}", by(VANGUARD), by(ASHEN), by(MERCHANT));
 }

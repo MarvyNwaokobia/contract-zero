@@ -105,7 +105,7 @@ pub fn commander(w: &World, id: &str) -> Vec<Decision> {
         }
         // Price discipline: above twice production cost, wait unless critically low.
         let ask = w.price(r).ask;
-        let ceiling = pricing::production_cost(r) * MAX_PRICE_MULT;
+        let ceiling = pricing::production_cost(r) * a.doctrine.max_price_mult;
         if ask > ceiling && have * 4 >= target {
             out.push(decision(id, &trigger, &ctx(&[("unit_ask", ask), ("price_ceiling", ceiling)]), None, format!("Short {want} {}, but the merchant asks {ask} cr (ceiling {ceiling}); waiting while stock lasts.", r.name())));
             continue;
@@ -129,25 +129,30 @@ pub fn commander(w: &World, id: &str) -> Vec<Decision> {
         }
     }
 
-    // Sell ammunition beyond twice the target to the merchant's bid, sized to what the
-    // merchant can actually pay above its reserve. On chain this settles as a merchant
-    // bid that the commander accepts (cz-world v2 `post_bid` / `accept_bid`).
-    let ammo = w.balance(&a.account, Asset::Res(Resource::Ammo));
-    let keep = ammo_target(a) * 2;
-    if ammo > keep && !w.merchant_insolvent() {
+    // Sell anything held beyond twice its target to the merchant's bid (Vanguard's
+    // ammunition, Ashen's fuel), sized to what the merchant can pay above its reserve.
+    // On chain this settles as a merchant bid the commander accepts.
+    for r in Resource::ALL {
+        let have = w.balance(&a.account, Asset::Res(r));
+        let keep = 2 * if r == Resource::Ammo { ammo_target(a) } else { a.requirement(r) };
+        if keep == 0 || have <= keep || w.merchant_insolvent() {
+            continue;
+        }
         let m = w.merchant();
         let merchant_budget = (w.balance(&m.account, Asset::Credits) - m.credit_reserve).max(0);
-        let mut qty = ammo - keep;
+        let mut qty = have - keep;
         while qty > 0 {
-            match w.quote(Resource::Ammo, Side::Sell, qty) {
+            match w.quote(r, Side::Sell, qty) {
                 Ok(q) if q.total <= merchant_budget => {
-                    out.push(decision(id, "ammo surplus", &[("have", ammo), ("keep", keep), ("quote_qty", q.qty), ("quote_total", q.total), ("merchant_budget", merchant_budget)], Some(Action::Trade { resource: Resource::Ammo, side: Side::Sell, qty: q.qty, limit_total: q.total }), format!("Sell {} surplus ammo to the merchant for {} credits.", q.qty, q.total)));
+                    out.push(decision(id, &format!("{} surplus", r.name()), &[("have", have), ("keep", keep), ("quote_qty", q.qty), ("quote_total", q.total), ("merchant_budget", merchant_budget)], Some(Action::Trade { resource: r, side: Side::Sell, qty: q.qty, limit_total: q.total }), format!("Sell {} surplus {} to the merchant for {} credits.", q.qty, r.name(), q.total)));
                     break;
                 }
                 _ => qty = if qty > 4 { qty * 3 / 4 } else { qty - 1 },
             }
         }
     }
+
+    out.extend(rivalry(w, a));
 
     // Starving and broke: take a merchant caravan carrying what is short, if one is on
     // the road. At most once per raid-memory window; the merchant will want it back.
@@ -173,7 +178,7 @@ pub fn commander(w: &World, id: &str) -> Vec<Decision> {
     // Defense posture follows recent raids, but only what the faction can pay for.
     let raids = w.recent_raids_on(id, RAID_MEMORY_TICKS) as i64;
     let credits = w.balance(&a.account, Asset::Credits);
-    let mut level = (BASE_DEFENSE as i64 + raids).min(DEFENSE_MAX as i64) as u8;
+    let mut level = (a.doctrine.base_defense as i64 + raids).min(DEFENSE_MAX as i64) as u8;
     let mut why = if raids > 0 { format!("{raids} raid(s) in the last {RAID_MEMORY_TICKS}h: escorts up.") } else { "Quiet period: standard escorts.".to_string() };
     // A strong treasury buys extra patrols (and pays their upkeep) before any raid:
     // one level per four days of income banked above the reserve.
@@ -192,6 +197,43 @@ pub fn commander(w: &World, id: &str) -> Vec<Decision> {
     out
 }
 
+/// How long a faction holds a grudge against a rival that paid for raids on it.
+pub const GRUDGE_TICKS: u64 = 72;
+
+/// Faction against faction: retaliate against a rival that paid for raids on you; an
+/// aggressive faction also pays to have a stronger rival raided first. Both act through
+/// bounties, so the player decides whether the raid happens.
+fn rivalry(w: &World, a: &Actor) -> Vec<Decision> {
+    let mut out = Vec::new();
+    let mut budget = spendable(w, a);
+    for rival in w.actors.values().filter(|r| r.kind == ActorKind::Faction && r.id != a.id) {
+        if w.open_bounties().any(|b| b.sponsor == a.id && b.target == rival.id) {
+            continue;
+        }
+        let paid_against_me = w.memory.get(&a.id).and_then(|m| m.sponsors.get(&rival.id)).map_or(0, |t| t.iter().filter(|&&t| t + GRUDGE_TICKS > w.tick).count()) as i64;
+        let stronger = w.balance(&rival.account, Asset::Credits) > w.balance(&a.account, Asset::Credits) * 6 / 5;
+        let (trigger, why) = if paid_against_me > 0 {
+            ("retaliation", format!("{} paid for {paid_against_me} raid(s) on us. Returning the favour", rival.name))
+        } else if a.doctrine.aggression >= 50 && stronger {
+            ("pre-emptive strike", format!("{} is richer than we are. Weakening it before it comes for us", rival.name))
+        } else {
+            continue;
+        };
+        // Hit the depot that hurts them most: their biggest.
+        let Some(plan) = Resource::ALL.iter().filter_map(|&r| mission::raid_plan(w, &rival.id, r)).max_by_key(|p| p.manifest * pricing::production_cost(p.resource)) else { continue };
+        let value = plan.manifest * pricing::production_cost(plan.resource);
+        let amount = value * 3_500 / BP;
+        let ctx = [("rival_credits", w.balance(&rival.account, Asset::Credits)), ("my_credits", w.balance(&a.account, Asset::Credits)), ("paid_raids_on_me", paid_against_me), ("depot", plan.manifest), ("bounty", amount), ("budget", budget)];
+        if amount > budget || amount < 1 {
+            out.push(decision(&a.id, trigger, &ctx, None, format!("{why}, but a {amount} cr bounty is over budget.")));
+            continue;
+        }
+        budget -= amount;
+        out.push(decision(&a.id, trigger, &ctx, Some(Action::PostBounty { target: rival.id.clone(), resource: plan.resource, amount }), format!("{why}: {amount} cr to whoever raids its {} depot.", plan.resource.name())));
+    }
+    out
+}
+
 pub fn merchant(w: &World) -> Vec<Decision> {
     let id = w.market.merchant.clone();
     let Ok(a) = w.actor(&id) else { return vec![] };
@@ -201,6 +243,23 @@ pub fn merchant(w: &World) -> Vec<Decision> {
     }
     let mut out = Vec::new();
     let mut budget = spendable(w, a);
+
+    // First, my own stolen cargo: pay whoever brings it back.
+    for c in w.convoys.values().filter(|c| c.owner == id) {
+        let ConvoyStatus::Seized { by } = &c.status else { continue };
+        if w.bounties.values().any(|b| b.convoy == Some(c.id)) {
+            continue;
+        }
+        let value = c.units * pricing::production_cost(c.resource);
+        let amount = value * 3_000 / BP;
+        let ctx = [("convoy", c.id as i64), ("units", c.units), ("budget", budget), ("fee", amount)];
+        if amount <= budget && amount > 0 {
+            budget -= amount;
+            out.push(decision(&id, "caravan seized", &ctx, Some(Action::PostContract { kind: OpKind::Recovery, target: by.clone(), resource: c.resource, amount, convoy: Some(c.id) }), format!("{by} took my caravan ({} {}). Paying {amount} cr to whoever brings it back.", c.units, c.resource.name())));
+        } else {
+            out.push(decision(&id, "caravan seized", &ctx, None, format!("{by} took my caravan, but a {amount} cr recovery fee is over budget.")));
+        }
+    }
 
     for r in Resource::ALL {
         let stock = w.merchant_stock(r);
@@ -222,23 +281,6 @@ pub fn merchant(w: &World) -> Vec<Decision> {
             }
             budget -= amount;
             out.push(decision(&id, &format!("{} shelf low", r.name()), &ctx, Some(Action::PostBounty { target: f.id.clone(), resource: r, amount }), format!("Pay {amount} cr to whoever raids {}'s {} depot ({} units): restocks my shelf.", f.name, r.name(), plan.manifest)));
-        }
-    }
-
-    // A caravan of mine was taken: pay whoever brings the cargo back.
-    for c in w.convoys.values().filter(|c| c.owner == id) {
-        let ConvoyStatus::Seized { by } = &c.status else { continue };
-        if w.bounties.values().any(|b| b.convoy == Some(c.id)) {
-            continue;
-        }
-        let value = c.units * pricing::production_cost(c.resource);
-        let amount = value * 3_000 / BP;
-        let ctx = [("convoy", c.id as i64), ("units", c.units), ("budget", budget), ("fee", amount)];
-        if amount <= budget && amount > 0 {
-            budget -= amount;
-            out.push(decision(&id, "caravan seized", &ctx, Some(Action::PostContract { kind: OpKind::Recovery, target: by.clone(), resource: c.resource, amount, convoy: Some(c.id) }), format!("{by} took my caravan ({} {}). Paying {amount} cr to whoever brings it back.", c.units, c.resource.name())));
-        } else {
-            out.push(decision(&id, "caravan seized", &ctx, None, format!("{by} took my caravan, but a {amount} cr recovery fee is over budget.")));
         }
     }
 

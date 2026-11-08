@@ -101,12 +101,25 @@ fn batches(near: &NearClient, mints: &Flows, burns: &Flows) -> Vec<(Vec<Value>, 
     out
 }
 
-pub async fn enqueue(db: &PgPool, kind: &str, op_id: &str, tick: u64, payload: &Value) -> Result<bool, sqlx::Error> {
-    let r = sqlx::query("INSERT INTO settlements (kind, op_id, tick, payload) VALUES ($1, $2, $3, $4) ON CONFLICT (op_id) DO NOTHING")
+/// The ledger position mirrored on chain for this controller.
+async fn cursor(db: &PgPool, contract: &str) -> Result<i64, sqlx::Error> {
+    sqlx::query("INSERT INTO chain_cursor (contract) VALUES ($1) ON CONFLICT (contract) DO NOTHING").bind(contract).execute(db).await?;
+    let (c,): (i64,) = sqlx::query_as("SELECT ledger_seq FROM chain_cursor WHERE contract = $1").bind(contract).fetch_one(db).await?;
+    Ok(c)
+}
+
+async fn set_cursor(db: &PgPool, contract: &str, seq: i64) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE chain_cursor SET ledger_seq = $2, updated_at = now() WHERE contract = $1").bind(contract).bind(seq).execute(db).await?;
+    Ok(())
+}
+
+pub async fn enqueue(db: &PgPool, near: &NearClient, kind: &str, op_id: &str, tick: u64, payload: &Value) -> Result<bool, sqlx::Error> {
+    let r = sqlx::query("INSERT INTO settlements (kind, op_id, tick, payload, contract) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (contract, op_id) DO NOTHING")
         .bind(kind)
         .bind(op_id)
         .bind(tick as i64)
         .bind(payload)
+        .bind(near.contract.to_string())
         .execute(db)
         .await?;
     Ok(r.rows_affected() == 1)
@@ -114,7 +127,8 @@ pub async fn enqueue(db: &PgPool, kind: &str, op_id: &str, tick: u64, payload: &
 
 /// Queue the flows since the cursor and advance it. Call inside a world transaction.
 pub async fn sync_flows(w: &World, db: &PgPool, near: &NearClient) -> Result<(), sqlx::Error> {
-    let (cursor,): (i64,) = sqlx::query_as("SELECT ledger_seq FROM chain_sync WHERE id = 1").fetch_one(db).await?;
+    let contract = near.contract.to_string();
+    let cursor = cursor(db, &contract).await?;
     let to = w.ledger.len();
     if to as i64 <= cursor {
         return Ok(());
@@ -122,19 +136,23 @@ pub async fn sync_flows(w: &World, db: &PgPool, near: &NearClient) -> Result<(),
     let (mints, burns) = flows_between(w, cursor as usize, to);
     for (i, (m, b)) in batches(near, &mints, &burns).into_iter().enumerate() {
         let batch_id = format!("ledger-{cursor}-{to}-{i}");
-        enqueue(db, "flows", &format!("flows:{batch_id}"), w.tick, &json!({ "batch_id": batch_id, "mints": m, "burns": b })).await?;
+        enqueue(db, near, "flows", &format!("flows:{batch_id}"), w.tick, &json!({ "batch_id": batch_id, "mints": m, "burns": b })).await?;
     }
-    sqlx::query("UPDATE chain_sync SET ledger_seq = $1, updated_at = now() WHERE id = 1").bind(to as i64).execute(db).await?;
+    set_cursor(db, &contract, to as i64).await?;
     Ok(())
 }
 
-/// Queue an agent's purchase from the merchant (after the flows that fund it).
+/// Queue an agent's trade with the merchant (after the flows that fund it). A purchase
+/// settles as a merchant offer the agent accepts; a sale as a merchant bid it accepts.
 pub async fn queue_trade(w: &World, db: &PgPool, near: &NearClient, t: &TradeRecord) -> Result<(), sqlx::Error> {
-    let Some(buyer) = chain_account(near, &t.party) else { return Ok(()) };
+    let Some(party) = chain_account(near, &t.party) else { return Ok(()) };
     sync_flows(w, db, near).await?;
-    let offer_id = format!("trade-{}", t.id);
-    let payload = json!({ "trade": t.id, "offer_id": offer_id, "buyer": buyer, "token_id": t.resource.name(), "amount": t.qty.to_string(), "total": t.total.to_string() });
-    enqueue(db, "trade", &format!("offer:{offer_id}"), w.tick, &payload).await.map(|_| ())
+    let (kind, base) = match t.side {
+        cz_economy::Side::Buy => ("trade", format!("trade-{}", t.id)),
+        cz_economy::Side::Sell => ("sell", format!("sale-{}", t.id)),
+    };
+    let payload = json!({ "trade": t.id, "quote_base": base, "party": party, "token_id": t.resource.name(), "amount": t.qty.to_string(), "total": t.total.to_string() });
+    enqueue(db, near, kind, &base, w.tick, &payload).await.map(|_| ())
 }
 
 /// Queue a validated raid's settlement (after the flows that put the cargo there).
@@ -156,7 +174,7 @@ pub async fn queue_raid(w: &World, db: &PgPool, near: &NearClient, raid: u64) ->
         "raid_id": raid.to_string(), "faction": faction, "player": r.player, "token_id": r.plan.resource.name(),
         "amount": units.to_string(), "bounty": sponsor.map(|s| json!([s, bounty.to_string()])),
     });
-    enqueue(db, "raid", &op, w.tick, &payload).await?;
+    enqueue(db, near, "raid", &op, w.tick, &payload).await?;
     Ok(Some(op))
 }
 
@@ -165,8 +183,7 @@ pub async fn queue_raid(w: &World, db: &PgPool, near: &NearClient, raid: u64) ->
 /// difference per actor, then start the cursor at the current ledger.
 pub async fn bootstrap(state: &AppState) -> Result<(), String> {
     let Some(near) = state.near.clone() else { return Ok(()) };
-    let (cursor,): (i64,) = sqlx::query_as("SELECT ledger_seq FROM chain_sync WHERE id = 1").fetch_one(state.world.db()).await.map_err(|e| e.to_string())?;
-    if cursor > 0 {
+    if cursor(state.world.db(), &near.contract.to_string()).await.map_err(|e| e.to_string())? > 0 {
         return Ok(());
     }
     // Read the chain first (no lock held across RPC), then align under the lock.
@@ -197,9 +214,9 @@ pub async fn bootstrap(state: &AppState) -> Result<(), String> {
             let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%S");
             for (i, (m, b)) in batches(&near, &mints, &burns).into_iter().enumerate() {
                 let batch_id = format!("baseline-{stamp}-{i}");
-                enqueue(db, "genesis", &format!("flows:{batch_id}"), w.tick, &json!({ "batch_id": batch_id, "mints": m, "burns": b, "note": "align the chain with the economy at startup" })).await?;
+                enqueue(db, &near, "genesis", &format!("flows:{batch_id}"), w.tick, &json!({ "batch_id": batch_id, "mints": m, "burns": b, "note": "align the chain with the economy at startup" })).await?;
             }
-            sqlx::query("UPDATE chain_sync SET ledger_seq = $1, updated_at = now() WHERE id = 1").bind(w.ledger.len() as i64).execute(db).await?;
+            set_cursor(db, &near.contract.to_string(), w.ledger.len() as i64).await?;
             Ok(())
         })
         .await
@@ -212,15 +229,31 @@ type Row = (i64, String, String, Value, i32);
 pub async fn process_next(state: &AppState) -> Result<bool, String> {
     let Some(near) = state.near.clone() else { return Ok(false) };
     let db = state.world.db();
-    let row: Option<Row> = sqlx::query_as("SELECT id, kind, op_id, payload, attempts FROM settlements WHERE status IN ('pending', 'submitted') ORDER BY id LIMIT 1")
+    // Only this controller's rows: rows for another contract (e.g. the frozen v1) are
+    // never submitted here.
+    let row: Option<Row> = sqlx::query_as("SELECT id, kind, op_id, payload, attempts FROM settlements WHERE status IN ('pending', 'submitted') AND contract = $1 ORDER BY id LIMIT 1")
+        .bind(near.contract.to_string())
         .fetch_optional(db)
         .await
         .map_err(|e| e.to_string())?;
     let Some((id, kind, op_id, payload, attempts)) = row else { return Ok(false) };
     sqlx::query("UPDATE settlements SET status = 'submitted', attempts = attempts + 1 WHERE id = $1").bind(id).execute(db).await.map_err(|e| e.to_string())?;
 
-    // Already applied on chain (e.g. a crash after submit)? Then it is done.
-    let already = near.view("is_used", json!({ "op_id": op_id })).await.ok().and_then(|v| v.as_bool()).unwrap_or(false);
+    // Already applied on chain (e.g. a crash after submit)? Ask cz-assets, which marks
+    // a controller operation used ONLY when value actually moved. (A cancelled or
+    // expired quote is used in the controller but never in cz-assets.)
+    let attempt = attempts + 1;
+    let ledger_ops: Vec<String> = match kind.as_str() {
+        "trade" => (1..=attempt).map(|k| format!("ctl:offer:{}-a{k}", payload["quote_base"].as_str().unwrap_or_default())).collect(),
+        "sell" => (1..=attempt).map(|k| format!("ctl:bid:{}-a{k}", payload["quote_base"].as_str().unwrap_or_default())).collect(),
+        _ => vec![format!("ctl:{op_id}")],
+    };
+    let mut already = false;
+    for op in &ledger_ops {
+        if near.view_assets("is_used", json!({ "op_id": op })).await.ok().and_then(|v| v.as_bool()).unwrap_or(false) {
+            already = true;
+        }
+    }
     let result: Result<Vec<Verified>, String> = if already {
         Ok(vec![])
     } else {
@@ -236,7 +269,8 @@ pub async fn process_next(state: &AppState) -> Result<bool, String> {
                 }), 0)
                 .await
                 .map(|v| vec![v]),
-            "trade" => settle_trade(&near, &payload).await,
+            "trade" => settle_quote(&near, &payload, attempt, false).await,
+            "sell" => settle_quote(&near, &payload, attempt, true).await,
             other => Err(format!("unknown settlement kind {other}")),
         }
     };
@@ -256,7 +290,7 @@ pub async fn process_next(state: &AppState) -> Result<bool, String> {
             let give_up = attempts + 1 >= 3;
             let status = if give_up { "failed" } else { "pending" };
             sqlx::query("UPDATE settlements SET status = $2, error = $3 WHERE id = $1").bind(id).bind(status).bind(&e).execute(db).await.map_err(|e| e.to_string())?;
-            if give_up && kind == "trade" {
+            if give_up && (kind == "trade" || kind == "sell") {
                 compensate_trade(state, id, &payload).await;
             }
             let tick = state.world.read(|w| w.tick).await;
@@ -266,24 +300,26 @@ pub async fn process_next(state: &AppState) -> Result<bool, String> {
     Ok(true)
 }
 
-async fn settle_trade(near: &NearClient, p: &Value) -> Result<Vec<Verified>, String> {
-    let offer_id = p["offer_id"].as_str().unwrap_or_default().to_string();
+/// Settle an agent trade as a fresh, attempt-scoped quote: Vex posts an offer (it
+/// sells) or a bid (it buys) to the party, and the party accepts with its price limit.
+/// If acceptance fails the quote is cancelled; the next attempt uses a new id.
+async fn settle_quote(near: &NearClient, p: &Value, attempt: i32, sale: bool) -> Result<Vec<Verified>, String> {
+    let id = format!("{}-a{attempt}", p["quote_base"].as_str().unwrap_or_default());
+    let party = p["party"].as_str().unwrap_or_default();
+    let role = Role::for_actor(party.split('.').next().unwrap_or_default()).ok_or_else(|| format!("{party} has no signing key"))?;
+    let (post, accept, quote_key, limit_key) = if sale { ("post_bid", "accept_bid", "bid", "min_total") } else { ("post_offer", "accept_offer", "offer", "max_total") };
+    let counterparty = if sale { "seller" } else { "buyer" };
     let mut out = Vec::new();
-    // The offer may already be posted from an earlier attempt.
-    let posted = near.view("get_offer", json!({ "offer_id": offer_id })).await.ok().map(|v| !v.is_null()).unwrap_or(false);
-    if !posted {
-        out.push(near.call(Role::Vex, "post_offer", json!({
-            "offer_id": offer_id, "buyer": p["buyer"], "token_id": p["token_id"], "amount": p["amount"], "total_credits": p["total"], "ttl_secs": 600,
-        }), 0).await?);
-    }
-    let buyer = Role::for_actor(p["buyer"].as_str().unwrap_or_default().split('.').next().unwrap_or_default()).unwrap_or(Role::Vanguard);
-    match near.call(buyer, "accept_offer", json!({ "offer_id": offer_id, "max_total": p["total"] }), 0).await {
+    out.push(near.call(Role::Vex, post, json!({
+        format!("{quote_key}_id"): id, counterparty: party, "token_id": p["token_id"], "amount": p["amount"], "total_credits": p["total"], "ttl_secs": 900,
+    }), 0).await?);
+    match near.call(role, accept, json!({ format!("{quote_key}_id"): id, limit_key: p["total"] }), 0).await {
         Ok(v) => {
             out.push(v);
             Ok(out)
         }
         Err(e) => {
-            let _ = near.call(Role::Vex, "cancel_offer", json!({ "offer_id": offer_id }), 0).await;
+            let _ = near.call(Role::Vex, "cancel_quote", json!({ "quote_id": format!("{quote_key}:{id}") }), 0).await;
             Err(e)
         }
     }
@@ -306,11 +342,12 @@ async fn compensate_trade(state: &AppState, id: i64, p: &Value) {
 /// Engine vs chain balances for each actor, with what is still in flight.
 pub async fn reconcile(state: &AppState) -> Result<Value, String> {
     let Some(near) = state.near.clone() else { return Ok(json!({ "enabled": false })) };
-    let open: Vec<(String,)> = sqlx::query_as("SELECT op_id FROM settlements WHERE status IN ('pending', 'submitted') ORDER BY id")
+    let open: Vec<(String,)> = sqlx::query_as("SELECT op_id FROM settlements WHERE status IN ('pending', 'submitted') AND contract = $1 ORDER BY id")
+        .bind(near.contract.to_string())
         .fetch_all(state.world.db())
         .await
         .map_err(|e| e.to_string())?;
-    let (cursor,): (i64,) = sqlx::query_as("SELECT ledger_seq FROM chain_sync WHERE id = 1").fetch_one(state.world.db()).await.map_err(|e| e.to_string())?;
+    let cursor = cursor(state.world.db(), &near.contract.to_string()).await.map_err(|e| e.to_string())?;
     let (engine, ledger_len) = state
         .world
         .read(|w| {
@@ -351,7 +388,7 @@ pub async fn reconcile(state: &AppState) -> Result<Value, String> {
 
 pub fn spawn_worker(state: AppState) {
     if state.near.is_none() {
-        tracing::info!("settlement: disabled (CZ_CONTRACT not set): the economy runs off-chain only");
+        tracing::info!("settlement: disabled (CZ_WORLD not set): the economy runs off-chain only");
         return;
     }
     tokio::spawn(async move {

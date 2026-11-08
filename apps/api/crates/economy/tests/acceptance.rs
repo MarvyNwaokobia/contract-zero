@@ -143,3 +143,28 @@ fn the_commander_does_not_top_up_a_nearly_full_store() {
     w.apply(&[Transfer { from: VG.into(), to: WORLD.into(), asset: Asset::Res(Resource::Ammo), qty: 30, reason: Reason::Consumption }]).unwrap();
     assert!(policy::commander(&w, VANGUARD).iter().all(|d| d.trigger != "ammo below target"));
 }
+
+#[test]
+fn the_commander_sells_surplus_ammo_within_what_the_merchant_can_pay() {
+    let mut w = acceptance();
+    // Vanguard is swimming in ammunition.
+    w.grant("faction:vanguard", Asset::Res(Resource::Ammo), 400);
+    let d = policy::commander(&w, VANGUARD);
+    let sell = d.iter().find(|d| d.trigger == "ammo surplus").expect("commander sells surplus");
+    let Some(Action::Trade { side: Side::Sell, qty, limit_total, .. }) = sell.action.clone() else { panic!("{sell:?}") };
+    let vex = w.actor(MERCHANT).unwrap();
+    assert!(limit_total <= w.balance(VEX_ACC, Asset::Credits) - vex.credit_reserve, "never more than the merchant can pay");
+    let before = (ammo(&w, VG), w.balance(VG, Asset::Credits));
+    w.execute(&Caller::Agent(VANGUARD.into()), sell.action.as_ref().unwrap()).unwrap();
+    assert_eq!(ammo(&w, VG), before.0 - qty);
+    assert_eq!(w.balance(VG, Asset::Credits), before.1 + limit_total);
+}
+
+#[test]
+fn the_commander_does_not_sell_to_an_insolvent_merchant() {
+    let mut w = acceptance();
+    w.grant("faction:vanguard", Asset::Res(Resource::Ammo), 400);
+    let c = w.balance(VEX_ACC, Asset::Credits);
+    w.apply(&[Transfer { from: VEX_ACC.into(), to: WORLD.into(), asset: Asset::Credits, qty: c - 10, reason: Reason::ImportCost { convoy: 0 } }]).unwrap();
+    assert!(policy::commander(&w, VANGUARD).iter().all(|d| d.trigger != "ammo surplus"));
+}

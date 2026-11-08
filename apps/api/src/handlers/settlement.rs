@@ -7,12 +7,12 @@ use serde_json::{json, Value};
 use crate::services::near::explorer_tx;
 use crate::AppState;
 
-type Row = (i64, String, String, i64, String, i32, Vec<String>, Option<Value>, Option<String>, Value);
+type Row = (i64, String, String, i64, String, i32, Vec<String>, Option<Value>, Option<String>, Value, String);
 
 fn row_json(r: Row) -> Value {
-    let (id, kind, op_id, tick, status, attempts, hashes, evidence, error, payload) = r;
+    let (id, kind, op_id, tick, status, attempts, hashes, evidence, error, payload, contract) = r;
     json!({
-        "id": id, "kind": kind, "op_id": op_id, "tick": tick, "status": status, "attempts": attempts,
+        "id": id, "kind": kind, "op_id": op_id, "contract": contract, "tick": tick, "status": status, "attempts": attempts,
         // Only a confirmed row is on-chain settlement; anything else is in flight or failed.
         "settled_on_chain": status == "confirmed",
         "tx_hashes": hashes, "explorer": hashes.iter().map(|h| explorer_tx(h)).collect::<Vec<_>>(),
@@ -20,7 +20,7 @@ fn row_json(r: Row) -> Value {
     })
 }
 
-const COLS: &str = "id, kind, op_id, tick, status, attempts, tx_hashes, evidence, error, payload";
+const COLS: &str = "id, kind, op_id, tick, status, attempts, tx_hashes, evidence, error, payload, contract";
 
 #[derive(Deserialize)]
 pub struct ListQuery {
@@ -39,7 +39,7 @@ pub async fn list(state: web::Data<AppState>, q: web::Query<ListQuery>) -> HttpR
 }
 
 pub async fn get(state: web::Data<AppState>, path: web::Path<String>) -> HttpResponse {
-    let row: Result<Option<Row>, _> = sqlx::query_as(&format!("SELECT {COLS} FROM settlements WHERE op_id = $1"))
+    let row: Result<Option<Row>, _> = sqlx::query_as(&format!("SELECT {COLS} FROM settlements WHERE op_id = $1 ORDER BY id DESC LIMIT 1"))
         .bind(path.into_inner())
         .fetch_optional(state.world.db())
         .await;

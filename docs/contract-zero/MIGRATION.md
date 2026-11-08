@@ -65,6 +65,8 @@ Recorded below as each step runs.
 | 10 | Imported | [`6dHFpcxcjTz9bJRgn7RaRLVvry4YgM4P9sqFDzgKuXqk`](https://testnet.nearblocks.io/txns/6dHFpcxcjTz9bJRgn7RaRLVvry4YgM4P9sqFDzgKuXqk). Every holder's `assets` balance equals its v1 balance, and `assets` supply equals v1 supply |
 | 11 | Sealed | [`DsaDLHFu…`](https://testnet.nearblocks.io/txns/DsaDLHFug769WadNb8SRCxh7a8Kv4q2qYHqXwQBzBLcs). A later import ([`GMq6vggr…`](https://testnet.nearblocks.io/txns/GMq6vggrupovWrPoQNUVJxSkUeVW8Kz2fxfG8oEc2dfr)) failed: "import window is sealed" |
 | 12 | v2 keys added; v1 function-call keys deleted | server `ed25519:9hg6yCxY…`, vanguard `ed25519:EVB73ozU…`, vex `ed25519:7CUkGTCt…`. v1 keys deleted ([`6zzHQJJ8…`](https://testnet.nearblocks.io/txns/6zzHQJJ85PaqVQjfAJucDuBw3teW8bRo8MEbR4gXH8Ks), [`8uMBW4ZN…`](https://testnet.nearblocks.io/txns/8uMBW4ZNfV2rJFKG3BJYSpMFiFZLgtxn1iXhFMrYi5aS), [`CtT2VXTj…`](https://testnet.nearblocks.io/txns/CtT2VXTjckbRtvCoyepZra4VbGhsCC7jwpLweU3sm2Jw)) |
+| 13 | API pointed at v2 | Fresh database (`contract_zero_v2`; the v1-era dev database is kept untouched). Startup baseline [`EHwWjQt8…`](https://testnet.nearblocks.io/txns/EHwWjQt8Bx8sB2RSFpE1JHfQwMF3JVahJe138dAuZutu) confirmed; `GET /reconciliation`: `in_sync` |
+| 14 | Acceptance re-run on v2 | Passed: raid [`AJTujuPH…`](https://testnet.nearblocks.io/txns/AJTujuPHdxbfwzmKyop8LzQjUqJCqEsams2oZScZHEEt), purchase [`GM9qTLTj…`](https://testnet.nearblocks.io/txns/GM9qTLTjFKk9gChis2ZTfz8qfN9hVwrSZNNH3quZs9Z), reconciled, next mission changed. Details in `NEAR.md` |
 
 ### Incident found during migration: a settlement marked confirmed that never settled
 
@@ -82,4 +84,3 @@ The economy recorded a purchase the chain doesn't have. The chain itself is cons
 - The callback's `false` result counts as a failure.
 - A trade that can't settle is reversed in the economy and marked `compensated`, never `confirmed`.
 
-Steps 13–14 (API cutover and the acceptance re-run on v2) are recorded in `NEAR.md`.

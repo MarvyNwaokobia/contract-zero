@@ -11,7 +11,8 @@ import { readFileSync } from 'node:fs';
 
 const API = process.argv[2] ?? 'http://127.0.0.1:8089';
 const RPC = 'https://rpc.testnet.near.org';
-const CONTRACT = 'world.contract-zero.testnet';
+// Balances live in the NEP-245 ledger (cz-assets) since the v2 split.
+const CONTRACT = process.env.CZ_ASSETS ?? 'assets.contract-zero.testnet';
 const PLAYER = 'player.contract-zero.testnet';
 const TOKEN = readFileSync(process.env.ADMIN_TOKEN_FILE, 'utf8').trim();
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));

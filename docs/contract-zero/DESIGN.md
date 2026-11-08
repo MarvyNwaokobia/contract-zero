@@ -187,11 +187,11 @@ A mission is a pure function of live state, so the server validates exactly the 
 
 ## 9. On-chain architecture: `cz-assets` + `cz-world` v2
 
-**Why split.** The current single contract (`world.contract-zero.testnet`, verified on testnet) keeps every balance and all game logic in one account, so it:
-- can't upgrade the game without redeploying the ledger
-- gives the server's key reach over the whole ledger
-- can only send tokens to accounts the server has registered, which blocks wallets and NEAR Intents
-- has no NEP-245 metadata
+**Why split.** The first single contract (`world.contract-zero.testnet`, verified on testnet and now frozen) kept every balance and all game logic in one account, so it:
+- couldn't upgrade the game without redeploying the ledger
+- gave the server's key reach over the whole ledger
+- could only send tokens to accounts the server has registered, which blocks wallets and NEAR Intents
+- had no NEP-245 metadata
 
 The split fixes each of these without losing atomic trades.
 
@@ -271,8 +271,8 @@ These build on the working FPS engine; nothing here is a rewrite.
 | 3 | API: board, mission sessions, world clock, decisions, Observer Mode | Built |
 | 4 | CZ World v1 on testnet, settlement, reconciliation, on-chain acceptance run | Built |
 | 5 | This design | Built |
-| 6 | `cz-assets` + `cz-world` v2, migration, acceptance re-run on v2 | Proposed: next |
-| 7 | Merchant bids (commander selling), player ownership, Exchange, onboarding | Proposed |
+| 6 | `cz-assets` + `cz-world` v2, migration, acceptance re-run on v2 | Built (deployed on testnet; acceptance passed on v2) |
+| 7 | Merchant bids (commander selling), player ownership, Exchange, onboarding | In progress: bids are built in the contract, policy and worker; the rest is proposed |
 | 8 | Second faction and merchant, strategy profiles, memory | Proposed |
 | 9 | LLM planner on NEAR AI Cloud with validated tool calls | Proposed |
 | 10 | War Room UI and the causal timeline | Proposed |

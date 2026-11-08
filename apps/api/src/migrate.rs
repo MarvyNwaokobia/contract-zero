@@ -16,6 +16,7 @@ use sqlx::PgPool;
 const MIGRATIONS: &[(&str, &str)] = &[
     ("0001_init.sql", include_str!("../migrations/0001_init.sql")),
     ("0002_settlement.sql", include_str!("../migrations/0002_settlement.sql")),
+    ("0003_settlement_v2.sql", include_str!("../migrations/0003_settlement_v2.sql")),
 ];
 
 /// Apply every migration not yet recorded, in order, each in its own transaction. Called

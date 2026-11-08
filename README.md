@@ -24,7 +24,7 @@ Built for the NEAR Hackathon (November 2026), track **Games With Real Economies*
 | Fallback policies for both agents, with logged decisions | **Built and tested** |
 | API: raid board, mission sessions with server-side validation, world clock, decision feed, Observer Mode | **Built.** Verified end to end against a local Postgres |
 | Main Menu, Contract Board, Armory, Deployment, Extraction, War Room, Exchange | In progress |
-| NEAR testnet contract (NEP-245 assets, settlement, receipt verification) | In progress |
+| NEAR testnet settlement: `cz-assets` (NEP-245 ledger) + `cz-world` v2 (game controller), queue, FINAL verification, reconciliation | **Working on testnet.** The full acceptance sequence passed on chain ([docs/contract-zero/NEAR.md](docs/contract-zero/NEAR.md)) |
 | Social login (FastAuth) | In progress |
 | LLM strategic planner (NEAR AI Cloud) with validated tool calls | In progress |
 
@@ -36,7 +36,11 @@ apps/web    Next.js 15 + React Three Fiber
             └─ engine/scene  the 3D scene (ContractZeroScene)
 apps/api    Rust / Actix-web + Postgres
             └─ crates/economy  the deterministic world (no I/O)
-            └─ src             world service, mission sessions, scheduler, API
+            └─ src             world service, mission sessions, scheduler, API, settlement worker
+contracts-near
+            └─ cz-assets     NEP-245 ledger: balances, storage, issuance budgets, replay set
+            └─ cz-world-v2   game controller: raids, flows, offers and bids, roles
+            └─ cz-world      v1 single contract (frozen; kept for its verified history)
 ```
 
 Combat AI is deterministic and runs in the client sim; no LLM is involved in a gunfight. The economy runs on the server, which is the only place a mission outcome turns into goods.
@@ -86,6 +90,8 @@ To try it: open `/training`, then press **M** to pick a practice operation. You 
 ```bash
 cd apps/web && npx vitest run && npx tsc --noEmit    # FPS engine, missions, convoy builder
 cd apps/api && cargo test --workspace                # economy engine + API (Rust stable)
+cd contracts-near/cz-assets && cargo test            # ledger
+cd contracts-near/cz-world-v2 && cargo test          # controller
 ```
 
 The economy tests cover:
@@ -97,7 +103,7 @@ The economy tests cover:
 - bounties, escrow and refunds
 - authorization
 - every economy-to-battlefield rule
-- the acceptance scenario in `tests/acceptance.rs`. Vanguard 100 → 40 ammo, then the commander quotes, buys within policy and reconciles, and the next mission is better armed. It also covers no stock, partial stock, over budget and rejected proposals
+- the acceptance scenario in `tests/acceptance.rs`. Vanguard 100 → 40 ammo, then the commander quotes, buys within policy and reconciles, and the next mission is better armed. It also covers no stock, partial stock, over budget, rejected proposals, and the commander selling a surplus to the merchant
 
 ## Prior work
 

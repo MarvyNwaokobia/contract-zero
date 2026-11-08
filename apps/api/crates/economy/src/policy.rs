@@ -13,8 +13,8 @@
 //! raids and relaxes it when quiet, and drops to minimum when it can't pay escorts.
 //! It buys only once stock is below 75% of target (then back up to target), and won't
 //! pay over twice production cost unless critically short.
-//! It does not sell to the merchant: every agent trade settles on NEAR as a merchant
-//! offer, and the contract has no merchant-bid path.
+//! It sells ammunition beyond twice its target to the merchant's bid, sized to what
+//! the merchant can pay; on NEAR that settles as a merchant bid the commander accepts.
 //!
 //! **Vex (merchant).** Suspends business while insolvent. Otherwise it sponsors
 //! bounties on Vanguard depots of resources its shelves are short of, and widens its
@@ -125,6 +125,26 @@ pub fn commander(w: &World, id: &str) -> Vec<Decision> {
             None => {
                 let one = w.quote(r, Side::Buy, 1).map(|q| q.total).unwrap_or(0);
                 out.push(decision(id, &trigger, &ctx(&[("unit_ask", one)]), None, format!("Short {want} {}, but even one unit ({one} cr) is over the spending policy.", r.name())));
+            }
+        }
+    }
+
+    // Sell ammunition beyond twice the target to the merchant's bid, sized to what the
+    // merchant can actually pay above its reserve. On chain this settles as a merchant
+    // bid that the commander accepts (cz-world v2 `post_bid` / `accept_bid`).
+    let ammo = w.balance(&a.account, Asset::Res(Resource::Ammo));
+    let keep = ammo_target(a) * 2;
+    if ammo > keep && !w.merchant_insolvent() {
+        let m = w.merchant();
+        let merchant_budget = (w.balance(&m.account, Asset::Credits) - m.credit_reserve).max(0);
+        let mut qty = ammo - keep;
+        while qty > 0 {
+            match w.quote(Resource::Ammo, Side::Sell, qty) {
+                Ok(q) if q.total <= merchant_budget => {
+                    out.push(decision(id, "ammo surplus", &[("have", ammo), ("keep", keep), ("quote_qty", q.qty), ("quote_total", q.total), ("merchant_budget", merchant_budget)], Some(Action::Trade { resource: Resource::Ammo, side: Side::Sell, qty: q.qty, limit_total: q.total }), format!("Sell {} surplus ammo to the merchant for {} credits.", q.qty, q.total)));
+                    break;
+                }
+                _ => qty = if qty > 4 { qty * 3 / 4 } else { qty - 1 },
             }
         }
     }

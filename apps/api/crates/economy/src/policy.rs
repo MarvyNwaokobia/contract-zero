@@ -135,13 +135,15 @@ pub fn commander(w: &World, id: &str) -> Vec<Decision> {
     for r in Resource::ALL {
         let have = w.balance(&a.account, Asset::Res(r));
         let keep = 2 * if r == Resource::Ammo { ammo_target(a) } else { a.requirement(r) };
-        if keep == 0 || have <= keep || w.merchant_insolvent() {
+        // Only in lots worth a trade: every sale settles on chain, and dribbling out
+        // one or two units at a time just clogs the settlement queue.
+        if keep == 0 || have - keep < MIN_SURPLUS_LOT || w.merchant_insolvent() {
             continue;
         }
         let m = w.merchant();
         let merchant_budget = (w.balance(&m.account, Asset::Credits) - m.credit_reserve).max(0);
         let mut qty = have - keep;
-        while qty > 0 {
+        while qty >= MIN_SURPLUS_LOT {
             match w.quote(r, Side::Sell, qty) {
                 Ok(q) if q.total <= merchant_budget => {
                     out.push(decision(id, &format!("{} surplus", r.name()), &[("have", have), ("keep", keep), ("quote_qty", q.qty), ("quote_total", q.total), ("merchant_budget", merchant_budget)], Some(Action::Trade { resource: r, side: Side::Sell, qty: q.qty, limit_total: q.total }), format!("Sell {} surplus {} to the merchant for {} credits.", q.qty, r.name(), q.total)));
@@ -198,6 +200,8 @@ pub fn commander(w: &World, id: &str) -> Vec<Decision> {
 }
 
 /// How long a faction holds a grudge against a rival that paid for raids on it.
+/// The smallest surplus a faction bothers to sell.
+pub const MIN_SURPLUS_LOT: i64 = 10;
 pub const GRUDGE_TICKS: u64 = 72;
 
 /// Faction against faction: retaliate against a rival that paid for raids on you; an

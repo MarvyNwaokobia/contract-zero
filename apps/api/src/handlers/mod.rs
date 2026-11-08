@@ -46,6 +46,7 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         .route("/admin/realign", web::post().to(settlement::admin_realign))
         .route("/admin/plan", web::post().to(settlement::admin_plan))
         .route("/me/profile", web::get().to(profile::get))
+        .route("/me/career", web::get().to(profile::career))
         .route("/me/profile", web::post().to(profile::set))
         .route("/auth/config", web::get().to(auth::config))
         .route("/auth/challenge", web::post().to(auth::challenge))

@@ -113,17 +113,83 @@ impl Resource {
     }
 }
 
+/// Equipment a player can own: a token per gun (`gun:<id>`), sold by the merchant's
+/// armory at a list price. Standard issue (SMG, assault rifle) is never a token.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Gear {
+    Marksman,
+    AshfallCarbine,
+    SeraphLmg,
+}
+
+impl Gear {
+    pub const ALL: [Gear; 3] = [Gear::Marksman, Gear::AshfallCarbine, Gear::SeraphLmg];
+    /// The client's gun id.
+    pub fn id(self) -> &'static str {
+        match self {
+            Gear::Marksman => "marksman",
+            Gear::AshfallCarbine => "ashfall_carbine",
+            Gear::SeraphLmg => "seraph_lmg",
+        }
+    }
+    /// The NEP-245 token id on the assets contract.
+    pub fn token(self) -> &'static str {
+        match self {
+            Gear::Marksman => "gun:marksman",
+            Gear::AshfallCarbine => "gun:ashfall_carbine",
+            Gear::SeraphLmg => "gun:seraph_lmg",
+        }
+    }
+    pub fn title(self) -> &'static str {
+        match self {
+            Gear::Marksman => "Marksman Rifle",
+            Gear::AshfallCarbine => "Dustline Carbine",
+            Gear::SeraphLmg => "Seraph",
+        }
+    }
+    /// What the merchant asks, before a player's standing discount.
+    pub fn list_price(self) -> i64 {
+        match self {
+            Gear::Marksman => 800,
+            Gear::AshfallCarbine => 1_300,
+            Gear::SeraphLmg => 2_400,
+        }
+    }
+    pub fn parse(s: &str) -> Option<Gear> {
+        Gear::ALL.into_iter().find(|g| g.id() == s || g.token() == s)
+    }
+}
+
+/// The merchant keeps this many of each gun in its armory, on consignment: it pays
+/// its supplier this share of the list price when one sells.
+pub const ARMORY_STOCK: i64 = 2;
+pub const ARMORY_COST_BP: i64 = 6_000;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Asset {
     Credits,
     Res(Resource),
+    Gear(Gear),
 }
+
+/// Every asset the economy moves, in a fixed order.
+pub const ALL_ASSETS: [Asset; 7] = [
+    Asset::Credits,
+    Asset::Res(Resource::Ammo),
+    Asset::Res(Resource::Med),
+    Asset::Res(Resource::Fuel),
+    Asset::Gear(Gear::Marksman),
+    Asset::Gear(Gear::AshfallCarbine),
+    Asset::Gear(Gear::SeraphLmg),
+];
 
 impl Asset {
     pub fn name(self) -> &'static str {
         match self {
             Asset::Credits => "credits",
             Asset::Res(r) => r.name(),
+            Asset::Gear(g) => g.token(),
         }
     }
 
@@ -133,7 +199,7 @@ impl Asset {
             "ammo" => Asset::Res(Resource::Ammo),
             "med" => Asset::Res(Resource::Med),
             "fuel" => Asset::Res(Resource::Fuel),
-            _ => return None,
+            other => Asset::Gear(Gear::parse(other).filter(|g| g.token() == other)?),
         })
     }
 }
@@ -196,14 +262,18 @@ pub enum Reason {
     QuoteRelease { quote: u64 },
     /// Tokens a player moved into or out of the game on NEAR (resynced from chain).
     External,
+    /// A gun brought into the merchant's armory (issued)…
+    Armory,
+    /// …and what the merchant paid its supplier for it (destroyed).
+    ArmoryCost,
 }
 
 impl Reason {
     /// Is this a source (issuance) or a sink (destruction), as opposed to a transfer?
     pub fn class(&self) -> &'static str {
         match self {
-            Reason::Genesis | Reason::Income | Reason::Production | Reason::Shipment { .. } | Reason::ExportRevenue => "issuance",
-            Reason::Consumption | Reason::Logistics { .. } | Reason::EscortWages { .. } | Reason::ImportCost { .. } | Reason::Upkeep | Reason::Export | Reason::Dividend | Reason::Remittance | Reason::Sabotage { .. } => "destruction",
+            Reason::Genesis | Reason::Income | Reason::Production | Reason::Shipment { .. } | Reason::ExportRevenue | Reason::Armory => "issuance",
+            Reason::Consumption | Reason::Logistics { .. } | Reason::EscortWages { .. } | Reason::ImportCost { .. } | Reason::Upkeep | Reason::Export | Reason::Dividend | Reason::Remittance | Reason::Sabotage { .. } | Reason::ArmoryCost => "destruction",
             _ => "transfer",
         }
     }
@@ -411,6 +481,10 @@ pub struct TradeRecord {
     pub side: Side,
     pub qty: i64,
     pub total: i64,
+    /// A gun sale: `resource` is then meaningless and the trade is not part of the
+    /// resource market (prices, demand).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gear: Option<Gear>,
 }
 
 /// Who is issuing a command. Authorization is decided from this alone.
@@ -485,6 +559,31 @@ pub enum Event {
     QuoteSettled { quote: u64, trade: u64 },
     QuoteReleased { quote: u64 },
     HoldingSynced { account: AccountId, asset: Asset, from: i64, to: i64 },
+    ArmoryRestocked { gear: Gear },
+}
+
+/// The merchant's view of a player: (minimum score, tier, discount in bp).
+pub const VEX_TIERS: [(i64, &str, i64); 3] = [(10, "Known", 300), (50, "Trusted", 600), (150, "Partner", 1_000)];
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FactionStanding {
+    pub actor: String,
+    pub name: String,
+    pub jobs_for: u32,
+    pub earned_from: i64,
+    pub operations_against: u32,
+    pub units_taken: i64,
+    pub score: i64,
+    pub tier: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Standing {
+    pub vex_score: i64,
+    pub vex_tier: String,
+    pub vex_discount_bp: i64,
+    pub vex_traded: i64,
+    pub factions: Vec<FactionStanding>,
 }
 
 /// A firm price the merchant gave one player. The merchant's side (goods for a
@@ -501,6 +600,9 @@ pub struct PlayerQuote {
     pub total: i64,
     pub posted_at: u64,
     pub status: QuoteStatus,
+    /// A gun from the armory instead of a resource (always a player purchase).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gear: Option<Gear>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -515,10 +617,14 @@ impl PlayerQuote {
     pub fn escrow(&self) -> AccountId {
         format!("quote:{}", self.id)
     }
+    /// The goods side of the quote.
+    pub fn goods(&self) -> Asset {
+        self.gear.map(Asset::Gear).unwrap_or(Asset::Res(self.resource))
+    }
     /// What the merchant holds for this quote.
     pub fn held(&self) -> (Asset, i64) {
         match self.side {
-            Side::Buy => (Asset::Res(self.resource), self.qty),
+            Side::Buy => (self.goods(), self.qty),
             Side::Sell => (Asset::Credits, self.total),
         }
     }
@@ -647,7 +753,7 @@ impl World {
         let since = self.tick.saturating_sub(TICKS_PER_DAY);
         self.trades
             .iter()
-            .filter(|t| t.resource == r && t.tick >= since)
+            .filter(|t| t.gear.is_none() && t.resource == r && t.tick >= since)
             .map(|t| match t.side { Side::Buy => t.qty, Side::Sell => -t.qty })
             .sum()
     }
@@ -834,7 +940,7 @@ impl World {
             Transfer { from: giver, to: taker, asset: Asset::Res(r), qty, reason: Reason::Trade { trade: id } },
         ])?;
         self.commit_id(id);
-        let rec = TradeRecord { id, tick: self.tick, party: party.to_string(), resource: r, side, qty, total: q.total };
+        let rec = TradeRecord { id, tick: self.tick, party: party.to_string(), resource: r, side, qty, total: q.total, gear: None };
         self.trades.push(rec.clone());
         ev.push(Event::Traded(rec));
         Ok(ev)
@@ -1090,6 +1196,7 @@ impl World {
 
         if self.market.living && t % MERCHANT_RESTOCK_TICKS == 3 {
             ev.extend(self.merchant_logistics());
+            ev.extend(self.armory_restock());
         }
 
         let expired: Vec<Bounty> = self.open_bounties().filter(|b| b.expires_at <= t).cloned().collect();
@@ -1253,6 +1360,93 @@ impl World {
         self.quotes.values().filter(|q| q.status == QuoteStatus::Open).map(|q| self.balance(&q.escrow(), asset)).sum()
     }
 
+    /// The merchant takes one of each gun it is short of from its supplier, on
+    /// consignment (paid for when it sells; see `settle_quote`).
+    fn armory_restock(&mut self) -> Vec<Event> {
+        let m = self.merchant().clone();
+        let mut ev = Vec::new();
+        for g in Gear::ALL {
+            let have = self.balance(&m.account, Asset::Gear(g)) + self.held_for_quotes(Asset::Gear(g));
+            if have >= ARMORY_STOCK {
+                continue;
+            }
+            let r = self.apply(&[Transfer { from: WORLD.into(), to: m.account.clone(), asset: Asset::Gear(g), qty: 1, reason: Reason::Armory }]);
+            if let Ok(e) = r {
+                ev.extend(e);
+                ev.push(Event::ArmoryRestocked { gear: g });
+            }
+        }
+        ev
+    }
+
+    /// The merchant's armory price for `player`, after their standing discount.
+    pub fn gear_price(&self, player: &str, g: Gear) -> i64 {
+        g.list_price() * (10_000 - self.standing(player).vex_discount_bp) / 10_000
+    }
+
+    /// A firm price for one gun from the armory, held for `player` like any quote.
+    pub fn reserve_gear_quote(&mut self, player: &str, g: Gear, limit_total: i64) -> Result<PlayerQuote, EconError> {
+        if self.open_quote_of(player).is_some() {
+            return Err(EconError::QuoteOpen);
+        }
+        let merchant = self.merchant().account.clone();
+        let stock = self.balance(&merchant, Asset::Gear(g));
+        if stock < 1 {
+            return Err(EconError::MerchantShort { qty: 1, stock });
+        }
+        let total = self.gear_price(player, g);
+        if total > limit_total {
+            return Err(EconError::PriceMoved { total, limit: limit_total });
+        }
+        let account = player_account(player);
+        let have = self.balance(&account, Asset::Credits);
+        if have < total {
+            return Err(EconError::Insufficient { account, asset: Asset::Credits, have, need: total });
+        }
+        let id = self.peek_id();
+        let pq = PlayerQuote { id, player: player.into(), resource: Resource::Ammo, side: Side::Buy, qty: 1, total, posted_at: self.tick, status: QuoteStatus::Open, gear: Some(g) };
+        self.apply(&[Transfer { from: merchant, to: pq.escrow(), asset: Asset::Gear(g), qty: 1, reason: Reason::QuoteHold { quote: id } }])?;
+        self.commit_id(id);
+        self.quotes.insert(id, pq.clone());
+        Ok(pq)
+    }
+
+    /// Does `player` own at least one of `g`?
+    pub fn owns(&self, player: &str, g: Gear) -> bool {
+        self.balance(&player_account(player), Asset::Gear(g)) > 0
+    }
+
+    /// How the world regards `player`, computed from what actually happened: the
+    /// merchant from the credits traded with it and the cargo returned to it; each
+    /// faction from the contracts it paid this player for, against the operations
+    /// this player ran on it.
+    pub fn standing(&self, player: &str) -> Standing {
+        let account = player_account(player);
+        let traded: i64 = self.trades.iter().filter(|t| t.party == account).map(|t| t.total).sum();
+        let mut paid_by: BTreeMap<&str, (u32, i64)> = BTreeMap::new();
+        for b in self.bounties.values() {
+            if let BountyStatus::Paid { raid, .. } = &b.status {
+                if self.raids.get(raid).is_some_and(|r| r.player == player) {
+                    let e = paid_by.entry(b.sponsor.as_str()).or_default();
+                    e.0 += 1;
+                    e.1 += b.amount;
+                }
+            }
+        }
+        let jobs_for_vex = paid_by.get(self.market.merchant.as_str()).map(|x| x.0).unwrap_or(0);
+        let score = traded / 100 + jobs_for_vex as i64 * 10;
+        let (tier, bp) = VEX_TIERS.iter().rev().find(|(min, _, _)| score >= *min).map(|(_, t, bp)| (*t, *bp)).unwrap_or(("Unknown", 0));
+        let factions = self.actors.values().filter(|a| a.kind == ActorKind::Faction).map(|a| {
+            let (jobs, earned) = paid_by.get(a.id.as_str()).copied().unwrap_or((0, 0));
+            let g = self.memory.get(&a.id).and_then(|m| m.players.get(player)).cloned().unwrap_or_default();
+            let against = g.raids + g.sabotage + g.recoveries;
+            let score = jobs as i64 * 10 - against as i64 * 10;
+            let tier = match score { s if s >= 20 => "Trusted", s if s > 0 => "Favoured", 0 => "Neutral", s if s > -30 => "Wary", _ => "Hostile" };
+            FactionStanding { actor: a.id.clone(), name: a.name.clone(), jobs_for: jobs, earned_from: earned, operations_against: against, units_taken: g.units_lost, score, tier: tier.into() }
+        }).collect();
+        Standing { vex_score: score, vex_tier: tier.into(), vex_discount_bp: bp, vex_traded: traded, factions }
+    }
+
     /// Give `player` a firm merchant price for `qty` of `r`, within the player's limit.
     /// The player must be able to pay (credits to buy, goods to sell) and may hold one
     /// open quote at a time. The merchant's side moves into escrow.
@@ -1264,7 +1458,10 @@ impl World {
         if side == Side::Sell && self.merchant_insolvent() {
             return Err(EconError::MerchantInsolvent);
         }
-        let q = self.quote(r, side, qty)?;
+        let mut q = self.quote(r, side, qty)?;
+        // A regular trading partner gets a better price, in either direction.
+        let bp = self.standing(player).vex_discount_bp;
+        q.total = match side { Side::Buy => q.total * (10_000 - bp) / 10_000, Side::Sell => q.total * (10_000 + bp) / 10_000 };
         let ok = match side { Side::Buy => q.total <= limit_total, Side::Sell => q.total >= limit_total };
         if !ok {
             return Err(EconError::PriceMoved { total: q.total, limit: limit_total });
@@ -1276,7 +1473,7 @@ impl World {
             return Err(EconError::Insufficient { account, asset: need_asset, have, need });
         }
         let id = self.peek_id();
-        let pq = PlayerQuote { id, player: player.into(), resource: r, side, qty, total: q.total, posted_at: self.tick, status: QuoteStatus::Open };
+        let pq = PlayerQuote { id, player: player.into(), resource: r, side, qty, total: q.total, posted_at: self.tick, status: QuoteStatus::Open, gear: None };
         let (asset, held) = pq.held();
         let merchant = self.merchant().account.clone();
         self.apply(&[Transfer { from: merchant, to: pq.escrow(), asset, qty: held, reason: Reason::QuoteHold { quote: id } }])?;
@@ -1295,14 +1492,19 @@ impl World {
         let merchant = self.merchant().account.clone();
         let player = player_account(&q.player);
         let (held_asset, held) = q.held();
-        let (pay_asset, pay) = match q.side { Side::Buy => (Asset::Credits, q.total), Side::Sell => (Asset::Res(q.resource), q.qty) };
+        let (pay_asset, pay) = match q.side { Side::Buy => (Asset::Credits, q.total), Side::Sell => (q.goods(), q.qty) };
         let trade = self.peek_id();
-        let mut ev = self.apply(&[
+        let mut legs = vec![
             Transfer { from: q.escrow(), to: player.clone(), asset: held_asset, qty: held, reason: Reason::Trade { trade } },
-            Transfer { from: player.clone(), to: merchant, asset: pay_asset, qty: pay, reason: Reason::Trade { trade } },
-        ])?;
+            Transfer { from: player.clone(), to: merchant.clone(), asset: pay_asset, qty: pay, reason: Reason::Trade { trade } },
+        ];
+        // A consigned gun: the merchant settles with its supplier out of the sale.
+        if let Some(g) = q.gear {
+            legs.push(Transfer { from: merchant, to: WORLD.into(), asset: Asset::Credits, qty: g.list_price() * ARMORY_COST_BP / 10_000, reason: Reason::ArmoryCost });
+        }
+        let mut ev = self.apply(&legs)?;
         self.commit_id(trade);
-        let rec = TradeRecord { id: trade, tick: self.tick, party: player, resource: q.resource, side: q.side, qty: q.qty, total: q.total };
+        let rec = TradeRecord { id: trade, tick: self.tick, party: player, resource: q.resource, side: q.side, qty: q.qty, total: q.total, gear: q.gear };
         self.trades.push(rec.clone());
         self.quotes.get_mut(&id).unwrap().status = QuoteStatus::Settled { trade };
         ev.push(Event::Traded(rec));

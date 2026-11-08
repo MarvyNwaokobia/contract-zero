@@ -4,12 +4,67 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Panel, Shell, Stat } from '@/components/ui/Shell'
-import { api, RESOURCE_LABEL, type ExchangePrice, type PlayerQuote, type ResourceName } from '@/lib/api'
+import dynamic from 'next/dynamic'
+import { api, RESOURCE_LABEL, type ArmoryItem, type ExchangePrice, type PlayerQuote, type ResourceName, type Standing } from '@/lib/api'
+import type { GunId } from '@/engine/combat/GunStats'
 import { acceptQuote, disableQuickTrade, enableQuickTrade, loadSessionKey } from '@/lib/auth'
 import { useSession } from '@/lib/useSession'
 import type { ChainCall } from '@/lib/wallet'
 
+const GunTurntable = dynamic(() => import('@/components/armory/GunTurntable'), { ssr: false })
+
 const ACCEPT_GAS = '60000000000000'
+
+/** Vex's armory: guns as tokens the player owns, at their standing price. */
+function Armory({ items, canTrade, busy, onBuy }: { items: ArmoryItem[]; canTrade: boolean; busy: boolean; onBuy: (id: string) => void }) {
+  return (
+    <div className="grid gap-3 md:grid-cols-3">
+      {items.map((g) => (
+        <div key={g.id} className="flex flex-col border border-line" data-testid="armory-item">
+          <div className="h-32" style={{ background: 'radial-gradient(ellipse at 50% 55%, #23272e 0%, #0e1013 70%)' }}>
+            <GunTurntable gunId={g.id as GunId} className="h-full w-full" />
+          </div>
+          <div className="flex flex-1 flex-col gap-1 p-3">
+            <div className="flex items-baseline justify-between">
+              <span className="font-display text-lg font-bold uppercase tracking-wider text-fog">{g.title}</span>
+              {g.owned > 0 && <span className="text-xs font-semibold uppercase tracking-wider text-friendly">Owned</span>}
+            </div>
+            <div className="text-sm">
+              <span className="cz-num font-semibold text-fog">{g.price.toLocaleString()} cr</span>
+              {g.price < g.list_price && <span className="ml-2 text-xs text-muted line-through">{g.list_price.toLocaleString()}</span>}
+              <span className="ml-2 text-xs text-muted">{g.stock > 0 ? `${g.stock} in the armory` : 'sold out · restocks within 12 hours'}</span>
+            </div>
+            <div className="text-[11px] text-dim">token <code>{g.token}</code></div>
+            <button className="cz-btn cz-btn-primary mt-auto px-4 py-1.5 text-sm" disabled={!canTrade || busy || g.stock < 1} onClick={() => onBuy(g.id)}>
+              {g.owned > 0 ? 'Buy another' : 'Buy'}
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** How the region regards the player, from the engine's record of what they did. */
+function StandingPanel({ s }: { s: Standing }) {
+  const tone = (t: string) => (t === 'Hostile' || t === 'Wary' ? 'text-hostile' : t === 'Neutral' || t === 'Unknown' ? 'text-muted' : 'text-friendly')
+  return (
+    <div className="grid gap-3 sm:grid-cols-3" data-testid="standing">
+      <div>
+        <div className="cz-label !text-[10px]">Vex Exchange</div>
+        <div className={`font-display text-xl font-bold ${tone(s.vex_tier)}`}>{s.vex_tier}</div>
+        <div className="text-xs text-muted">{s.vex_discount_bp > 0 ? `${s.vex_discount_bp / 100}% better prices` : 'list prices'} · {s.vex_traded.toLocaleString()} cr traded</div>
+      </div>
+      {s.factions.map((f) => (
+        <div key={f.actor}>
+          <div className="cz-label !text-[10px]">{f.name}</div>
+          <div className={`font-display text-xl font-bold ${tone(f.tier)}`}>{f.tier}</div>
+          <div className="text-xs text-muted">{f.jobs_for} job{f.jobs_for === 1 ? '' : 's'} for them · {f.operations_against} against them</div>
+        </div>
+      ))}
+    </div>
+  )
+}
 const explorer = (h: string) => `https://testnet.nearblocks.io/txns/${h}`
 
 function QuickTrade({ enabled, onChange }: { enabled: boolean; onChange: () => void }) {
@@ -144,6 +199,17 @@ export default function Exchange() {
     }
   }
 
+  async function requestGear(id: string) {
+    if (!player) return
+    setError(null)
+    try {
+      const q = await api.quoteGear(id)
+      setTicket({ quote: q.quote, call: q.chain, expiresAt: Date.now() + q.expires_in_secs * 1000, phase: 'ready', txs: q.posted ? [q.posted.tx_hash] : [] })
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+
   async function accept() {
     if (!ticket) return
     const id = ticket.quote.id
@@ -195,6 +261,7 @@ export default function Exchange() {
                 <Stat label="Fuel" value={holdings.fuel} />
               </div>
               {onChain && <p className="mt-2 text-xs text-muted">Owned by your account and recorded on-chain: only you can trade it.</p>}
+              {ex.data?.standing && <div className="mt-4 border-t border-line pt-3"><StandingPanel s={ex.data.standing} /></div>}
             </>
           ) : (
             <p className="text-sm text-muted">Loading…</p>
@@ -222,7 +289,7 @@ export default function Exchange() {
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <div className="text-lg font-semibold text-slate-100">
-                {q.side === 'buy' ? `Vex sells you ${q.qty} ${q.resource} for ${q.total} credits` : `Vex buys ${q.qty} ${q.resource} from you for ${q.total} credits`}
+                {q.gear ? `Vex sells you a ${q.gear.title} for ${q.total} credits` : q.side === 'buy' ? `Vex sells you ${q.qty} ${q.resource} for ${q.total} credits` : `Vex buys ${q.qty} ${q.resource} from you for ${q.total} credits`}
               </div>
               <div className="text-xs text-muted">
                 {q.unit.toFixed(1)} cr/unit · firm price, held for you{ticket.phase === 'ready' ? ` · ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} left` : ''}
@@ -266,11 +333,18 @@ export default function Exchange() {
         </Panel>
       )}
 
+      {ex.data?.armory && (
+        <Panel title="ARMORY · OWNED GEAR" className="mt-4">
+          <p className="mb-3 text-sm text-muted">Guns you buy here are yours: a token in your account, carried into any contract from the loadout. Standard issue (SMG, assault rifle) is always free.</p>
+          <Armory items={ex.data.armory} canTrade={canTrade} busy={!!ticket && ticket.phase !== 'settled' && left > 0} onBuy={requestGear} />
+        </Panel>
+      )}
+
       {ex.data && ex.data.trades.length > 0 && (
         <Panel title="YOUR TRADES" className="mt-4">
           <ul className="space-y-1 text-sm tabular-nums text-slate-300">
             {ex.data.trades.map((t) => (
-              <li key={t.id}>{t.side === 'buy' ? 'Bought' : 'Sold'} {t.qty} {t.resource} for {t.total} cr <span className="text-muted">· tick {t.tick}</span></li>
+              <li key={t.id}>{t.side === 'buy' ? 'Bought' : 'Sold'} {t.gear ? `a ${ex.data!.armory?.find((g) => g.id === t.gear)?.title ?? t.gear}` : `${t.qty} ${t.resource}`} for {t.total} cr <span className="text-muted">· tick {t.tick}</span></li>
             ))}
           </ul>
         </Panel>

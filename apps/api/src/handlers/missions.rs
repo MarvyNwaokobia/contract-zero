@@ -63,7 +63,13 @@ pub struct StartRequest {
     /// raid (default), sabotage or recovery.
     #[serde(default)]
     pub kind: cz_economy::OpKind,
+    /// The weapon the player deploys with: standard issue, or a gun they own.
+    #[serde(default)]
+    pub gun: Option<String>,
 }
+
+/// Always available, never a token.
+pub const STANDARD_ISSUE: [&str; 3] = ["smg", "assault_rifle", "sidearm"];
 
 /// Seconds to plant one sabotage charge (two per op).
 pub const PLANT_SECS: f64 = 5.0;
@@ -86,6 +92,16 @@ pub async fn start(state: web::Data<AppState>, req: HttpRequest, body: web::Json
     let res = state
         .world
         .transact(async move |w, db| {
+            // Owned gear is checked against the economy, which mirrors the player's
+            // NEAR balance: a gun you don't own can't be carried in.
+            if let Some(gun) = body.gun.as_deref() {
+                if !STANDARD_ISSUE.contains(&gun) {
+                    let g = cz_economy::Gear::parse(gun).ok_or_else(|| WorldError::Other(format!("unknown weapon {gun}")))?;
+                    if !w.owns(&body.player, g) {
+                        return Err(WorldError::Other(format!("you don't own the {}; buy one from Vex's armory", g.title())));
+                    }
+                }
+            }
             let action = match body.kind {
                 cz_economy::OpKind::Raid => Action::StartRaid { target: body.target.clone(), resource: body.resource },
                 kind => Action::StartOperation { kind, target: body.target.clone(), resource: body.resource },
@@ -123,7 +139,7 @@ pub async fn start(state: web::Data<AppState>, req: HttpRequest, body: web::Json
             .bind(json!({ "facts": facts, "story": tale, "voiced": false }))
             .execute(db)
             .await?;
-            log_event(db, w.tick, &format!("player:{}", body.player), "mission", &json!({ "phase": "start", "session": session, "raid": raid, "plan": plan, "events": summarize(&ev) })).await?;
+            log_event(db, w.tick, &format!("player:{}", body.player), "mission", &json!({ "phase": "start", "session": session, "raid": raid, "plan": plan, "gun": body.gun, "events": summarize(&ev) })).await?;
             Ok(json!({ "session": session, "raid": raid, "min_secs": min_secs, "mission": crate::handlers::world::mission_json(w, &plan, Some(raid)), "story": tale }))
         })
         .await;

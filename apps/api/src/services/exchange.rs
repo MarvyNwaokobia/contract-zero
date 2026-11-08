@@ -36,7 +36,7 @@ const SWEEP_GRACE_SECS: i64 = 30;
 /// player's storage, settles both legs on `cz-assets`, then runs its callback.
 pub const ACCEPT_GAS: u64 = 60_000_000_000_000;
 
-const ASSETS: [Asset; 4] = [Asset::Credits, Asset::Res(Resource::Ammo), Asset::Res(Resource::Med), Asset::Res(Resource::Fuel)];
+const ASSETS: [Asset; 7] = cz_economy::ALL_ASSETS;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExchangeError {
@@ -88,13 +88,20 @@ async fn chain_holdings(near: &NearClient, player: &str) -> Result<HashMap<Strin
 
 fn quote_json(q: &PlayerQuote) -> Value {
     json!({
-        "id": q.id, "player": q.player, "resource": q.resource, "side": side_name(q.side), "qty": q.qty,
+        "id": q.id, "player": q.player, "resource": q.resource, "gear": q.gear.map(|g| json!({ "id": g.id(), "title": g.title(), "token": g.token() })), "side": side_name(q.side), "qty": q.qty,
         "total": q.total, "unit": if q.qty > 0 { q.total as f64 / q.qty as f64 } else { 0.0 }, "status": q.status,
     })
 }
 
+/// What a quote is for.
+#[derive(Clone, Copy, Debug)]
+pub enum Item {
+    Res(Resource),
+    Gear(cz_economy::Gear),
+}
+
 /// Reserve a quote for `player` and post it on chain.
-pub async fn create(state: &AppState, player: String, resource: Resource, side: Side, qty: i64, limit_total: i64) -> Result<Value, ExchangeError> {
+pub async fn create(state: &AppState, player: String, item: Item, side: Side, qty: i64, limit_total: i64) -> Result<Value, ExchangeError> {
     let near = state.near.clone();
     let chain = match &near {
         Some(n) => {
@@ -115,7 +122,10 @@ pub async fn create(state: &AppState, player: String, resource: Resource, side: 
                     synced.extend(w.sync_holding(&p, a, chain.get(a.name()).copied().unwrap_or(0))?);
                 }
             }
-            let q = w.reserve_quote(&p, resource, side, qty, limit_total)?;
+            let q = match item {
+                Item::Res(r) => w.reserve_quote(&p, r, side, qty, limit_total)?,
+                Item::Gear(g) => w.reserve_gear_quote(&p, g, limit_total)?,
+            };
             log_event(db, w.tick, &format!("player:{p}"), "exchange", &json!({ "phase": "quote", "quote": quote_json(&q), "synced": synced })).await?;
             Ok(q)
         })
@@ -143,7 +153,7 @@ pub async fn create(state: &AppState, player: String, resource: Resource, side: 
     };
     let posted = near
         .call(Role::Vex, post, json!({
-            format!("{key}_id"): chain_id, counterparty: player, "token_id": resource.name(), "amount": quote.qty.to_string(),
+            format!("{key}_id"): chain_id, counterparty: player, "token_id": quote.goods().name(), "amount": quote.qty.to_string(),
             "total_credits": quote.total.to_string(), "ttl_secs": QUOTE_TTL_SECS,
         }), 0)
         .await;
@@ -246,7 +256,7 @@ async fn resolve_locked(state: &AppState, quote_id: u64, tx_hash: Option<String>
                 let mut ev = Vec::new();
                 if let Some(chain) = &chain {
                     let (credit_delta, res_delta) = match q.side { Side::Buy => (-q.total, q.qty), Side::Sell => (q.total, -q.qty) };
-                    for (asset, delta) in [(Asset::Credits, credit_delta), (Asset::Res(q.resource), res_delta)] {
+                    for (asset, delta) in [(Asset::Credits, credit_delta), (q.goods(), res_delta)] {
                         ev.extend(w.sync_holding(&p, asset, chain.get(asset.name()).copied().unwrap_or(0) - delta)?);
                     }
                 }
@@ -412,9 +422,18 @@ pub async fn overview(state: &AppState, player: Option<String>) -> Result<Value,
                     w.trades.iter().rev().filter(|t| t.party == acct).take(10).map(|t| json!(t)).collect()
                 })
                 .unwrap_or_default();
+            // Vex's armory: guns as owned tokens, at the player's standing price.
+            let armory: Vec<Value> = cz_economy::Gear::ALL.iter().map(|&g| json!({
+                "id": g.id(), "title": g.title(), "token": g.token(), "list_price": g.list_price(),
+                "price": p.as_ref().map(|p| w.gear_price(p, g)).unwrap_or(g.list_price()),
+                "stock": w.balance(&m.account, Asset::Gear(g)),
+                "owned": p.as_ref().map(|p| w.balance(&cz_economy::player_account(p), Asset::Gear(g))).unwrap_or(0),
+            })).collect();
+            let standing = p.as_ref().map(|p| w.standing(p));
             json!({
                 "tick": w.tick, "merchant": { "id": m.id, "name": m.name, "insolvent": w.merchant_insolvent(), "credits": w.balance(&m.account, Asset::Credits) },
                 "prices": prices, "shortages": shortages, "engine_holdings": holdings, "open_quote": open, "trades": trades,
+                "armory": armory, "standing": standing,
             })
         })
         .await;

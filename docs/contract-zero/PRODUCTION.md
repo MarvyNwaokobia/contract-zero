@@ -243,3 +243,44 @@ The setting, cast and writing rules are in `docs/contract-zero/STORY.md`.
 - **The recording is the automated run.** A hand-played recording with Google sign-in follows `DEMO.md`.
 - **Hosting is not done.** It needs accounts for the web app, the API and Postgres; see the report.
 - **The NEAR AI planner** has no credits, so no model decisions appear in the run.
+
+### Milestone 7: progression and economy depth (2026-11-08)
+
+**Built:**
+- **Equipment tokens.** `gun:marksman`, `gun:ashfall_carbine` and `gun:seraph_lmg` are registered on `assets.contract-zero.testnet`, with a mint cap of 20 per epoch (txs 8S8TKovF…, 2aaPy8iY…, DDT918ST…).
+  - In the engine they're `Asset::Gear`. Every asset list (flows, alignment, reconciliation, chain balances) comes from one `ALL_ASSETS`.
+- **Vex's armory.**
+  - Keeps 2 of each gun on consignment, and reviews stock every 12 hours.
+  - Pays its supplier 60% of the list price when one sells, so a sale is always affordable and leaves Vex a margin.
+  - Guns sell through the same firm quote as resources: Vex posts an offer, and the player signs `accept_offer`.
+  - Gun sales are kept out of resource demand and pricing.
+- **Owned-gear loadout.** The SMG and assault rifle are standard issue. Owned guns are selectable; unowned guns are locked and show their price. `POST /missions/start` takes the chosen gun and refuses one the player doesn't own.
+- **Standing, computed from what happened** (`World::standing`):
+  - **Vex:** a score from credits traded with it plus jobs done for it. Known / Trusted / Partner earn 3 / 6 / 10% better prices on every quote, buying or selling. That discount is real money in the quote the player signs.
+  - **Each faction:** contracts it paid you for against operations you ran on it, shown as Hostile, Wary, Neutral, Favoured or Trusted. Today this is shown, not enforced; the target's radio lines already draw on the same memory.
+- **Career record** (`GET /me/career`, on the Operator page): totals, standing, owned gear, and every operation with its NEAR settlement link.
+- **Exchange:** an armory section with 3D previews, discounted prices shown against the list price, and standing. The trade list names gun purchases.
+- **Settlement load:** factions sell surplus only in lots of 10 or more. Over 10 simulated days, trades fall from 157 to 93, and the 91 sales under 10 units disappear.
+
+**Verified:**
+- 6 engine tests:
+  - gear assets and their token ids round-trip;
+  - the armory stocks on consignment and pays its supplier on sale;
+  - buying a gun is a firm quote that leaves ammo prices unchanged;
+  - purchases are refused without stock or money, or above the player's limit;
+  - trading volume earns Vex's 3% tier;
+  - factions judge by jobs done for them and operations against them.
+- All engine suites, 18 API tests and 452 web tests pass.
+- `apps/web/probe-gear.mjs`, signed in as the test player: the armory shows 776 / 1,261 / 2,328 cr, 3% off because the player is Known to Vex. Standing reads Ashen Neutral and Vanguard Neutral (1 job for, 1 against each). The loadout shows all three guns locked with prices. The service record lists 9 operations, 3 extracted and 1,583 cr in fees, with NEAR links. No page errors.
+
+**Blocked: on-chain purchase not yet verified.** The agent signing keys (Vex, Ashen, Vanguard and the server) are function-call keys with a gas allowance:
+- that allowance is spent by every transaction and never refunded;
+- each key has 0.10–0.14 NEAR left;
+- Vanguard's is too low for a 100 Tgas call, so its trades fail with `InvalidTransaction`, are reversed in the engine, and its chain balances drift;
+- a ledger batch that burns Vanguard med it doesn't hold on chain now blocks the queue.
+
+The fix has two steps, both needing the owner's approval:
+1. Re-issue the four keys with the same public keys and methods, without the allowance cap.
+2. Run `POST /admin/realign` to bring the chain back to the engine.
+
+`scripts/gear-e2e.mjs` then verifies the purchase on chain end to end.

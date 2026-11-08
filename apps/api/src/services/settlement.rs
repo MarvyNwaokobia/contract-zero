@@ -267,7 +267,7 @@ pub async fn align(state: &AppState, force: bool) -> Result<Value, String> {
             let (mut mints, mut burns) = (Flows::new(), Flows::new());
             for a in w.actors.values() {
                 let Some(acct) = chain_account(&near, &a.account) else { continue };
-                for asset in [Asset::Credits, Asset::Res(cz_economy::Resource::Ammo), Asset::Res(cz_economy::Resource::Med), Asset::Res(cz_economy::Resource::Fuel)] {
+                for asset in cz_economy::ALL_ASSETS {
                     // What the actor holds on chain: its balance plus anything the
                     // economy holds for it off chain (bounty escrow, quote holds).
                     let mut engine = w.balance(&a.account, asset);
@@ -442,7 +442,7 @@ pub async fn reconcile(state: &AppState) -> Result<Value, String> {
             let mut m = BTreeMap::new();
             for a in w.actors.values() {
                 let mut h = BTreeMap::new();
-                for asset in [Asset::Credits, Asset::Res(cz_economy::Resource::Ammo), Asset::Res(cz_economy::Resource::Med), Asset::Res(cz_economy::Resource::Fuel)] {
+                for asset in cz_economy::ALL_ASSETS {
                     let mut v = w.balance(&a.account, asset);
                     if asset == Asset::Credits {
                         v += escrowed_by(w, &a.id);

@@ -240,7 +240,7 @@ impl NearClient {
 
     /// Balances of one account for every token.
     pub async fn balances(&self, account: &str) -> Result<HashMap<String, i64>, String> {
-        let tokens = ["credits", "ammo", "med", "fuel"];
+        let tokens: Vec<&str> = cz_economy::ALL_ASSETS.iter().map(|a| a.name()).collect();
         let v = self.view_assets("mt_batch_balance_of", json!({ "account_id": account, "token_ids": tokens })).await?;
         let arr = v.as_array().ok_or("bad balance response")?;
         Ok(tokens.iter().zip(arr).map(|(t, a)| (t.to_string(), a.as_str().and_then(|s| s.parse().ok()).unwrap_or(0))).collect())

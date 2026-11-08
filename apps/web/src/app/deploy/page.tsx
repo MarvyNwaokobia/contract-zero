@@ -25,7 +25,7 @@ const ContractZeroScene = dynamic(
 const GunTurntable = dynamic(() => import('@/components/armory/GunTurntable'), { ssr: false })
 
 /** Standard issue until the Armory sells gear. */
-const ISSUE: GunId[] = ['smg', 'assault_rifle', 'marksman']
+const ISSUE: GunId[] = ['smg', 'assault_rifle']
 
 type Phase =
   | { kind: 'loadout' }
@@ -76,6 +76,7 @@ function Deploy() {
   const { session, loading } = useSession()
   const player = session?.account ?? null
   const [gun, setGun] = useState<GunId>('assault_rifle')
+  const armory = useQuery({ queryKey: ['armory', player], queryFn: () => api.exchange(player).then((e) => e.armory ?? []), enabled: !!player })
   const [phase, setPhase] = useState<Phase>({ kind: 'loadout' })
 
   const deploy = async () => {
@@ -83,7 +84,7 @@ function Deploy() {
     setPhase({ kind: 'starting' })
     try {
       const before = await api.world()
-      const start = await api.startMission(target, resource, kind)
+      const start = await api.startMission(target, resource, kind, gun)
       setPhase({ kind: 'briefing', start, before, story: null })
       // The voiced story when the server has a model (checked line by line), else
       // the authored one it started with. Never wait more than 12 s for it.
@@ -219,7 +220,28 @@ function Deploy() {
                 </button>
               )
             })}
-            <p className="text-xs text-slate-500">Standard issue. Owned gear arrives with the Exchange.</p>
+            <div className="cz-label mt-2 !text-[10px]">Owned gear</div>
+            {(armory.data ?? []).map((a) => {
+              const id = a.id as GunId
+              const g = GUN_CATALOG[id]
+              const owned = a.owned > 0
+              return (
+                <button
+                  key={a.id}
+                  onClick={() => owned && setGun(id)}
+                  disabled={!owned}
+                  data-testid={`gear-${a.id}`}
+                  className={`border px-4 py-3 text-left ${gun === id ? 'border-amber bg-amber/10' : owned ? 'border-line hover:bg-panel-2' : 'border-line/60 opacity-60'}`}
+                >
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="font-semibold text-slate-100">{a.title}</span>
+                    {owned ? <span className="text-xs font-semibold uppercase tracking-wider text-friendly">Owned{a.owned > 1 ? ` ×${a.owned}` : ''}</span> : <span className="text-xs text-muted">{a.price.toLocaleString()} cr at the Exchange</span>}
+                  </div>
+                  {g && <div className="text-xs text-slate-500">damage {g.damage} · {g.fireRate} rpm · mag {g.magazine} · {Math.round(gunDps(g))} dps</div>}
+                </button>
+              )
+            })}
+            <p className="text-xs text-slate-500">SMG and assault rifle are standard issue. Owned guns are tokens in your account; <Link href="/exchange" className="text-amber-hi hover:underline">Vex&apos;s armory</Link> sells them.</p>
           </div>
           <div className="h-56 border border-line" style={{ background: 'radial-gradient(ellipse at 50% 55%, #23272e 0%, #0e1013 70%)' }}><GunTurntable gunId={gun} className="h-full w-full" /></div>
         </div>

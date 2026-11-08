@@ -144,10 +144,24 @@ export interface ExchangePrice {
   sell_10: number | null
 }
 
+export interface GearRef { id: string; title: string; token: string }
+export interface ArmoryItem { id: string; title: string; token: string; list_price: number; price: number; stock: number; owned: number }
+export interface FactionStanding { actor: string; name: string; jobs_for: number; earned_from: number; operations_against: number; units_taken: number; score: number; tier: string }
+export interface Standing { vex_score: number; vex_tier: string; vex_discount_bp: number; vex_traded: number; factions: FactionStanding[] }
+export interface Career {
+  account: string
+  totals: { operations: number; extracted: number; lost: number; units_moved: number; fees_earned: number }
+  missions: { at: string; codename: string | null; outcome: string; kind: OpKind | null; target: string | null; resource: ResourceName | null; units: number | null; fee: number | null; secs: number | null; settlement: { op_id: string; status: string; settled_on_chain: boolean; explorer: string[] } | null }[]
+  standing: Standing
+  gear: { id: string; title: string; owned: number }[]
+}
+
 export interface PlayerQuote {
   id: number
   player: string
   resource: ResourceName
+  /** A gun from Vex's armory (then `resource` is meaningless). */
+  gear?: GearRef | null
   side: 'buy' | 'sell'
   qty: number
   total: number
@@ -165,7 +179,9 @@ export interface ExchangeView {
   engine_holdings: Holdings | null
   chain_holdings: Holdings | null
   open_quote: PlayerQuote | null
-  trades: { id: number; tick: number; resource: ResourceName; side: 'buy' | 'sell'; qty: number; total: number }[]
+  trades: { id: number; tick: number; resource: ResourceName; side: 'buy' | 'sell'; qty: number; total: number; gear?: string }[]
+  armory?: ArmoryItem[]
+  standing?: Standing | null
 }
 
 export interface QuoteCreated {
@@ -238,8 +254,10 @@ export const api = {
   player: (id: string) => req<{ player: string; holdings: Holdings; active_raid: number | null }>(`/players/${encodeURIComponent(id)}`),
   decisions: (limit = 30) => req<{ events: AgentEvent[] }>(`/events?kind=agent_decision&limit=${limit}`).then((e) => e.events),
   // The player is the signed-in session; the server never takes it from the body.
-  startMission: (target: string, resource: ResourceName, kind: OpKind = 'raid') =>
-    req<MissionStart>('/missions/start', { method: 'POST', body: JSON.stringify({ target, resource, kind }) }),
+  startMission: (target: string, resource: ResourceName, kind: OpKind = 'raid', gun?: string) =>
+    req<MissionStart>('/missions/start', { method: 'POST', body: JSON.stringify({ target, resource, kind, gun }) }),
+  quoteGear: (gear: string) => req<QuoteCreated>('/exchange/quotes', { method: 'POST', body: JSON.stringify({ gear, side: 'buy', qty: 1 }) }),
+  career: () => req<Career>('/me/career'),
   missionStory: (session: string) => req<{ story: MissionStory }>(`/missions/${session}/story`).then((r) => r.story),
   settlement: (opId: string) => req<SettlementView>(`/settlements/${encodeURIComponent(opId)}`),
   completeMission: (session: string, outcome: 'extracted' | 'killed', kills: number) =>

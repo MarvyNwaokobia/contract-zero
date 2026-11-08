@@ -85,8 +85,8 @@ pub fn world_view(w: &World) -> Value {
     let raids: Vec<_> = w.raids.values().rev().take(10).collect();
     let trades: Vec<_> = w.trades.iter().rev().take(20).collect();
     let mut flows = serde_json::Map::new();
-    for asset in [Asset::Credits, Asset::Res(Resource::Ammo), Asset::Res(Resource::Med), Asset::Res(Resource::Fuel)] {
-        let key = match asset { Asset::Credits => "credits", Asset::Res(r) => r.name() };
+    for asset in cz_economy::ALL_ASSETS {
+        let key = asset.name();
         flows.insert(key.into(), json!({ "issued": w.issued(asset), "destroyed": w.destroyed(asset), "conserved": w.total(asset) == 0 }));
     }
     json!({
@@ -223,7 +223,7 @@ pub async fn simulate(state: web::Data<AppState>, body: web::Json<SimulateReques
         }));
     }
     let raids: Vec<_> = w.raids.values().filter(|r| r.player == raider).map(|r| json!({ "id": r.id, "resource": r.plan.resource.name(), "manifest": r.plan.manifest, "extracted": matches!(r.status, RaidStatus::Extracted { .. }) })).collect();
-    let all_assets = [Asset::Credits, Asset::Res(Resource::Ammo), Asset::Res(Resource::Med), Asset::Res(Resource::Fuel)];
+    let all_assets = cz_economy::ALL_ASSETS;
     let conserved = all_assets.iter().all(|a| w.total(*a) == 0);
     HttpResponse::Ok().json(json!({
         "simulated": true,

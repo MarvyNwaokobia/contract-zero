@@ -45,7 +45,13 @@ pub async fn overview(state: web::Data<AppState>, q: web::Query<OverviewQuery>) 
 pub struct QuoteRequest {
     #[serde(default)]
     pub player: String,
-    pub resource: Resource,
+    /// A resource to trade, or…
+    #[serde(default)]
+    pub resource: Option<Resource>,
+    /// …a gun from Vex's armory (`marksman`, `ashfall_carbine`, `seraph_lmg`): buy only,
+    /// one at a time.
+    #[serde(default)]
+    pub gear: Option<String>,
     /// The player's side: `buy` from the merchant or `sell` to it.
     pub side: Side,
     pub qty: i64,
@@ -72,7 +78,16 @@ pub async fn create(state: web::Data<AppState>, req: HttpRequest, body: web::Jso
         return HttpResponse::BadRequest().json(json!({ "error": "qty must be 1..=10000" }));
     }
     let limit = b.limit_total.unwrap_or(match b.side { Side::Buy => i64::MAX, Side::Sell => 0 });
-    reply(exchange::create(&state, b.player, b.resource, b.side, b.qty, limit).await)
+    let item = match (&b.gear, b.resource) {
+        (Some(g), None) => match cz_economy::Gear::parse(g) {
+            Some(g) if b.side == Side::Buy => exchange::Item::Gear(g),
+            Some(_) => return HttpResponse::BadRequest().json(json!({ "error": "Vex sells guns; it does not buy them back" })),
+            None => return HttpResponse::BadRequest().json(json!({ "error": "unknown gear" })),
+        },
+        (None, Some(r)) => exchange::Item::Res(r),
+        _ => return HttpResponse::BadRequest().json(json!({ "error": "give either a resource or a gear id" })),
+    };
+    reply(exchange::create(&state, b.player, item, b.side, b.qty, limit).await)
 }
 
 pub async fn get(state: web::Data<AppState>, path: web::Path<u64>) -> HttpResponse {

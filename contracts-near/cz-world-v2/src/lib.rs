@@ -275,6 +275,28 @@ impl WorldV2 {
             .then(Self::ext(env::current_account_id()).with_static_gas(GAS_CALLBACK).on_settled(op, None))
     }
 
+    /// Settle a sabotage fee or a recovery: legs that each debit a registered actor and
+    /// pay a registered actor or the named player (e.g. faction → merchant cargo, and
+    /// merchant → player fee). Server-only; registers the player's storage first.
+    pub fn settle_operation(&mut self, op_id: String, player: AccountId, legs: Vec<Leg>) -> Promise {
+        self.only_server();
+        require!(self.roles.get(&player).is_none() && player != self.server && player != env::current_account_id(), "the player must not be an actor");
+        require!(!legs.is_empty() && legs.len() <= 4, "1..=4 legs");
+        for l in &legs {
+            require!(self.roles.get(&l.from).is_some(), "operation legs debit actors only");
+            require!(self.roles.get(&l.to).is_some() || l.to == player, "operation legs pay actors or the player");
+            require!(l.from != l.to, "sender and receiver are the same");
+            require_amount(l.amount.0);
+        }
+        let op = format!("op:{op_id}");
+        self.begin(&op);
+        ext_assets::ext(self.assets.clone())
+            .with_static_gas(GAS_REGISTER)
+            .controller_register(player)
+            .then(ext_assets::ext(self.assets.clone()).with_static_gas(GAS_SETTLE).controller_settle(op.clone(), legs))
+            .then(Self::ext(env::current_account_id()).with_static_gas(GAS_CALLBACK).on_settled(op, None))
+    }
+
     /// Mirror a batch of the economy's issuance and destruction on actor accounts.
     pub fn apply_flows(&mut self, batch_id: String, mints: Vec<Flow>, burns: Vec<Flow>) -> Promise {
         self.only_server();

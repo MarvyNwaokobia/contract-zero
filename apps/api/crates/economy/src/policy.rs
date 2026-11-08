@@ -149,6 +149,27 @@ pub fn commander(w: &World, id: &str) -> Vec<Decision> {
         }
     }
 
+    // Starving and broke: take a merchant caravan carrying what is short, if one is on
+    // the road. At most once per raid-memory window; the merchant will want it back.
+    let seized_recently = w.convoys.values().any(|c| matches!(&c.status, ConvoyStatus::Seized { by } if by == id) && c.dispatched_at + RAID_MEMORY_TICKS > w.tick);
+    if !seized_recently {
+        for r in Resource::ALL {
+            let target = if r == Resource::Ammo { ammo_target(a) } else { a.requirement(r) };
+            let have = w.balance(&a.account, Asset::Res(r));
+            let unit = w.quote(r, Side::Buy, 1).map(|q| q.total).unwrap_or(i64::MAX);
+            // Below the restock line and unable to pay for the restock.
+            let restock = w.quote(r, Side::Buy, (target - have).max(1)).map(|q| q.total).unwrap_or(i64::MAX);
+            if target == 0 || have * 4 >= target * 3 || spendable(w, a) >= restock {
+                continue;
+            }
+            let merchant = w.market.merchant.clone();
+            if let Some(c) = w.convoys.values().find(|c| c.owner == merchant && c.resource == r && c.status == ConvoyStatus::InTransit) {
+                out.push(decision(id, &format!("{} critical", r.name()), &[("have", have), ("target", target), ("spendable", spendable(w, a)), ("unit_ask", unit), ("caravan_units", c.units)], Some(Action::SeizeConvoy { convoy: c.id }), format!("Down to {have} {} and can't pay for a restock ({unit} cr a unit): seizing {}'s caravan ({} {}) on the road.", r.name(), w.merchant().name, c.units, r.name())));
+                break;
+            }
+        }
+    }
+
     // Defense posture follows recent raids, but only what the faction can pay for.
     let raids = w.recent_raids_on(id, RAID_MEMORY_TICKS) as i64;
     let credits = w.balance(&a.account, Asset::Credits);
@@ -201,6 +222,45 @@ pub fn merchant(w: &World) -> Vec<Decision> {
             }
             budget -= amount;
             out.push(decision(&id, &format!("{} shelf low", r.name()), &ctx, Some(Action::PostBounty { target: f.id.clone(), resource: r, amount }), format!("Pay {amount} cr to whoever raids {}'s {} depot ({} units): restocks my shelf.", f.name, r.name(), plan.manifest)));
+        }
+    }
+
+    // A caravan of mine was taken: pay whoever brings the cargo back.
+    for c in w.convoys.values().filter(|c| c.owner == id) {
+        let ConvoyStatus::Seized { by } = &c.status else { continue };
+        if w.bounties.values().any(|b| b.convoy == Some(c.id)) {
+            continue;
+        }
+        let value = c.units * pricing::production_cost(c.resource);
+        let amount = value * 3_000 / BP;
+        let ctx = [("convoy", c.id as i64), ("units", c.units), ("budget", budget), ("fee", amount)];
+        if amount <= budget && amount > 0 {
+            budget -= amount;
+            out.push(decision(&id, "caravan seized", &ctx, Some(Action::PostContract { kind: OpKind::Recovery, target: by.clone(), resource: c.resource, amount, convoy: Some(c.id) }), format!("{by} took my caravan ({} {}). Paying {amount} cr to whoever brings it back.", c.units, c.resource.name())));
+        } else {
+            out.push(decision(&id, "caravan seized", &ctx, None, format!("{by} took my caravan, but a {amount} cr recovery fee is over budget.")));
+        }
+    }
+
+    // Overstocked on something a faction makes for itself: pay to take its line down,
+    // so it has to buy from me.
+    for r in Resource::ALL {
+        let stock = w.merchant_stock(r);
+        if stock * 2 <= w.market.target[r.idx()] * 3 {
+            continue;
+        }
+        for f in w.actors.values().filter(|f| f.kind == ActorKind::Faction && f.production[r.idx()] > 0) {
+            if w.disrupted(&f.id, r) || w.contract_for(OpKind::Sabotage, &f.id, r).is_some() {
+                continue;
+            }
+            let fstock = w.balance(&f.account, Asset::Res(r));
+            let value = (f.production[r.idx()] + fstock * SABOTAGE_SHARE_BP / BP) * pricing::production_cost(r);
+            let amount = value * 3_000 / BP;
+            let ctx = [("my_stock", stock), ("target", w.market.target[r.idx()]), ("their_output_per_day", f.production[r.idx()]), ("budget", budget), ("fee", amount)];
+            if amount > 0 && amount <= budget {
+                budget -= amount;
+                out.push(decision(&id, &format!("{} glut", r.name()), &ctx, Some(Action::PostContract { kind: OpKind::Sabotage, target: f.id.clone(), resource: r, amount, convoy: None }), format!("My {} shelf is overstocked while {} makes its own. Paying {amount} cr to knock its line out.", r.name(), f.name)));
+            }
         }
     }
 

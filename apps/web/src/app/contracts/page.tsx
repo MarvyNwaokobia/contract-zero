@@ -23,6 +23,27 @@ function Guards({ e }: { e: BoardEntry }) {
   )
 }
 
+const KIND: Record<string, { label: string; badge: string; title: (e: BoardEntry) => string; does: (e: BoardEntry) => string; changes: (e: BoardEntry) => string }> = {
+  raid: {
+    label: 'Depot raid', badge: 'bg-amber/15 !text-amber-hi',
+    title: (e) => `${RESOURCE_LABEL[e.resource]}: ${e.manifest} units`,
+    does: (e) => `Break into ${e.target_name}'s depot, load the cargo under fire and walk it out. It's yours to keep or sell.`,
+    changes: (e) => `${e.target_name} loses ${e.manifest} ${e.resource}. Expect it to restock from Vex and field fewer armed guards next time.`,
+  },
+  sabotage: {
+    label: 'Sabotage', badge: 'bg-hostile/15 !text-hostile',
+    title: (e) => `${e.target_name}'s ${e.resource} line`,
+    does: () => 'Plant two charges and get clear. No need to fight them all; you take nothing home but the fee.',
+    changes: (e) => `Destroys ${e.manifest} ${e.resource} and stops ${e.target_name} producing it for 36 hours, so it has to buy from the market.`,
+  },
+  recovery: {
+    label: 'Recovery', badge: 'bg-steel/15 !text-steel',
+    title: (e) => `Seized ${e.resource}: ${e.manifest} units`,
+    does: (e) => `${e.target_name} took a caravan on the road. Find the cargo, secure it, and hand it back to its owner.`,
+    changes: (e) => `The ${e.resource} goes back on the owner's shelf and ${e.target_name} loses what it stole. You're paid the fee, not the cargo.`,
+  },
+}
+
 export default function ContractBoard() {
   const world = useQuery({ queryKey: ['world'], queryFn: api.world, refetchInterval: 5_000 })
   const board = world.data?.board ?? []
@@ -31,30 +52,37 @@ export default function ContractBoard() {
     <Shell title="Contract Board" back={{ href: '/', label: 'Hub' }}>
       {world.isError && <p className="text-rose-400">The economy server is not reachable.</p>}
       {world.data && board.length === 0 && (
-        <Panel><p className="text-slate-400">No depot is worth raiding right now. Vanguard may be out of fuel to stage one, or its stores are too thin.</p></Panel>
+        <Panel><p className="text-muted">Nothing on the board right now. Vanguard may be out of fuel to stage a depot, and nobody is paying for anything else.</p></Panel>
       )}
       <div className="grid gap-3">
-        {board.map((e) => (
-          <Panel key={`${e.target}-${e.resource}`}>
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="min-w-0 flex-1">
-                <div className="text-xs tracking-[0.2em] text-slate-500">RAID · {e.target_name.toUpperCase()} · DEFENSE L{e.defense}</div>
-                <div className="mt-1 text-lg font-semibold text-slate-100">{RESOURCE_LABEL[e.resource]} depot: {e.manifest} units</div>
-                <div className="mt-2"><Guards e={e} /></div>
+        {board.map((e) => {
+          const k = KIND[e.kind] ?? KIND.raid
+          const site = world.data?.zone === 'BLACKSITE' ? 'Blacksite · night' : world.data?.zone === 'REDYARD' ? 'Dustline Depot · dusk' : 'Dustline Depot · day'
+          const fee = e.bounty?.amount ?? 0
+          return (
+            <section key={`${e.kind}-${e.target}-${e.resource}`} className="cz-panel p-5">
+              <div className="flex flex-wrap items-start justify-between gap-5">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className={`cz-label !text-[10px] px-2 py-0.5 ${k.badge}`}>{k.label}</span>
+                    <span className="cz-label !text-[10px]">{site} · defense L{e.defense}</span>
+                  </div>
+                  <div className="mt-2 font-display text-2xl font-bold uppercase tracking-wide">{k.title(e)}</div>
+                  <p className="mt-1 text-sm text-muted">{k.does(e)}</p>
+                  <p className="mt-2 border-l-2 border-amber/60 pl-3 text-sm">{k.changes(e)}</p>
+                  <div className="mt-3"><Guards e={e} /></div>
+                </div>
+                <div className="flex shrink-0 flex-col items-end gap-3">
+                  <div className="flex gap-6 text-right">
+                    {e.kind === 'raid' && <Stat label="Cargo sells for" value={`${e.market_value.bid} cr`} hint={`${e.market_value.unit_bid} cr/unit at Vex`} />}
+                    <Stat label={e.kind === 'raid' ? 'Bounty' : 'Contract fee'} value={fee ? `${fee} cr` : 'none'} hint={e.bounty ? `from ${e.bounty.sponsor_name}` : undefined} />
+                  </div>
+                  <Link href={`/deploy?target=${e.target}&resource=${e.resource}&kind=${e.kind}`} className="cz-btn cz-btn-primary px-6 py-2 text-sm">Deploy</Link>
+                </div>
               </div>
-              <div className="flex gap-6">
-                <Stat label="Sells for" value={`${e.market_value.bid} cr`} hint={`${e.market_value.unit_bid} cr/unit at Vex`} />
-                <Stat label="Bounty" value={e.bounty ? `${e.bounty.amount} cr` : 'none'} hint={e.bounty ? `from ${e.bounty.sponsor_name}` : undefined} />
-              </div>
-              <Link
-                href={`/deploy?target=${e.target}&resource=${e.resource}`}
-                className="self-center rounded bg-cyan-500 px-5 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
-              >
-                Deploy
-              </Link>
-            </div>
-          </Panel>
-        ))}
+            </section>
+          )
+        })}
       </div>
 
       {world.data && (

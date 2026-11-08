@@ -46,6 +46,33 @@ pub const BOUNTY_MIN_BP: i64 = 2_500;
 pub const BOUNTY_MAX_BP: i64 = 15_000;
 /// How long a posted bounty stays open.
 pub const BOUNTY_TICKS: u64 = 24;
+/// A sabotaged production line stays down this long.
+pub const SABOTAGE_TICKS: u64 = 36;
+/// Share of the targeted stock a successful sabotage destroys.
+pub const SABOTAGE_SHARE_BP: i64 = 4_000;
+
+/// What an operation does when it succeeds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OpKind {
+    /// Take the depot's cargo for yourself.
+    #[default]
+    Raid,
+    /// Destroy stock and stop the faction producing that resource for a while.
+    Sabotage,
+    /// Retrieve seized cargo and return it to its owner, for the owner's fee.
+    Recovery,
+}
+
+impl OpKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            OpKind::Raid => "raid",
+            OpKind::Sabotage => "sabotage",
+            OpKind::Recovery => "recovery",
+        }
+    }
+}
 /// Live-world rules (see [`Market::living`]).
 /// The merchant reviews its shelves this often, and its caravans take this long.
 pub const MERCHANT_RESTOCK_TICKS: u64 = 12;
@@ -147,6 +174,12 @@ pub enum Reason {
     Refund { bounty: u64 },
     BountyPaid { bounty: u64, raid: u64 },
     Raid { raid: u64 },
+    /// Stock destroyed by a sabotage operation.
+    Sabotage { raid: u64 },
+    /// Seized cargo returned to its owner by a recovery operation.
+    Recovered { raid: u64 },
+    /// A caravan's cargo taken on the road by a faction.
+    Seized { convoy: u64 },
     /// A faction's daily garrison pay (destroyed).
     Upkeep,
     /// Merchant surplus sold out of the region (goods destroyed)…
@@ -170,7 +203,7 @@ impl Reason {
     pub fn class(&self) -> &'static str {
         match self {
             Reason::Genesis | Reason::Income | Reason::Production | Reason::Shipment { .. } | Reason::ExportRevenue => "issuance",
-            Reason::Consumption | Reason::Logistics { .. } | Reason::EscortWages { .. } | Reason::ImportCost { .. } | Reason::Upkeep | Reason::Export | Reason::Dividend | Reason::Remittance => "destruction",
+            Reason::Consumption | Reason::Logistics { .. } | Reason::EscortWages { .. } | Reason::ImportCost { .. } | Reason::Upkeep | Reason::Export | Reason::Dividend | Reason::Remittance | Reason::Sabotage { .. } => "destruction",
             _ => "transfer",
         }
     }
@@ -228,6 +261,9 @@ pub struct Actor {
     pub credit_reserve: i64,
     pub defense: u8,
     pub shipment: Option<ShipmentPlan>,
+    /// Per resource: production is down (sabotaged) until this tick.
+    #[serde(default)]
+    pub disrupted_until: [u64; 3],
 }
 
 impl Actor {
@@ -248,11 +284,13 @@ pub struct Market {
     pub living: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConvoyStatus {
     InTransit,
     Arrived,
+    /// Taken on the road by a faction; its cargo went to that faction.
+    Seized { by: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -307,6 +345,14 @@ pub struct Bounty {
     pub target: String,
     pub resource: Resource,
     pub amount: i64,
+    /// What the sponsor is paying for (a raid bounty, a sabotage or a recovery contract).
+    #[serde(default)]
+    pub kind: OpKind,
+    /// Recovery: the seized caravan, and how many units to bring back.
+    #[serde(default)]
+    pub convoy: Option<u64>,
+    #[serde(default)]
+    pub units: i64,
     pub posted_at: u64,
     pub expires_at: u64,
     pub status: BountyStatus,
@@ -351,6 +397,12 @@ pub enum Action {
     StartRaid { target: String, resource: Resource },
     SettleRaid { raid: u64, player: String },
     FailRaid { raid: u64, player: String },
+    /// A sabotage or recovery operation (a raid is `StartRaid`).
+    StartOperation { kind: OpKind, target: String, resource: Resource },
+    /// A sponsor's escrowed contract for a sabotage or recovery (raid bounties are `PostBounty`).
+    PostContract { kind: OpKind, target: String, resource: Resource, amount: i64, convoy: Option<u64> },
+    /// A faction takes a merchant caravan on the road.
+    SeizeConvoy { convoy: u64 },
 }
 
 impl Action {
@@ -363,6 +415,9 @@ impl Action {
             Action::StartRaid { .. } => "start_raid",
             Action::SettleRaid { .. } => "settle_raid",
             Action::FailRaid { .. } => "fail_raid",
+            Action::StartOperation { .. } => "start_operation",
+            Action::PostContract { .. } => "post_contract",
+            Action::SeizeConvoy { .. } => "seize_convoy",
         }
     }
 }
@@ -385,6 +440,9 @@ pub enum Event {
     Traded(TradeRecord),
     DefenseChanged { actor: String, level: u8 },
     StrategyChanged { strategy: Strategy },
+    ConvoySeized { convoy: u64, by: String, resource: Resource, units: i64 },
+    ProductionDisrupted { actor: String, resource: Resource, until: u64 },
+    ContractPosted { contract: u64, kind: OpKind, sponsor: String, target: String, resource: Resource, amount: i64 },
     QuoteReserved(PlayerQuote),
     QuoteSettled { quote: u64, trade: u64 },
     QuoteReleased { quote: u64 },
@@ -457,6 +515,8 @@ pub enum EconError {
     RaidNotActive { raid: u64 },
     #[error("raid {raid} was already settled")]
     AlreadySettled { raid: u64 },
+    #[error("a contract like this is already open")]
+    ContractExists,
     #[error("player already has an open quote")]
     QuoteOpen,
     #[error("quote {quote} is not open")]
@@ -569,8 +629,19 @@ impl World {
     }
 
     /// The open bounty a raid on (target, resource) would collect, if any (oldest first).
+    /// The open raid bounty on (target, resource), if any.
     pub fn bounty_for(&self, target: &str, resource: Resource) -> Option<&Bounty> {
-        self.open_bounties().find(|b| b.target == target && b.resource == resource)
+        self.contract_for(OpKind::Raid, target, resource)
+    }
+
+    /// The open contract of `kind` on (target, resource), oldest first.
+    pub fn contract_for(&self, kind: OpKind, target: &str, resource: Resource) -> Option<&Bounty> {
+        self.open_bounties().find(|b| b.kind == kind && b.target == target && b.resource == resource)
+    }
+
+    /// Is `actor`'s production of `r` currently down?
+    pub fn disrupted(&self, actor: &str, r: Resource) -> bool {
+        self.actors.get(actor).is_some_and(|a| a.disrupted_until[r.idx()] > self.tick)
     }
 
     pub fn active_raid_of(&self, player: &str) -> Option<&Raid> {
@@ -667,6 +738,9 @@ impl World {
             Action::StartRaid { target, resource } => self.start_raid(caller_player(caller), target, *resource),
             Action::SettleRaid { raid, player } => self.settle_raid(*raid, player),
             Action::FailRaid { raid, player } => self.fail_raid(*raid, player),
+            Action::StartOperation { kind, target, resource } => self.start_operation(caller_player(caller), *kind, target, *resource),
+            Action::PostContract { kind, target, resource, amount, convoy } => self.post_contract(caller_actor(caller), *kind, target, *resource, *amount, *convoy),
+            Action::SeizeConvoy { convoy } => self.seize_convoy(caller_actor(caller), *convoy),
         }
     }
 
@@ -675,9 +749,16 @@ impl World {
     fn authorize(&self, caller: &Caller, action: &Action) -> Result<AccountId, EconError> {
         let deny = || EconError::Unauthorized { caller: format!("{caller:?}"), action: action.name().into() };
         match (caller, action) {
-            (Caller::Agent(id), Action::Trade { .. } | Action::PostBounty { .. } | Action::ConfigureDefense { .. }) => {
+            (Caller::Agent(id), Action::SeizeConvoy { .. }) => {
                 let a = self.actor(id)?;
-                if a.kind == ActorKind::Merchant && !matches!(action, Action::PostBounty { .. }) {
+                if a.kind != ActorKind::Faction {
+                    return Err(deny());
+                }
+                Ok(a.account.clone())
+            }
+            (Caller::Agent(id), Action::Trade { .. } | Action::PostBounty { .. } | Action::PostContract { .. } | Action::ConfigureDefense { .. }) => {
+                let a = self.actor(id)?;
+                if a.kind == ActorKind::Merchant && !matches!(action, Action::PostBounty { .. } | Action::PostContract { .. }) {
                     return Err(deny()); // the merchant is the market: it doesn't trade with itself or run escorts
                 }
                 Ok(a.account.clone())
@@ -685,7 +766,7 @@ impl World {
             (Caller::Agent(id), Action::SetStrategy { .. }) => {
                 if *id == self.market.merchant { Ok(self.actor(id)?.account.clone()) } else { Err(deny()) }
             }
-            (Caller::Player(p), Action::Trade { .. } | Action::StartRaid { .. }) => Ok(player_account(p)),
+            (Caller::Player(p), Action::Trade { .. } | Action::StartRaid { .. } | Action::StartOperation { .. }) => Ok(player_account(p)),
             (Caller::System, Action::SettleRaid { .. } | Action::FailRaid { .. }) => Ok(WORLD.into()),
             _ => Err(deny()),
         }
@@ -728,7 +809,7 @@ impl World {
             return Err(EconError::BountyOutOfRange { amount, min, max });
         }
         let id = self.peek_id();
-        let b = Bounty { id, sponsor: sponsor.into(), target: target.into(), resource: r, amount, posted_at: self.tick, expires_at: self.tick + BOUNTY_TICKS, status: BountyStatus::Open };
+        let b = Bounty { id, sponsor: sponsor.into(), target: target.into(), resource: r, amount, kind: OpKind::Raid, convoy: None, units: 0, posted_at: self.tick, expires_at: self.tick + BOUNTY_TICKS, status: BountyStatus::Open };
         let account = self.actor(sponsor)?.account.clone();
         let mut ev = self.apply(&[Transfer { from: account, to: b.escrow(), asset: Asset::Credits, qty: amount, reason: Reason::Escrow { bounty: id } }])?;
         self.commit_id(id);
@@ -747,6 +828,79 @@ impl World {
     }
 
     /// Lock in the raid plan from current state. Nothing moves yet.
+    /// A sponsor escrows the fee for a sabotage or a recovery.
+    fn post_contract(&mut self, sponsor: &str, kind: OpKind, target: &str, r: Resource, amount: i64, convoy: Option<u64>) -> Result<Vec<Event>, EconError> {
+        if sponsor == target {
+            return Err(EconError::SelfTarget);
+        }
+        let t = self.actor(target)?.clone();
+        if t.kind != ActorKind::Faction {
+            return Err(EconError::NoRaidTarget { target: target.into(), resource: r });
+        }
+        if self.contract_for(kind, target, r).is_some() {
+            return Err(EconError::ContractExists);
+        }
+        let (value, units) = match kind {
+            OpKind::Raid => return Err(EconError::Unauthorized { caller: sponsor.into(), action: "post_contract (raids use post_bounty)".into() }),
+            OpKind::Sabotage => {
+                if t.production[r.idx()] <= 0 || self.disrupted(target, r) {
+                    return Err(EconError::NoRaidTarget { target: target.into(), resource: r });
+                }
+                // What the sabotage costs the faction: a day of output plus the stock it burns.
+                let stock = self.balance(&t.account, Asset::Res(r));
+                ((t.production[r.idx()] + stock * SABOTAGE_SHARE_BP / pricing::BP) * pricing::production_cost(r), 0)
+            }
+            OpKind::Recovery => {
+                let c = convoy.and_then(|id| self.convoys.get(&id)).ok_or_else(|| unknown("convoy", &format!("{convoy:?}")))?;
+                let sponsor_id = self.actor(sponsor)?.id.clone();
+                if c.owner != sponsor_id || c.resource != r || c.status != (ConvoyStatus::Seized { by: target.into() }) {
+                    return Err(unknown("seized convoy", &c.id.to_string()));
+                }
+                (c.units * pricing::production_cost(r), c.units)
+            }
+        };
+        let (min, max) = (value * BOUNTY_MIN_BP / pricing::BP, value * BOUNTY_MAX_BP / pricing::BP);
+        if amount < min.max(1) || amount > max {
+            return Err(EconError::BountyOutOfRange { amount, min, max });
+        }
+        let id = self.peek_id();
+        let b = Bounty { id, sponsor: sponsor.into(), target: target.into(), resource: r, amount, kind, convoy, units, posted_at: self.tick, expires_at: self.tick + 2 * BOUNTY_TICKS, status: BountyStatus::Open };
+        let account = self.actor(sponsor)?.account.clone();
+        let mut ev = self.apply(&[Transfer { from: account, to: b.escrow(), asset: Asset::Credits, qty: amount, reason: Reason::Escrow { bounty: id } }])?;
+        self.commit_id(id);
+        self.bounties.insert(id, b);
+        ev.push(Event::ContractPosted { contract: id, kind, sponsor: sponsor.into(), target: target.into(), resource: r, amount });
+        Ok(ev)
+    }
+
+    /// A faction takes a merchant caravan on the road; the cargo becomes its stock.
+    fn seize_convoy(&mut self, faction: &str, convoy: u64) -> Result<Vec<Event>, EconError> {
+        let c = self.convoys.get(&convoy).cloned().ok_or_else(|| unknown("convoy", &convoy.to_string()))?;
+        let owner = self.actor(&c.owner)?.clone();
+        if c.status != ConvoyStatus::InTransit || owner.kind != ActorKind::Merchant {
+            return Err(unknown("caravan on the road", &convoy.to_string()));
+        }
+        let to = self.actor(faction)?.account.clone();
+        let mut ev = self.apply(&[Transfer { from: c.account(), to, asset: Asset::Res(c.resource), qty: c.units, reason: Reason::Seized { convoy } }])?;
+        self.convoys.get_mut(&convoy).unwrap().status = ConvoyStatus::Seized { by: faction.into() };
+        ev.push(Event::ConvoySeized { convoy, by: faction.into(), resource: c.resource, units: c.units });
+        Ok(ev)
+    }
+
+    /// Lock in a sabotage or recovery plan; it needs an open contract to exist.
+    fn start_operation(&mut self, player: &str, kind: OpKind, target: &str, r: Resource) -> Result<Vec<Event>, EconError> {
+        if self.active_raid_of(player).is_some() {
+            return Err(EconError::RaidInProgress);
+        }
+        let plan = mission::operation_plan(self, kind, target, r).ok_or_else(|| EconError::NoRaidTarget { target: target.into(), resource: r })?;
+        let id = self.peek_id();
+        self.commit_id(id);
+        let manifest = plan.manifest;
+        self.raids.insert(id, Raid { id, player: player.into(), plan, started_at: self.tick, status: RaidStatus::Active });
+        self.version += 1;
+        Ok(vec![Event::RaidStarted { raid: id, player: player.into(), target: target.into(), resource: r, manifest }])
+    }
+
     fn start_raid(&mut self, player: &str, target: &str, r: Resource) -> Result<Vec<Event>, EconError> {
         if self.active_raid_of(player).is_some() {
             return Err(EconError::RaidInProgress);
@@ -776,10 +930,19 @@ impl World {
         let units = raid.plan.manifest.min(self.balance(&target, asset));
         let to = player_account(player);
         let mut batch = Vec::new();
+        let kind = raid.plan.kind;
+        let contract = raid.plan.contract.and_then(|c| self.bounties.get(&c)).filter(|b| b.status == BountyStatus::Open).cloned();
         if units > 0 {
-            batch.push(Transfer { from: target, to: to.clone(), asset, qty: units, reason: Reason::Raid { raid: id } });
+            match kind {
+                OpKind::Raid => batch.push(Transfer { from: target, to: to.clone(), asset, qty: units, reason: Reason::Raid { raid: id } }),
+                OpKind::Sabotage => batch.push(Transfer { from: target, to: WORLD.into(), asset, qty: units, reason: Reason::Sabotage { raid: id } }),
+                OpKind::Recovery => {
+                    let owner = contract.as_ref().map(|b| self.actor(&b.sponsor).map(|a| a.account.clone())).transpose()?.unwrap_or_else(|| to.clone());
+                    batch.push(Transfer { from: target, to: owner, asset, qty: units, reason: Reason::Recovered { raid: id } });
+                }
+            }
         }
-        let bounty = self.bounty_for(&raid.plan.target, raid.plan.resource).cloned();
+        let bounty = if kind == OpKind::Raid { self.bounty_for(&raid.plan.target, raid.plan.resource).cloned() } else { contract };
         if let Some(b) = &bounty {
             batch.push(Transfer { from: b.escrow(), to, asset: Asset::Credits, qty: b.amount, reason: Reason::BountyPaid { bounty: b.id, raid: id } });
         }
@@ -789,6 +952,12 @@ impl World {
             self.bounties.get_mut(&b.id).unwrap().status = BountyStatus::Paid { raid: id, player: player.into() };
         }
         self.raids.get_mut(&id).unwrap().status = RaidStatus::Extracted { units, bounty: paid };
+        if kind == OpKind::Sabotage {
+            let until = self.tick + SABOTAGE_TICKS;
+            let r = raid.plan.resource;
+            self.actors.get_mut(&raid.plan.target).unwrap().disrupted_until[r.idx()] = until;
+            ev.push(Event::ProductionDisrupted { actor: raid.plan.target.clone(), resource: r, until });
+        }
         self.version += 1;
         ev.push(Event::RaidExtracted { raid: id, player: player.into(), units, bounty: paid });
         Ok(ev)
@@ -821,7 +990,7 @@ impl World {
                 batch.push(Transfer { from: WORLD.into(), to: a.account.clone(), asset: Asset::Credits, qty: inc, reason: Reason::Income });
             }
             for r in Resource::ALL {
-                let p = spread(a.production[r.idx()], t);
+                let p = if a.disrupted_until[r.idx()] > t { 0 } else { spread(a.production[r.idx()], t) };
                 if p > 0 {
                     batch.push(Transfer { from: WORLD.into(), to: a.account.clone(), asset: Asset::Res(r), qty: p, reason: Reason::Production });
                 }

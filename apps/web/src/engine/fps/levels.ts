@@ -50,7 +50,13 @@ export interface LevelDef {
   lights: LightSpec[]
   /** Where each room's guards may be placed. */
   rooms: Record<1 | 2, Rect[]>
-  points: { entry: [number, number]; push: [number, number]; cargo: [number, number]; extract: [number, number] }
+  points: {
+    entry: [number, number]; push: [number, number]; cargo: [number, number]; extract: [number, number]
+    /** Sabotage charge sites: one in the outer zone, one inside. */
+    charges: [[number, number], [number, number]]
+    /** Where seized cargo is held, and where it is handed back. */
+    cache: [number, number]; handover: [number, number]
+  }
   floor: { kind: 'dirt' | 'concrete' }
   /** Distance the sun's shadow camera must cover. */
   shadowHalf: number
@@ -129,7 +135,11 @@ const DEPOT: LevelDef = {
     1: [{ x: [-24, -4], z: [-13, 9] }, { x: [-2, 18], z: [-13, 2] }],
     2: [{ x: [-24.5, -7.5], z: [-46.5, -26] }, { x: [6, 27], z: [-52, -20] }],
   },
-  points: { entry: [0, 9], push: [0, -17.5], cargo: [-16, -28.5], extract: [0, 14] },
+  points: {
+    entry: [0, 9], push: [0, -17.5], cargo: [-16, -28.5], extract: [0, 14],
+    charges: [[18, 4], [-20.2, -38]],   // the fuel depot · the munitions line in the warehouse
+    cache: [16, -36], handover: [26, -24], // the container yard · Vex's truck at the east fence
+  },
   floor: { kind: 'dirt' },
   shadowHalf: 44,
 }
@@ -207,7 +217,11 @@ const BLACKSITE: LevelDef = {
     1: [{ x: [-19, 19], z: [4, 17] }],
     2: [{ x: [-17, -3], z: [-29, 1] }, { x: [3, 17], z: [-29, 1] }, { x: [-16, 16], z: [-41, -31.5] }],
   },
-  points: { entry: [0, 16], push: [0, 3.5], cargo: [0, -35.5], extract: [0, 19] },
+  points: {
+    entry: [0, 16], push: [0, 3.5], cargo: [0, -35.5], extract: [0, 19],
+    charges: [[12.5, 12], [11, -24]],   // the APC motor bay · the server room
+    cache: [10, -10], handover: [0, 19], // the control room · out the gate
+  },
   floor: { kind: 'concrete' },
   shadowHalf: 36,
 }

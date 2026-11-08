@@ -40,7 +40,7 @@ function NextOperation({ e, others, signedIn }: { e: BoardEntry; others: BoardEn
   return (
     <section className="cz-panel cz-rise p-5">
       <div className="cz-label text-amber">Next operation</div>
-      <div className="mt-1 font-display text-3xl font-bold uppercase leading-none tracking-wide">{RESOURCE_LABEL[e.resource]} raid</div>
+      <div className="mt-1 font-display text-3xl font-bold uppercase leading-none tracking-wide">{e.kind === 'sabotage' ? `Sabotage: ${e.resource} line` : e.kind === 'recovery' ? `Recover seized ${e.resource}` : `${RESOURCE_LABEL[e.resource]} raid`}</div>
       <div className="mt-1 text-sm text-muted">{e.target_name} depot · Dustline · defense level {e.defense}</div>
       <div className="mt-4 grid grid-cols-3 gap-3">
         <div><div className="cz-label !text-[10px]">Cargo</div><div className="cz-num font-display text-xl font-bold">{e.manifest}</div><div className="text-xs text-muted">units of {e.resource}</div></div>
@@ -56,7 +56,7 @@ function NextOperation({ e, others, signedIn }: { e: BoardEntry; others: BoardEn
       </p>
       <div className="mt-5 flex flex-wrap gap-3">
         {signedIn ? (
-          <Link href={`/deploy?target=${e.target}&resource=${e.resource}`} className="cz-btn cz-btn-primary px-6 py-2.5 text-sm">Brief &amp; deploy</Link>
+          <Link href={`/deploy?target=${e.target}&resource=${e.resource}&kind=${e.kind}`} className="cz-btn cz-btn-primary px-6 py-2.5 text-sm">Brief &amp; deploy</Link>
         ) : (
           <Link href="/signin" className="cz-btn cz-btn-primary px-6 py-2.5 text-sm">Sign in to deploy</Link>
         )}

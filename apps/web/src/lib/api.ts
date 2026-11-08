@@ -32,7 +32,12 @@ export interface GuardPlan {
   reinforce_every_secs_x100: number;
 }
 
+export type OpKind = 'raid' | 'sabotage' | 'recovery';
+
 export interface BoardEntry {
+  kind: OpKind;
+  /** The target's production of this resource is down (sabotaged). */
+  disrupted: boolean;
   target: string;
   target_name: string;
   resource: ResourceName;
@@ -190,8 +195,8 @@ export const api = {
   player: (id: string) => req<{ player: string; holdings: Holdings; active_raid: number | null }>(`/players/${encodeURIComponent(id)}`),
   decisions: (limit = 30) => req<{ events: AgentEvent[] }>(`/events?kind=agent_decision&limit=${limit}`).then((e) => e.events),
   // The player is the signed-in session; the server never takes it from the body.
-  startMission: (target: string, resource: ResourceName) =>
-    req<MissionStart>('/missions/start', { method: 'POST', body: JSON.stringify({ target, resource }) }),
+  startMission: (target: string, resource: ResourceName, kind: OpKind = 'raid') =>
+    req<MissionStart>('/missions/start', { method: 'POST', body: JSON.stringify({ target, resource, kind }) }),
   settlement: (opId: string) => req<SettlementView>(`/settlements/${encodeURIComponent(opId)}`),
   completeMission: (session: string, outcome: 'extracted' | 'killed', kills: number) =>
     req<{ replayed: boolean; result: MissionResult }>(`/missions/${session}/complete`, { method: 'POST', body: JSON.stringify({ outcome, kills }) }),

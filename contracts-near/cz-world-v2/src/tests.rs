@@ -392,3 +392,56 @@ fn sessions_are_bounded_in_time() {
     signed(PLAYER, WALLET_PK, SESSION_DEPOSIT, 1_000);
     w.register_session(pk(SESSION_PK), U128(1), U128(1), MAX_SESSION_SECS + 1);
 }
+
+// ── operations ───────────────────────────────────────────────────────────────
+
+fn leg(from: &str, to: &str, token: &str, amount: u128) -> Leg {
+    Leg { from: acc(from), to: acc(to), token_id: token.into(), amount: U128(amount) }
+}
+
+#[test]
+fn the_server_settles_a_recovery_and_its_fee() {
+    let mut w = setup();
+    as_(SERVER);
+    let _ = w.settle_operation("7".into(), acc(PLAYER), vec![leg(VANGUARD, VEX, "fuel", 60), leg(VEX, PLAYER, "credits", 540)]);
+    assert!(w.is_pending("op:7".into()));
+    callback(ok());
+    assert!(w.on_settled("op:7".into(), None, Ok(())));
+    assert!(w.is_used("op:7".into()));
+}
+
+#[test]
+#[should_panic(expected = "only the game server can do this")]
+fn only_the_server_settles_operations() {
+    let mut w = setup();
+    as_(VEX);
+    let _ = w.settle_operation("7".into(), acc(PLAYER), vec![leg(VEX, PLAYER, "credits", 1)]);
+}
+
+#[test]
+#[should_panic(expected = "operation legs debit actors only")]
+fn an_operation_cannot_debit_a_player() {
+    let mut w = setup();
+    as_(SERVER);
+    let _ = w.settle_operation("7".into(), acc(PLAYER), vec![leg(PLAYER, VEX, "ammo", 1)]);
+}
+
+#[test]
+#[should_panic(expected = "operation legs pay actors or the player")]
+fn an_operation_pays_only_actors_or_the_named_player() {
+    let mut w = setup();
+    as_(SERVER);
+    let _ = w.settle_operation("7".into(), acc(PLAYER), vec![leg(VEX, "someone.testnet", "credits", 1)]);
+}
+
+#[test]
+#[should_panic(expected = "operation already applied")]
+fn an_operation_settles_once() {
+    let mut w = setup();
+    as_(SERVER);
+    let _ = w.settle_operation("7".into(), acc(PLAYER), vec![leg(VEX, PLAYER, "credits", 1)]);
+    callback(ok());
+    w.on_settled("op:7".into(), None, Ok(()));
+    as_(SERVER);
+    let _ = w.settle_operation("7".into(), acc(PLAYER), vec![leg(VEX, PLAYER, "credits", 1)]);
+}

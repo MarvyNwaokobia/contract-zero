@@ -65,7 +65,13 @@ impl GuardPlan {
 pub struct RaidPlan {
     pub target: String,
     pub resource: Resource,
+    /// Raid: units taken. Sabotage: units destroyed. Recovery: units returned.
     pub manifest: i64,
+    #[serde(default)]
+    pub kind: crate::OpKind,
+    /// The contract that pays for it (sabotage and recovery always have one).
+    #[serde(default)]
+    pub contract: Option<u64>,
     pub defense: u8,
     pub guards: GuardPlan,
     pub seed: u32,
@@ -137,10 +143,23 @@ pub fn raid_plan(w: &World, target: &str, resource: Resource) -> Option<RaidPlan
     let ammo_available = if resource == Resource::Ammo { ammo - manifest } else { ammo };
     let guards = guard_plan(a.defense, ammo_available, bal(Resource::Med), a.requirement(Resource::Med));
     let seed = (crate::splitmix(w.seed ^ (w.tick << 8) ^ resource.idx() as u64) & 0xffff_ffff) as u32;
-    Some(RaidPlan { target: target.into(), resource, manifest, defense: a.defense, guards, seed })
+    Some(RaidPlan { target: target.into(), resource, manifest, kind: crate::OpKind::Raid, contract: None, defense: a.defense, guards, seed })
 }
 
 /// Every raid currently available, faction by faction, resource by resource.
+/// Every operation on offer: raidable depots, plus each open sabotage or recovery contract.
+pub fn available_operations(w: &World) -> Vec<RaidPlan> {
+    let mut out = available_raids(w);
+    for b in w.open_bounties().filter(|b| b.kind != crate::OpKind::Raid) {
+        if let Some(p) = operation_plan(w, b.kind, &b.target, b.resource) {
+            if !out.iter().any(|q| q.kind == p.kind && q.target == p.target && q.resource == p.resource) {
+                out.push(p);
+            }
+        }
+    }
+    out
+}
+
 pub fn available_raids(w: &World) -> Vec<RaidPlan> {
     w.actors
         .keys()
@@ -211,4 +230,31 @@ mod tests {
         assert_eq!(load_seconds(60), 10);
         assert_eq!(load_seconds(100_000), 20);
     }
+}
+
+/// A sabotage or recovery against `target`'s `resource`, or `None` without an open
+/// contract for it. Same guards as a raid (the faction defends what it holds); the
+/// manifest is what is destroyed (sabotage) or returned (recovery).
+pub fn operation_plan(w: &World, kind: crate::OpKind, target: &str, resource: Resource) -> Option<RaidPlan> {
+    if kind == crate::OpKind::Raid {
+        return raid_plan(w, target, resource);
+    }
+    let a = w.actors.get(target)?;
+    if a.kind != crate::ActorKind::Faction {
+        return None;
+    }
+    let contract = w.contract_for(kind, target, resource)?;
+    let bal = |r| w.balance(&a.account, Asset::Res(r));
+    let stock = bal(resource);
+    let manifest = match kind {
+        crate::OpKind::Sabotage => (stock * crate::SABOTAGE_SHARE_BP / BP).max(0),
+        _ => contract.units.min(stock),
+    };
+    if kind == crate::OpKind::Recovery && manifest < 1 {
+        return None;
+    }
+    let ammo = bal(Resource::Ammo);
+    let guards = guard_plan(a.defense, ammo, bal(Resource::Med), a.requirement(Resource::Med));
+    let seed = (crate::splitmix(w.seed ^ (w.tick << 8) ^ (resource.idx() as u64 + 16 * contract.id)) & 0xffff_ffff) as u32;
+    Some(RaidPlan { target: target.into(), resource, manifest, kind, contract: Some(contract.id), defense: a.defense, guards, seed })
 }

@@ -25,6 +25,7 @@ fn vanguard(credit_reserve: i64, shipment: Option<ShipmentPlan>) -> Actor {
         credit_reserve,
         defense: 2,
         shipment,
+        disrupted_until: [0; 3],
     }
 }
 
@@ -41,6 +42,7 @@ fn vex(credit_reserve: i64, shipment: Option<ShipmentPlan>) -> Actor {
         credit_reserve,
         defense: 1,
         shipment,
+        disrupted_until: [0; 3],
     }
 }
 

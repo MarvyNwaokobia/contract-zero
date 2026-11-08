@@ -6,12 +6,12 @@ import { Rajdhani } from 'next/font/google'
 import { useSearchParams } from 'next/navigation'
 import { Suspense, useMemo, useState } from 'react'
 import { Panel, Shell, Stat } from '@/components/ui/Shell'
-import { buildConvoyMission } from '@/engine/fps/convoy'
+import { buildOperationMission } from '@/engine/fps/convoy'
 import { GUN_CATALOG, gunDps, type GunId } from '@/engine/combat/GunStats'
 import type { ContractRunStats } from '@/engine/scene/ContractZeroScene'
 import { useQuery } from '@tanstack/react-query'
 import { useSession } from '@/lib/useSession'
-import { api, RESOURCE_LABEL, type BoardEntry, type MissionResult, type MissionStart, type ResourceName, type WorldView } from '@/lib/api'
+import { api, RESOURCE_LABEL, type OpKind, type BoardEntry, type MissionResult, type MissionStart, type ResourceName, type WorldView } from '@/lib/api'
 import { retryImport } from '@/lib/retryImport'
 
 const tactical = Rajdhani({ subsets: ['latin'], weight: ['500', '600', '700'], variable: '--font-tactical', display: 'swap' })
@@ -69,6 +69,7 @@ function Deploy() {
   const params = useSearchParams()
   const target = params.get('target') ?? 'vanguard'
   const resource = (params.get('resource') ?? 'ammo') as ResourceName
+  const kind = (params.get('kind') ?? 'raid') as OpKind
   const { session, loading } = useSession()
   const player = session?.account ?? null
   const [gun, setGun] = useState<GunId>('assault_rifle')
@@ -79,7 +80,7 @@ function Deploy() {
     setPhase({ kind: 'starting' })
     try {
       const before = await api.world()
-      const start = await api.startMission(target, resource)
+      const start = await api.startMission(target, resource, kind)
       setPhase({ kind: 'fighting', start, before })
     } catch (e) {
       setPhase({ kind: 'error', message: (e as Error).message })
@@ -99,7 +100,7 @@ function Deploy() {
     }
   }
 
-  const mission = useMemo(() => (phase.kind === 'fighting' ? buildConvoyMission(phase.start.mission, gun) : null), [phase, gun])
+  const mission = useMemo(() => (phase.kind === 'fighting' ? buildOperationMission(phase.start.mission, gun) : null), [phase, gun])
 
   if (phase.kind === 'fighting' && mission) {
     const { start, before } = phase

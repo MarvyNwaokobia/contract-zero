@@ -28,9 +28,18 @@ fn holdings(w: &World, account: &str) -> Value {
 }
 
 /// The mission the client builds for a raid plan. `raid_id` is set once started.
+/// The contract paying for a plan: a raid's bounty, or a sabotage/recovery contract.
+pub fn plan_contract<'a>(w: &'a World, plan: &RaidPlan) -> Option<&'a cz_economy::Bounty> {
+    match plan.kind {
+        cz_economy::OpKind::Raid => w.bounty_for(&plan.target, plan.resource),
+        _ => plan.contract.and_then(|c| w.bounties.get(&c)),
+    }
+}
+
 pub fn mission_json(w: &World, plan: &RaidPlan, raid_id: Option<u64>) -> Value {
-    let bounty = w.bounty_for(&plan.target, plan.resource);
+    let bounty = plan_contract(w, plan);
     json!({
+        "kind": plan.kind.name(),
         "id": raid_id.map(|r| r.to_string()).unwrap_or_else(|| format!("{}-{}-{}", plan.target, plan.resource.name(), w.tick)),
         "target": w.actors[&plan.target].name,
         "issuer": bounty.map(|b| w.actors[&b.sponsor].name.clone()),
@@ -45,8 +54,10 @@ pub fn mission_json(w: &World, plan: &RaidPlan, raid_id: Option<u64>) -> Value {
 /// One board entry: a raidable depot, why it looks the way it does, and its bounty.
 pub fn board_entry(w: &World, plan: &RaidPlan) -> Value {
     let a = &w.actors[&plan.target];
-    let bounty = w.bounty_for(&plan.target, plan.resource);
+    let bounty = plan_contract(w, plan);
     json!({
+        "kind": plan.kind.name(),
+        "disrupted": w.disrupted(&plan.target, plan.resource),
         "target": plan.target, "target_name": a.name,
         "resource": plan.resource.name(),
         "manifest": plan.manifest,
@@ -86,7 +97,7 @@ pub fn world_view(w: &World) -> Value {
         "prices": prices,
         "shipments": shipments, "bounties": bounties, "raids": raids, "recent_trades": trades,
         "flows": flows,
-        "board": mission::available_raids(w).iter().map(|p| board_entry(w, p)).collect::<Vec<_>>(),
+        "board": mission::available_operations(w).iter().map(|p| board_entry(w, p)).collect::<Vec<_>>(),
     })
 }
 
@@ -95,7 +106,7 @@ pub async fn get_world(state: web::Data<AppState>) -> HttpResponse {
 }
 
 pub async fn get_board(state: web::Data<AppState>) -> HttpResponse {
-    let board = state.world.read(|w| mission::available_raids(w).iter().map(|p| board_entry(w, p)).collect::<Vec<_>>()).await;
+    let board = state.world.read(|w| mission::available_operations(w).iter().map(|p| board_entry(w, p)).collect::<Vec<_>>()).await;
     HttpResponse::Ok().json(json!({ "board": board }))
 }
 

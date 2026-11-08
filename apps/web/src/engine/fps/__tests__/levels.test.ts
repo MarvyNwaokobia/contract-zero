@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { LEVELS, levelForZone, type LevelDef } from '../levels'
 import { NavGrid } from '../nav'
-import { buildConvoyMission, type ConvoyContract } from '../convoy'
+import { buildConvoyMission, buildOperationMission, type ConvoyContract } from '../convoy'
 import { FPS_TUNING } from '../FpsSim'
 
 const R = FPS_TUNING.ENEMY.BODY_R + 0.05
@@ -16,10 +16,18 @@ const contract = (zone: 'DUSTLINE' | 'BLACKSITE', seed: number, defense = 5): Co
 
 describe.each(Object.values(LEVELS))('$name', (lv) => {
   const nav = navOf(lv)
-  const pts = { start: lv.start, ...lv.points }
+  const { charges, ...single } = lv.points
+  const pts: Record<string, [number, number]> = { start: lv.start, ...single, charge1: charges[0], charge2: charges[1] }
 
   it('has every objective point on open floor', () => {
     for (const [name, [x, z]] of Object.entries(pts)) expect(nav.isFree(x, z), name).toBe(true)
+  })
+
+  it('can reach every sabotage and recovery point from the start', () => {
+    for (const name of ['charge1', 'charge2', 'cache', 'handover']) {
+      const [x, z] = pts[name]
+      expect(nav.findPath(lv.start[0], lv.start[1], x, z), name).not.toBeNull()
+    }
   })
 
   it('can reach every objective point from the start, in order', () => {
@@ -82,4 +90,24 @@ describe('raids on levels', () => {
     expect(Math.abs(area(a) - area(b))).toBeGreaterThan(500)
     expect(a.points.cargo).not.toEqual(b.points.cargo)
   })
+})
+
+describe('operation kinds play differently', () => {
+  for (const zone of ['DUSTLINE', 'BLACKSITE'] as const) {
+    it(`${zone}: raid, sabotage and recovery have different objectives and end points`, () => {
+      const base = contract(zone, 3)
+      const raid = buildOperationMission({ ...base, kind: 'raid' })
+      const sab = buildOperationMission({ ...base, kind: 'sabotage', issuer: 'Vex Exchange' })
+      const rec = buildOperationMission({ ...base, kind: 'recovery', issuer: 'Vex Exchange' })
+      const shape = (m: typeof raid) => m.objectives.map((o) => `${o.kind}@${o.pos}`).join(' ')
+      expect(new Set([shape(raid), shape(sab), shape(rec)]).size).toBe(3)
+      // Sabotage plants two charges and never asks you to clear a room.
+      expect(sab.objectives.filter((o) => o.kind === 'defend')).toHaveLength(2)
+      expect(sab.objectives.some((o) => o.kind === 'clear')).toBe(false)
+      // Recovery secures the cargo away from the raid's cargo point.
+      const lv = LEVELS[rec.level!]
+      expect(rec.objectives.find((o) => o.kind === 'defend')!.pos).toEqual(lv.points.cache)
+      expect(rec.objectives[rec.objectives.length - 1].pos).toEqual(lv.points.handover)
+    })
+  }
 })

@@ -63,7 +63,9 @@ pub fn flows_between(w: &World, from: usize, to: usize) -> (Flows, Flows) {
     let (mut mints, mut burns) = (Flows::new(), Flows::new());
     for e in &w.ledger[from.min(w.ledger.len())..to.min(w.ledger.len())] {
         let t = &e.transfer;
-        let arrived = matches!(t.reason, Reason::ShipmentArrived { .. });
+        // Cargo that reaches an actor from a convoy (on arrival, or seized on the road)
+        // appears on chain then: convoys themselves are engine-only.
+        let arrived = matches!(t.reason, Reason::ShipmentArrived { .. } | Reason::Seized { .. });
         match t.reason.class() {
             "issuance" if actors.contains(&t.to) => *mints.entry((t.to.clone(), t.asset)).or_default() += t.qty,
             "destruction" if actors.contains(&t.from) => *burns.entry((t.from.clone(), t.asset)).or_default() += t.qty,
@@ -178,6 +180,32 @@ pub async fn queue_raid(w: &World, db: &PgPool, near: &NearClient, raid: u64) ->
     Ok(Some(op))
 }
 
+/// Queue a settled sabotage or recovery: every actor-to-actor or actor-to-player leg
+/// of the operation (a recovery's cargo going home, the fee from the sponsor's
+/// escrow) as one `settle_operation`, after the flows (e.g. a sabotage's burn).
+pub async fn queue_operation(w: &World, db: &PgPool, near: &NearClient, raid: u64) -> Result<Option<String>, sqlx::Error> {
+    sync_flows(w, db, near).await?;
+    let r = &w.raids[&raid];
+    let mut legs = Vec::new();
+    for e in &w.ledger {
+        let t = &e.transfer;
+        let from = match &t.reason {
+            Reason::Recovered { raid: id } if *id == raid => chain_account(near, &t.from),
+            // The fee leaves the sponsor's escrow, which on chain is still the sponsor's.
+            Reason::BountyPaid { bounty, raid: id } if *id == raid => w.bounties.get(bounty).and_then(|b| w.actors.get(&b.sponsor)).and_then(|a| chain_account(near, &a.account)),
+            _ => continue,
+        };
+        let (Some(from), Some(to)) = (from, chain_account(near, &t.to)) else { continue };
+        legs.push(json!({ "from": from, "to": to, "token_id": t.asset.name(), "amount": t.qty.to_string() }));
+    }
+    if legs.is_empty() {
+        return Ok(None);
+    }
+    let op = format!("op:{raid}");
+    enqueue(db, near, "operation", &op, w.tick, &json!({ "op_id": raid.to_string(), "player": r.player, "legs": legs })).await?;
+    Ok(Some(op))
+}
+
 /// One-time alignment when the chain already holds state the ledger cursor knows
 /// nothing about (a fresh economy against an existing contract): mint or burn the
 /// difference per actor, then start the cursor at the current ledger.
@@ -269,6 +297,10 @@ pub async fn process_next(state: &AppState) -> Result<bool, String> {
                 }), 0)
                 .await
                 .map(|v| vec![v]),
+            "operation" => near
+                .call(Role::Server, "settle_operation", json!({ "op_id": payload["op_id"], "player": payload["player"], "legs": payload["legs"] }), 0)
+                .await
+                .map(|v| vec![v]),
             "trade" => settle_quote(&near, &payload, attempt, false).await,
             "sell" => settle_quote(&near, &payload, attempt, true).await,
             other => Err(format!("unknown settlement kind {other}")),
@@ -287,7 +319,11 @@ pub async fn process_next(state: &AppState) -> Result<bool, String> {
         }
         Err(e) => {
             tracing::warn!("settlement {op_id} attempt {} failed: {e}", attempts + 1);
-            let give_up = attempts + 1 >= 3;
+            // Only a trade gives up (it is then compensated in the economy). Flows,
+            // raids and operations mirror state the economy already committed and are
+            // replay-protected on chain, so they retry until they land: a transient
+            // RPC outage must delay them, never leave a permanent gap.
+            let give_up = (kind == "trade" || kind == "sell") && attempts + 1 >= 3;
             let status = if give_up { "failed" } else { "pending" };
             sqlx::query("UPDATE settlements SET status = $2, error = $3 WHERE id = $1").bind(id).bind(status).bind(&e).execute(db).await.map_err(|e| e.to_string())?;
             if give_up && (kind == "trade" || kind == "sell") {
@@ -295,6 +331,9 @@ pub async fn process_next(state: &AppState) -> Result<bool, String> {
             }
             let tick = state.world.read(|w| w.tick).await;
             let _ = log_event(db, tick, "near", "settlement", &json!({ "op_id": op_id, "kind": kind, "status": status, "error": e })).await;
+            // Back off before the next attempt (2, 4, 8 … 60 s), so an RPC outage is
+            // waited out instead of hammered.
+            tokio::time::sleep(std::time::Duration::from_secs(2u64.pow((attempts + 1).clamp(1, 6) as u32).min(60))).await;
         }
     }
     Ok(true)

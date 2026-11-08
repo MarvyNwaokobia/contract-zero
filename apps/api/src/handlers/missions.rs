@@ -59,7 +59,13 @@ pub struct StartRequest {
     pub player: String,
     pub target: String,
     pub resource: Resource,
+    /// raid (default), sabotage or recovery.
+    #[serde(default)]
+    pub kind: cz_economy::OpKind,
 }
+
+/// Seconds to plant one sabotage charge (two per op).
+pub const PLANT_SECS: f64 = 5.0;
 
 pub async fn start(state: web::Data<AppState>, req: HttpRequest, body: web::Json<StartRequest>) -> HttpResponse {
     let ip = req.connection_info().realip_remote_addr().unwrap_or("unknown").to_string();
@@ -79,10 +85,18 @@ pub async fn start(state: web::Data<AppState>, req: HttpRequest, body: web::Json
     let res = state
         .world
         .transact(async move |w, db| {
-            let ev = w.execute(&Caller::Player(body.player.clone()), &Action::StartRaid { target: body.target.clone(), resource: body.resource })?;
+            let action = match body.kind {
+                cz_economy::OpKind::Raid => Action::StartRaid { target: body.target.clone(), resource: body.resource },
+                kind => Action::StartOperation { kind, target: body.target.clone(), resource: body.resource },
+            };
+            let ev = w.execute(&Caller::Player(body.player.clone()), &action)?;
             let raid = *w.raids.keys().last().expect("raid just created");
             let plan = w.raids[&raid].plan.clone();
-            let min_secs = load_seconds(plan.manifest) as f64 + MIN_TRAVERSAL_SECS;
+            // What the op physically takes: loading cargo, or planting two charges.
+            let min_secs = match plan.kind {
+                cz_economy::OpKind::Sabotage => 2.0 * PLANT_SECS + MIN_TRAVERSAL_SECS,
+                _ => load_seconds(plan.manifest) as f64 + MIN_TRAVERSAL_SECS,
+            };
             sqlx::query(
                 "INSERT INTO mission_sessions (id, player, raid_id, min_secs, expires_at)
                  VALUES ($1, $2, $3, $4, now() + make_interval(secs => $5))",
@@ -169,9 +183,11 @@ pub async fn complete(state: web::Data<AppState>, req: HttpRequest, path: web::P
             // On-chain settlement is queued here and confirmed later by the worker; the
             // response says "queued", never "settled".
             let settlement = match (&near, outcome) {
-                (Some(n), "extracted") => crate::services::settlement::queue_raid(w, db, n, raid)
-                    .await?
-                    .map(|op| json!({ "op_id": op, "status": "queued" })),
+                (Some(n), "extracted") => match plan.kind {
+                    cz_economy::OpKind::Raid => crate::services::settlement::queue_raid(w, db, n, raid).await?,
+                    _ => crate::services::settlement::queue_operation(w, db, n, raid).await?,
+                }
+                .map(|op| json!({ "op_id": op, "status": "queued" })),
                 _ => None,
             };
             let result = json!({
@@ -180,6 +196,7 @@ pub async fn complete(state: web::Data<AppState>, req: HttpRequest, path: web::P
                 "elapsed_secs": elapsed,
                 "min_secs": min_secs,
                 "raid": raid,
+                "kind": plan.kind.name(),
                 "target": plan.target,
                 "resource": plan.resource.name(),
                 "extracted_units": units,

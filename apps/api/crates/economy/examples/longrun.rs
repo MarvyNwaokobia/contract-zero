@@ -42,4 +42,7 @@ fn main() {
         }
     }
     println!("raids {raids}, ticks with an empty board {empty_board_ticks} of {}", days * TICKS_PER_DAY);
+    let kinds = |k: OpKind| w.bounties.values().filter(|b| b.kind == k).count();
+    let seized = w.convoys.values().filter(|c| matches!(c.status, ConvoyStatus::Seized { .. })).count();
+    println!("contracts: raid {} sabotage {} recovery {}; caravans seized {seized}", kinds(OpKind::Raid), kinds(OpKind::Sabotage), kinds(OpKind::Recovery));
 }

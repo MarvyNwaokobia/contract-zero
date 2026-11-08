@@ -379,7 +379,7 @@ impl AuthService {
         let res = Transaction::construct(r.account.clone(), receiver)
             .add_actions(actions)
             .with_signer(r.signer.clone())
-            .send_to_testnet()
+            .send_to(&super::near::network(&self.rpc_url).map_err(AuthError::Unavailable)?)
             .await
             .map_err(|e| AuthError::Unavailable(format!("relay send failed: {e}")))?;
         let full = res.into_full().ok_or_else(|| AuthError::Unavailable("relay: transaction still pending".into()))?;

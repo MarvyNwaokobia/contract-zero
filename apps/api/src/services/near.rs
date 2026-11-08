@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use near_api::types::{AccountId, NearGas, NearToken};
-use near_api::{Contract, Signer};
+use near_api::{Contract, NetworkConfig, RPCEndpoint, RetryMethod, Signer};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
@@ -61,11 +61,22 @@ pub struct NearClient {
     /// The NEP-245 ledger (cz-assets) that balances are read from.
     pub assets: AccountId,
     rpc_url: String,
+    network: NetworkConfig,
     accounts: HashMap<Role, AccountId>,
     signers: HashMap<Role, Arc<Signer>>,
     http: reqwest::Client,
     /// One transaction at a time per signer keeps nonces in order.
     locks: HashMap<Role, Arc<Mutex<()>>>,
+}
+
+/// The network config for sending, on the SAME RPC endpoint we read and verify with
+/// (NEAR_RPC_URL), with patient retries: a few seconds of RPC trouble should delay a
+/// settlement, not fail it.
+pub fn network(rpc_url: &str) -> Result<NetworkConfig, String> {
+    let mut ep = RPCEndpoint::new(rpc_url.parse().map_err(|e| format!("NEAR_RPC_URL: {e}"))?);
+    ep.retries = 8;
+    ep.retry_method = RetryMethod::ExponentialBackoff { initial_sleep: std::time::Duration::from_millis(500), factor: 2 };
+    Ok(NetworkConfig { rpc_endpoints: vec![ep], ..NetworkConfig::testnet() })
 }
 
 pub fn explorer_tx(hash: &str) -> String {
@@ -102,7 +113,8 @@ impl NearClient {
             locks.insert(role, Arc::new(Mutex::new(())));
         }
         let rpc_url = std::env::var("NEAR_RPC_URL").unwrap_or_else(|_| "https://rpc.testnet.fastnear.com".into());
-        Ok(Some(Self { contract, assets, rpc_url, accounts, signers, http: reqwest::Client::new(), locks }))
+        let network = network(&rpc_url)?;
+        Ok(Some(Self { contract, assets, rpc_url, network, accounts, signers, http: reqwest::Client::new(), locks }))
     }
 
     pub fn account(&self, role: Role) -> &AccountId {
@@ -119,7 +131,7 @@ impl NearClient {
             .gas(NearGas::from_tgas(100))
             .deposit(NearToken::from_yoctonear(deposit_yocto))
             .with_signer(signer_id.clone(), self.signers[&role].clone())
-            .send_to_testnet()
+            .send_to(&self.network)
             .await
             .map_err(|e| format!("{method}: send failed: {e}"))?;
         let full = result.into_full().ok_or_else(|| format!("{method}: transaction still pending"))?;

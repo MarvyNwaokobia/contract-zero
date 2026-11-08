@@ -40,7 +40,11 @@ export interface GuardPlan {
   reinforce_every_secs_x100: number;
 }
 
+export type OpKind = 'raid' | 'sabotage' | 'recovery';
+
 export interface ConvoyContract {
+  /** What the operation is (default raid). */
+  kind?: OpKind;
   /** Stable raid id; also the default seed source. */
   id: string;
   /** Who is paying a bounty on this depot, if anyone. */
@@ -173,4 +177,68 @@ export function buildConvoyMission(c: ConvoyContract, gun: GunId = 'assault_rifl
     ],
     attachments: night ? ['nvg'] : undefined,
   };
+}
+
+/** Seconds to plant one charge. Matches PLANT_SECS on the server. */
+export const PLANT_SECS = 5;
+
+/**
+ * SABOTAGE: knock out the faction's production line. Two charges in two parts of the
+ * site, no need to clear anyone (stealth pays), then get clear. The server destroys
+ * the stock and halts that production for 36 hours on success.
+ */
+export function buildSabotageMission(c: ConvoyContract, gun: GunId = 'assault_rifle' as GunId): Mission {
+  const base = buildConvoyMission(c, gun);
+  const lv = LEVELS[base.level!];
+  const p = lv.points;
+  const night = lv.id === 'blacksite';
+  const label = RESOURCE_LABEL[c.cargo.resource].toLowerCase();
+  const esc = escortsFor(c);
+  return {
+    ...base,
+    id: `sabotage-${c.id}`,
+    name: night ? 'SABOTAGE · BLACKSITE' : 'SABOTAGE · DUSTLINE DEPOT',
+    brief: `plant two charges · knock out ${c.target}'s ${label} production · get clear`,
+    story: `${c.issuer ?? 'A sponsor'} wants ${c.target}'s ${label} line down. Plant one charge ${night ? 'on the APC motor bay' : 'at the fuel depot'} and one ${night ? 'in the server room' : 'on the munitions line inside the warehouse'}. You don't have to fight them all, just get out before they work out what you did.`,
+    objectives: [
+      { text: night ? 'BREACH THE COURTYARD' : 'HIT THE MOTOR POOL', kind: 'reach', pos: p.entry, activateRoom: 1 },
+      { text: night ? 'PLANT CHARGE · MOTOR BAY' : 'PLANT CHARGE · FUEL DEPOT', kind: 'defend', pos: p.charges[0], holdSecs: PLANT_SECS },
+      { text: night ? 'GET INSIDE' : 'CROSS INTO THE YARD', kind: 'reach', pos: p.push, activateRoom: 2 },
+      { text: night ? 'PLANT CHARGE · SERVER ROOM' : 'PLANT CHARGE · MUNITIONS LINE', kind: 'defend', pos: p.charges[1], holdSecs: PLANT_SECS, reinforceRoom: 2, reinforceEvery: esc.reinforceEvery, reinforceCount: esc.reinforceCount },
+      { text: 'GET CLEAR', kind: 'reach', pos: p.extract },
+    ],
+  };
+}
+
+/**
+ * RECOVERY: a faction seized a merchant caravan; bring the cargo back to its owner.
+ * The cargo sits somewhere else on the site, has to be secured under fire, and is
+ * handed over to the owner's people, not walked out the way you came.
+ */
+export function buildRecoveryMission(c: ConvoyContract, gun: GunId = 'assault_rifle' as GunId): Mission {
+  const base = buildConvoyMission(c, gun);
+  const lv = LEVELS[base.level!];
+  const p = lv.points;
+  const night = lv.id === 'blacksite';
+  const label = RESOURCE_LABEL[c.cargo.resource];
+  const esc = escortsFor(c);
+  const owner = c.issuer ?? 'the owner';
+  return {
+    ...base,
+    id: `recovery-${c.id}`,
+    name: night ? 'RECOVERY · BLACKSITE' : 'RECOVERY · DUSTLINE DEPOT',
+    brief: `find ${owner}'s seized ${label.toLowerCase()} · secure it · hand it over`,
+    story: `${c.target} took ${owner}'s caravan on the road: ${c.cargo.units} units of ${label.toLowerCase()}, now held ${night ? 'in the control room' : 'in the container yard'}. ${owner} pays when it is back in their hands${night ? ' at the gate' : ', at their truck by the east fence'}.`,
+    objectives: [
+      { text: night ? 'BREACH THE COURTYARD' : 'HIT THE MOTOR POOL', kind: 'reach', pos: p.entry, activateRoom: 1 },
+      { text: night ? 'GET INSIDE' : 'CROSS INTO THE YARD', kind: 'reach', pos: p.push, activateRoom: 2 },
+      { text: `SECURE THE ${label}`, kind: 'defend', pos: p.cache, holdSecs: loadSeconds(c.cargo.units), reinforceRoom: 2, reinforceEvery: esc.reinforceEvery, reinforceCount: esc.reinforceCount },
+      { text: `DELIVER TO ${owner.toUpperCase()}`, kind: 'reach', pos: p.handover },
+    ],
+  };
+}
+
+/** The mission for any operation kind. */
+export function buildOperationMission(c: ConvoyContract, gun?: GunId): Mission {
+  return c.kind === 'sabotage' ? buildSabotageMission(c, gun) : c.kind === 'recovery' ? buildRecoveryMission(c, gun) : buildConvoyMission(c, gun);
 }

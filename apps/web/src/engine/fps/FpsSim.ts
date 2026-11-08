@@ -18,6 +18,7 @@
  */
 
 import { getGun, type GunId, type GunStats } from '../combat/GunStats';
+import { NavGrid, type NavBounds } from './nav';
 import {
   AMMO_CATALOG,
   resolveGunStats,
@@ -34,6 +35,10 @@ export type EnemyAI = 'hidden' | 'seek' | 'aim' | 'fire' | 'recover';
 
 /** A humanoid combatant. Head is a sphere, body an axis-aligned box. */
 export interface FpsEnemy {
+  /** Navigation (levels with `nav` only): the waypoints to the current goal. */
+  path?: [number, number][];
+  pathGoal?: [number, number];
+  pathAt?: number;
   id: number;
   x: number;
   z: number;
@@ -210,6 +215,12 @@ export interface FpsSimOptions {
   rng?: () => number;
   /** Sandbox respawns cleared enemies; a mission does not (default true). */
   respawnEnabled?: boolean;
+  /** Levels with real structure: enemies path-find within these bounds around the
+   *  colliders (built once from `cover`). Absent: the legacy straight-line steer. */
+  nav?: NavBounds;
+  /** How long a guard keeps hunting a last-known position before going back to its
+   *  post. Defaults to SEARCH_SECS (sized for single rooms); big levels need longer. */
+  searchSecs?: number;
 }
 
 /** A rescue op's hostage: a non-combatant who waits, then trails the player out. */
@@ -364,6 +375,9 @@ export class FpsSim {
   };
   private rng: () => number;
   private respawnEnabled: boolean;
+  /** Grid navigation on structured levels (null on authored rooms and endless). */
+  private nav: NavGrid | null = null;
+  private searchSecs: number;
   /** The rescue objective's hostage, or null on ordinary ops. */
   hostage: Hostage | null = null;
   /** The player's ground position, cached each step (hostage-follow, defend proximity). */
@@ -428,6 +442,11 @@ export class FpsSim {
     this.cover = opts.cover ?? [];
     this.rng = opts.rng ?? Math.random;
     this.respawnEnabled = opts.respawnEnabled ?? true;
+    if (opts.nav) {
+      this.nav = new NavGrid(opts.nav, this.cover, FPS_TUNING.ENEMY.BODY_R + 0.05, 0.5);
+      this.bounds = { ...opts.nav };
+    }
+    this.searchSecs = opts.searchSecs ?? FPS_TUNING.ENEMY.SEARCH_SECS;
     if (opts.hostage) this.hostage = { x: opts.hostage[0], z: opts.hostage[1], spawn: [opts.hostage[0], opts.hostage[1]], rescued: false };
     for (const e of opts.enemies) this.addEnemy(e);
   }
@@ -1036,7 +1055,7 @@ export class FpsSim {
       // these and not tx/tz — an enemy that reads the real position while it cannot
       // see its target is an enemy you cannot hide from, which is what this used to
       // be: it faced you through walls and walked straight to you with its eyes shut.
-      const hunting = e.seenAt > 0 && this.time - e.seenAt < E.SEARCH_SECS;
+      const hunting = e.seenAt > 0 && this.time - e.seenAt < this.searchSecs;
 
       // Watch where you believe he is. Having given up, that means watching the last
       // place you saw him from your post, which reads as a guard back on his arc.
@@ -1269,6 +1288,22 @@ export class FpsSim {
 
   private moveToward(e: FpsEnemy, px: number, pz: number, dt: number, speedMult = 1): void {
     const R = FPS_TUNING.ENEMY.BODY_R;
+    // On a structured level, walk the route rather than into the wall in between:
+    // steer at the next waypoint, re-planning when the goal moves or every 2 s.
+    if (this.nav) {
+      if (this.nav.segmentClear(e.x, e.z, px, pz)) {
+        e.path = undefined;
+      } else {
+        const stale = !e.path || !e.pathGoal || Math.hypot(e.pathGoal[0] - px, e.pathGoal[1] - pz) > 1 || this.time - (e.pathAt ?? -99) > 2;
+        if (stale) {
+          e.path = this.nav.findPath(e.x, e.z, px, pz) ?? [];
+          e.pathGoal = [px, pz];
+          e.pathAt = this.time;
+        }
+        while (e.path && e.path.length > 1 && Math.hypot(e.path[0][0] - e.x, e.path[0][1] - e.z) < 0.45) e.path.shift();
+        if (e.path && e.path.length) [px, pz] = e.path[0];
+      }
+    }
     const dx = px - e.x, dz = pz - e.z;
     const len = Math.hypot(dx, dz) || 1;
     const step = FPS_TUNING.ENEMY.MOVE_SPEED * speedMult * dt;

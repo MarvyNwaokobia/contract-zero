@@ -7,18 +7,20 @@
  * existing FPS engine. It is pure and seeded: the same contract always produces
  * the same mission, so the server can recompute exactly what the player faced.
  *
- * Flow on Layout B (entry → hall → convoy yard):
- *   1. INTERCEPT THE CONVOY  reach the hall door, wakes the forward escort
- *   2. CLEAR THE ESCORT      kill the hall escort
- *   3. PUSH TO THE YARD      reach the yard door, wakes the convoy guard
+ * The level comes from the contract's zone (fps/levels): DUSTLINE and REDYARD play
+ * the Dustline depot, BLACKSITE the night facility. Flow on either:
+ *   1. BREACH                reach the entry point, wakes the outer guard (room 1)
+ *   2. CLEAR                 kill the outer guard
+ *   3. PUSH IN               reach the inner threshold, wakes the inner guard (room 2)
  *   4. LOAD THE CARGO        hold the cargo point while reinforcements come
- *   5. EXTRACT WITH CARGO    walk the cargo back out to the entry
+ *   5. EXTRACT WITH CARGO    walk the cargo back out
  */
 
 import type { CoverBox, EnemySpec } from './index';
 import type { GunId } from '../combat/GunStats';
-import { LAYOUT_B, type Mission } from './campaign';
+import type { Mission } from './campaign';
 import { mulberry32 } from './endless';
+import { LEVELS, levelForZone, type LevelDef, type Rect } from './levels';
 
 export type Resource = 'ammo' | 'med' | 'fuel';
 export type ConvoyZone = 'DUSTLINE' | 'REDYARD' | 'BLACKSITE';
@@ -63,22 +65,8 @@ export const RESOURCE_LABEL: Record<Resource, string> = {
   fuel: 'FUEL',
 };
 
-/** Playable-space bounds of Layout B's two rooms (inside the walls, off the dividers). */
-const ROOM_BOUNDS: Record<1 | 2, { x: [number, number]; z: [number, number] }> = {
-  1: { x: [-8.6, 8.6], z: [-4.6, 4.6] },
-  2: { x: [-8.6, 8.6], z: [-16.6, -7.4] },
-};
-
-/** Two parked trucks plus cargo crates in the yard (replace Layout B's room-2 cover). */
-const YARD_COVER: CoverBox[] = [
-  { x: -5, z: -11.5, w: 2.4, d: 5.2, h: 2.2 },  // truck, west
-  { x: 5.5, z: -13, w: 2.4, d: 5.2, h: 2.2 },   // truck, east (clear of the x=3..7 door)
-  { x: 0.8, z: -14.5, w: 1.2, d: 1.2, h: 1.1 }, // cargo crates
-  { x: -1.4, z: -9, w: 1.4, d: 1.0, h: 1.1 },
-];
-
-/** Where the player stands to load the cargo. */
-export const CARGO_POINT: [number, number] = [0, -11.5];
+/** The depot cargo point (kept for callers that predate levels). */
+export const CARGO_POINT: [number, number] = LEVELS.dustline_depot.points.cargo;
 
 export const clampDefense = (d: number): number => Math.min(5, Math.max(1, Math.round(d)));
 
@@ -99,20 +87,20 @@ export function loadSeconds(units: number): number {
   return Math.min(20, Math.max(8, Math.round(8 + units / 25)));
 }
 
-function overlapsCover(x: number, z: number, cover: CoverBox[], margin: number): boolean {
+function overlapsCover(x: number, z: number, cover: readonly CoverBox[], margin: number): boolean {
   return cover.some((c) => Math.abs(x - c.x) < c.w / 2 + margin && Math.abs(z - c.z) < c.d / 2 + margin);
 }
 
-/** Seeded escort placement inside a room, clear of cover and of each other. Each
- *  entry of `loadouts` is one guard's damage multiplier (1 = rifle). */
-function placeEscorts(room: 1 | 2, loadouts: number[], hp: number, cover: CoverBox[], rng: () => number): EnemySpec[] {
-  const b = ROOM_BOUNDS[room];
+/** Seeded guard placement in a room's zones, clear of all geometry and of each
+ *  other. Each entry of `loadouts` is one guard's damage multiplier (1 = rifle). */
+function placeEscorts(room: 1 | 2, zones: readonly Rect[], loadouts: number[], hp: number, geometry: readonly CoverBox[], rng: () => number): EnemySpec[] {
   const out: EnemySpec[] = [];
-  for (let tries = 0; out.length < loadouts.length && tries < 400; tries++) {
+  for (let tries = 0; out.length < loadouts.length && tries < 800; tries++) {
+    const b = zones[Math.floor(rng() * zones.length)];
     const x = b.x[0] + rng() * (b.x[1] - b.x[0]);
     const z = b.z[0] + rng() * (b.z[1] - b.z[0]);
-    if (overlapsCover(x, z, cover, 1.0)) continue;
-    if (out.some((e) => Math.hypot(e.pos[0] - x, e.pos[1] - z) < 2.2)) continue;
+    if (overlapsCover(x, z, geometry, 1.0)) continue;
+    if (out.some((e) => Math.hypot(e.pos[0] - x, e.pos[1] - z) < 2.4)) continue;
     const dmgMult = loadouts[out.length];
     out.push({ pos: [+x.toFixed(2), +z.toFixed(2)], room, hp, ...(dmgMult !== 1 ? { dmgMult } : {}) });
   }
@@ -148,36 +136,41 @@ export function escortsFor(c: ConvoyContract) {
 export function buildConvoyMission(c: ConvoyContract, gun: GunId = 'assault_rifle' as GunId): Mission {
   const esc = escortsFor(c);
   const rng = mulberry32(c.seed >>> 0);
-  const cover = [...LAYOUT_B.cover.filter((k) => k.z > -6), ...YARD_COVER];
   const label = RESOURCE_LABEL[c.cargo.resource];
   const zone = c.zone ?? 'DUSTLINE';
-  const o = LAYOUT_B.obj;
+  const lv: LevelDef = LEVELS[levelForZone(zone)];
+  const p = lv.points;
+  const geometry = [...lv.walls, ...lv.cover];
+  const night = lv.id === 'blacksite';
 
   return {
     id: `contract-${c.id}`,
     zone,
+    level: lv.id,
     op: c.issuer ? `CONTRACT · ${c.issuer.toUpperCase()}` : `RAID · ${c.target.toUpperCase()}`,
-    name: `${label} CONVOY`,
-    brief: `raid ${c.target}'s depot · load ${c.cargo.units} ${label.toLowerCase()} · extract`,
-    story: `${c.target} has ${c.cargo.units} units of ${label.toLowerCase()} staged in the depot yard under ${esc.hall.length + esc.yard.length} guards.${c.issuer ? ` ${c.issuer} is paying a bounty on it.` : ''} Load it and walk it out.`,
+    name: night ? `${label} · BLACKSITE` : `${label} · DUSTLINE DEPOT`,
+    brief: `raid ${c.target}'s ${night ? 'facility' : 'depot'} · load ${c.cargo.units} ${label.toLowerCase()} · extract`,
+    story: night
+      ? `${c.target} moved ${c.cargo.units} units of ${label.toLowerCase()} into the blacksite vault. ${esc.hall.length} guards hold the courtyard, ${esc.yard.length} the facility.${c.issuer ? ` ${c.issuer} is paying a bounty on it.` : ''} Get in, load it, walk it out.`
+      : `${c.target} has ${c.cargo.units} units of ${label.toLowerCase()} staged in the depot warehouse. ${esc.hall.length} guards on the motor pool, ${esc.yard.length} in the yard.${c.issuer ? ` ${c.issuer} is paying a bounty on it.` : ''} Load it and drive it out the gate.`,
     gun,
-    start: LAYOUT_B.start,
-    walls: [...LAYOUT_B.walls],
-    cover,
+    start: lv.start,
+    walls: [...lv.walls],
+    cover: [...lv.cover],
     enemies: [
-      ...placeEscorts(1, esc.hall, esc.hp, cover, rng),
-      ...placeEscorts(2, esc.yard, esc.hp, cover, rng),
+      ...placeEscorts(1, lv.rooms[1], esc.hall, esc.hp, geometry, rng),
+      ...placeEscorts(2, lv.rooms[2], esc.yard, esc.hp, geometry, rng),
     ],
     objectives: [
-      { text: 'INTERCEPT THE CONVOY', kind: 'reach', pos: o.breach, activateRoom: 1 },
-      { text: 'CLEAR THE ESCORT', kind: 'clear', room: 1, pos: [o.breach[0], o.breach[1] - 4] },
-      { text: 'PUSH TO THE YARD', kind: 'reach', pos: o.push, activateRoom: 2 },
+      { text: night ? 'BREACH THE COURTYARD' : 'HIT THE MOTOR POOL', kind: 'reach', pos: p.entry, activateRoom: 1 },
+      { text: night ? 'CLEAR THE COURTYARD' : 'CLEAR THE MOTOR POOL', kind: 'clear', room: 1, pos: p.entry },
+      { text: night ? 'ENTER THE FACILITY' : 'CROSS INTO THE YARD', kind: 'reach', pos: p.push, activateRoom: 2 },
       {
-        text: `LOAD THE ${label}`, kind: 'defend', pos: CARGO_POINT, holdSecs: loadSeconds(c.cargo.units),
+        text: `LOAD THE ${label}`, kind: 'defend', pos: p.cargo, holdSecs: loadSeconds(c.cargo.units),
         reinforceRoom: 2, reinforceEvery: esc.reinforceEvery, reinforceCount: esc.reinforceCount,
       },
-      { text: 'EXTRACT WITH THE CARGO', kind: 'reach', pos: LAYOUT_B.start },
+      { text: 'EXTRACT WITH THE CARGO', kind: 'reach', pos: p.extract },
     ],
-    attachments: zone === 'BLACKSITE' ? ['nvg'] : undefined,
+    attachments: night ? ['nvg'] : undefined,
   };
 }

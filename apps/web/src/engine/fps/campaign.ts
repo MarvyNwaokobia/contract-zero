@@ -54,6 +54,9 @@ export interface Mission {
    *  never run out, so a run is one continuous session with no mission list. Drives
    *  both Campaign Endless and the Seasonal Campaign. */
   endless?: boolean;
+  /** A structured environment (fps/levels): its own geometry, art, lights and
+   *  navigation. Absent on the authored training compounds. */
+  level?: import('./levels').LevelId;
 }
 
 /** Survival escalation: how many attackers and how tough, by 1-based wave. */
@@ -100,9 +103,9 @@ export const ZONE_THEMES: Record<string, ZoneTheme> = {
   // BLACKSITE — night, but a readable night: deep blue moonlight, not pitch black.
   // NVG lifts it further; only the blackout op leans all the way into the dark.
   'BLACKSITE': {
-    bg: '#0d1626', fog: ['#101c34', 18, 58], hemi: ['#617fb2', '#10131e', 0.46],
-    sun: { color: '#93aade', intensity: 1.0 }, fill: { color: '#6a55d0', intensity: 0.5 },
-    ambient: 0.24, practical: '#9a6bff', practicalIntensity: 2.2, floorTint: '#5c5c68', wallTint: '#545660',
+    bg: '#0b1320', fog: ['#0e1828', 18, 70], hemi: ['#5f7ea8', '#0e1116', 0.5],
+    sun: { color: '#9fb6dc', intensity: 1.0 }, fill: { color: '#4f6f9a', intensity: 0.45 },
+    ambient: 0.26, practical: '#cfe0ff', practicalIntensity: 2.0, floorTint: '#5d6066', wallTint: '#545660',
     sky: { top: '#0a1122', bottom: '#1e2f4e' },
   },
   // SURVIVAL — a stark, red-lit kill-house for the endless mode.

@@ -46,6 +46,7 @@ function Boxes({ items, material, castShadow = false }: { items: number[][]; mat
       ref.current!.setMatrixAt(i, m)
     })
     ref.current!.instanceMatrix.needsUpdate = true
+    ref.current!.computeBoundingSphere()
   }, [items])
   return (
     <instancedMesh ref={ref} args={[undefined, undefined, items.length]} material={material} castShadow={castShadow} receiveShadow>

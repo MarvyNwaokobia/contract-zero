@@ -26,6 +26,8 @@ import { FpsAudio } from '../audio';
 import { computeEdgeArrow } from '../verb/threatArrow';
 import { useGunPrototypes, ALL_GUN_IDS, GUN_LENGTH } from './gunModels';
 import { OperatorRig, type OperatorApi } from './OperatorRig';
+import { LEVELS } from '../fps/levels';
+import { LevelArt } from './LevelArt';
 import { CAMPAIGN, CAMPAIGN_KEY, PROGRESS_KEY, ZONE_THEMES, themeForMission, SURVIVAL_MISSION, GAUNTLET_MISSION, ENDLESS_MISSION, SEASONAL_MISSION, survivalWaveCount, survivalWaveHp, gauntletWaveCount, gauntletWaveHp, type Mission } from '../fps/campaign';
 import {
   buildChain, generateRoom, entryCap, spawnPointFor, zForWaveStart, firstRoomOfWave, roomsForWave, ROOM_W,
@@ -620,8 +622,12 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
   // per-frame loop below already re-reads it, so they pick up new geometry for free.
   // The clutter hugging the walls. Authored missions only — survival and endless
   // don't dress their rooms.
+  // A structured level (fps/levels) brings its own geometry and art.
+  const LEVEL = mission.level ? LEVELS[mission.level] : null;
+  const levelCx = LEVEL ? (LEVEL.bounds.minX + LEVEL.bounds.maxX) / 2 : 0;
+  const levelCz = LEVEL ? (LEVEL.bounds.minZ + LEVEL.bounds.maxZ) / 2 : 0;
   const DRESSING = useMemo(
-    () => (mission.survival || mission.endless ? [] : dressingFor(mission)),
+    () => (mission.survival || mission.endless || mission.level ? [] : dressingFor(mission)),
     [mission],
   );
   // Barrels, crates and sandbags are SOLID, alongside the walls and cover. They were
@@ -724,7 +730,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
   const sim = useMemo(() => {
     // The op's issued kit (e.g. NVG in the Rift) plus the player's chosen field kit.
     const attachments = [...new Set([...(mission.attachments ?? []), ...(fieldKit ?? [])])];
-    const s = new FpsSim({ loadout: LOADOUT, attachments, ammoId: equippedAmmo, gunMods: equippedMods, enemies: ENEMIES, cover: COLLIDERS, hostage: mission.hostage, respawnEnabled: false });
+    const s = new FpsSim({ loadout: LOADOUT, attachments, ammoId: equippedAmmo, gunMods: equippedMods, enemies: ENEMIES, cover: COLLIDERS, hostage: mission.hostage, respawnEnabled: false, nav: LEVEL?.bounds, searchSecs: LEVEL ? 20 : undefined });
     s.setAllActive(false); // rooms start dormant; breaching each one wakes it
     if (endless) {
       const seed = endlessOpts?.seed ?? 1;
@@ -1282,6 +1288,13 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
   // own. Endless needs that to walk the shadow frustum along with the player; every
   // other mode keeps the default origin aim, which is what the authored ops expect.
   useEffect(() => {
+    // A structured level aims the sun (and its shadow box) at the level's centre.
+    if (LEVEL && sunRef.current && sunTargetRef.current) {
+      sunTargetRef.current.position.set(levelCx, 0, levelCz);
+      sunTargetRef.current.updateMatrixWorld();
+      sunRef.current.target = sunTargetRef.current;
+      return;
+    }
     if (!endless || !sunRef.current || !sunTargetRef.current) return;
     sunRef.current.target = sunTargetRef.current;
     sunRef.current.updateMatrixWorld();
@@ -1340,6 +1353,8 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       };
     };
     w.__czWarp = (x: number, z: number) => { pos.current.set(x, EYE_STAND, z); };
+    w.__czLook = (y: number, p = 0) => { yaw.current = y; pitch.current = p; };
+    w.__czWakeAll = () => { sim.setRoomActive(1, true); sim.setRoomActive(2, true); };
     w.__czSkipBriefing = () => { briefingUntil.current = 0; };
     w.__czXp = () => ({ careerXp: careerXp.current, rank: rankForXp(careerXp.current), intoRank: xpIntoRank(careerXp.current) });
     w.__czStory = () => ({ fired: [...storyFired.current], queued: voQueue.current.length });
@@ -2598,6 +2613,11 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       const front = rooms.length ? rooms[rooms.length - 1].zFar : -1;
       cx = Math.max(-ENDLESS_HALF_W, Math.min(ENDLESS_HALF_W, cx));
       cz = Math.max(front + 0.5, Math.min(back - 0.2, cz));
+    } else if (LEVEL) {
+      // A structured level: its own bounds (its fences and walls do the real work).
+      const B = LEVEL.bounds;
+      cx = Math.max(B.minX + 0.4, Math.min(B.maxX - 0.4, cx));
+      cz = Math.max(B.minZ + 0.4, Math.min(B.maxZ - 0.4, cz));
     } else {
       // Arena bounds.
       cx = Math.max(-9.4, Math.min(9.4, cx));
@@ -3053,11 +3073,11 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       <hemisphereLight args={theme.hemi} />
       <directionalLight
         ref={sunRef}
-        position={[9, 16, 10]} intensity={theme.sun.intensity} color={theme.sun.color} castShadow={!minimal}
+        position={LEVEL ? [levelCx + 22, 34, levelCz + 26] : [9, 16, 10]} intensity={theme.sun.intensity} color={theme.sun.color} castShadow={!minimal}
         shadow-mapSize={[lightFx ? 1024 : 2048, lightFx ? 1024 : 2048]}
-        shadow-camera-left={-22} shadow-camera-right={22}
-        shadow-camera-top={22} shadow-camera-bottom={-22}
-        shadow-camera-far={70} shadow-bias={-0.0008}
+        shadow-camera-left={-(LEVEL?.shadowHalf ?? 22)} shadow-camera-right={LEVEL?.shadowHalf ?? 22}
+        shadow-camera-top={LEVEL?.shadowHalf ?? 22} shadow-camera-bottom={-(LEVEL?.shadowHalf ?? 22)}
+        shadow-camera-far={LEVEL ? 140 : 70} shadow-bias={-0.0008}
       />
       {/* The sun's aim point. Authored ops all fit inside the shadow camera's ±22
           box around the origin, but an endless run walks hundreds of metres past it,
@@ -3084,7 +3104,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
           geometry work did not fix a phone that was fill-bound rather than
           vertex-bound. Dropping these four leaves the two flash lights, which have to
           stay — they are the "someone fired" read. */}
-      {!endless && !minimal && <>
+      {!endless && !minimal && !LEVEL && <>
         <pointLight position={[0, 2.6, 12]} intensity={theme.practicalIntensity * 0.9} distance={9} decay={2} color={theme.practical} />
         <pointLight position={[0, 2.6, 4]} intensity={theme.practicalIntensity} distance={10} decay={2} color={theme.practical} />
         <pointLight position={[0, 2.6, -4]} intensity={theme.practicalIntensity} distance={10} decay={2} color={theme.practical} />
@@ -3094,8 +3114,8 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       {/* burned ground */}
       {/* endless rides this plane along under the player (see the endless flow), so
           the chain can run to -Z forever without an enormous floor */}
-      <mesh ref={floorRef} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-        <planeGeometry args={[FLOOR_W, endless ? ENDLESS_FLOOR_D : FLOOR_D]} />
+      <mesh ref={floorRef} rotation={[-Math.PI / 2, 0, 0]} position={LEVEL ? [levelCx, 0, levelCz] : undefined} receiveShadow>
+        <planeGeometry args={LEVEL ? [LEVEL.bounds.maxX - LEVEL.bounds.minX + 120, LEVEL.bounds.maxZ - LEVEL.bounds.minZ + 120] : [FLOOR_W, endless ? ENDLESS_FLOOR_D : FLOOR_D]} />
         {/* World-space texturing pins the ground to the WORLD, not to the plane, so
             the endless floor can jump along Z to follow the player without the
             texture visibly sliding under their feet. */}
@@ -3108,7 +3128,8 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
           off the FRONT of this list, which shifts every later index and would make
           React re-render every wall in the world on each room advance — a hitch per
           doorway. Keyed this way, the walls that didn't change keep their identity. */}
-      {LEVEL_WALLS.map((c, i) => (
+      {LEVEL && <LevelArt level={LEVEL} minimal={minimal} lit={mission.zone !== 'DUSTLINE'} />}
+      {!LEVEL && LEVEL_WALLS.map((c, i) => (
         <group key={`w${c.x}_${c.z}_${c.w}_${c.d}`}>
           {/* Every wall SHARES one unit cube and is scaled to size. Authoring a fresh
               boxGeometry per wall allocates and frees a GPU buffer per wall — fine for
@@ -3129,7 +3150,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       ))}
 
       {/* cover: scorched planking */}
-      {LEVEL_COVER.map((c) => (
+      {!LEVEL && LEVEL_COVER.map((c) => (
         <mesh key={`c${c.x}_${c.z}_${c.w}_${c.d}`} geometry={UNIT_BOX} position={[c.x, c.h / 2, c.z]} scale={[c.w, c.h, c.d]} castShadow receiveShadow>
           <primitive object={shellMaterials.plank} attach="material" />
         </mesh>
@@ -3266,6 +3287,14 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
           flavour; a playable frame rate is not. */}
       {minimal ? null : (lightFx || endless) ? (
         <EffectComposer multisampling={0}>
+          <ChromaticAberration offset={caOffset} radialModulation modulationOffset={0.35} blendFunction={BlendFunction.NORMAL} />
+          <Vignette darkness={0.5} offset={0.3} blendFunction={BlendFunction.NORMAL} />
+        </EffectComposer>
+      ) : LEVEL ? (
+        // Structured levels: bloom for the practicals, but no N8AO. Its normal pass
+        // re-renders a 60 m level every frame for contact shadows the sun map gives anyway.
+        <EffectComposer multisampling={0}>
+          {mission.zone !== 'DUSTLINE' ? <Bloom intensity={0.22} luminanceThreshold={0.85} luminanceSmoothing={0.2} mipmapBlur /> : <></>}
           <ChromaticAberration offset={caOffset} radialModulation modulationOffset={0.35} blendFunction={BlendFunction.NORMAL} />
           <Vignette darkness={0.5} offset={0.3} blendFunction={BlendFunction.NORMAL} />
         </EffectComposer>

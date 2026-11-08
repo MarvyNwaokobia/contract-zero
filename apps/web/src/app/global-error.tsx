@@ -63,7 +63,7 @@ export default function GlobalError({
               color: '#f4f3f7',
             }}
           >
-            VALOR
+            CONTRACT ZERO
           </div>
           <p style={{ marginTop: 18, fontSize: 15, lineHeight: 1.5, color: '#b7b4c0' }}>
             {reloading

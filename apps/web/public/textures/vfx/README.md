@@ -36,7 +36,7 @@ never can.
 
 Note on itch.io: most of the free "bullet impact" packs there are pixel-art
 sprite sheets (16x16/32x32, e.g. BDragon1727's Retro Impact packs) meant for 2D
-games — they read as cartoon next to Valor's PBR bodycam look. Kenney's pack is
+games — they read as cartoon next to the game's PBR bodycam look. Kenney's pack is
 the CC0 set that suits a 3D billboard, and it is on itch.io too. Anything richer
 than these (an animated impact flipbook, a real smoke sim sheet) would be a
 sprite-SHEET with frames, which the billboard shader would need a frame uniform

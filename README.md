@@ -1,25 +1,55 @@
 # CONTRACT ZERO
 
-A tactical extraction shooter in which autonomous NPC factions run real economies, settled on NEAR. Built for the NEAR Hackathon (November 2026), track **Games With Real Economies**.
+A first-person extraction shooter where the missions come from an economy, not a script. Two NPCs run it: a faction commander and an independent merchant. Both hold real inventories and treasuries, post bounties on each other's supply convoys, and react to every raid you pull off.
 
-> **Status:** early. This commit contains the inherited FPS engine only. The economy, agents, NEAR contracts and new screens are being built in the commits that follow.
+Built for the NEAR Hackathon (November 2026), track **Games With Real Economies**.
 
-## Inherited code
+## The loop
 
-CONTRACT ZERO is built on the FPS engine of **Valor** ([MarvyNwaokobia/Valor](https://github.com/MarvyNwaokobia/Valor)), a first-person shooter that runs on Celo and GoodDollar. Valor was built by Marvy Nwaokobia, who is building CONTRACT ZERO with Samuel Dahunsi.
+**Deploy → raid a convoy → extract → the economy shifts → the agents replan → new contracts appear.**
 
-- **The first commit, tagged `pre-hackathon`,** is Valor at upstream commit `b118eac`. It has been trimmed to the FPS engine: all Celo, GoodDollar and EVM wallet code, the Solidity contracts, the legacy melee game, PvP, social features and the mobile shells were removed. A minimal app shell and API skeleton were added so it builds. Valor's full development history (757 commits) stays public in the upstream repository.
-- **Everything after `pre-hackathon`** is CONTRACT ZERO work written during the hackathon. To see it, run `git diff pre-hackathon..HEAD`.
+1. **The convoys.** Ironveil Directorate runs fuel convoys, and Vex Exchange runs medical-supply caravans.
+2. **The contract.** When one side wants the other's cargo, it escrows a bounty on that convoy. That bounty is the contract you take.
+3. **The raid.** You fight through the escort, load the cargo under fire, and walk it out.
+4. **The settlement.** The bounty pays you, and the cargo goes to whoever posted the contract. The convoy's owner never receives it.
+5. **The fallout.** Ironveil falls short of fuel and has to buy it from Vex, whose prices respond to the shift in supply and demand. It also hires heavier escorts, so the next convoy fields more guards and they hit harder.
 
-What was kept, changed and removed is listed file by file in [docs/contract-zero/AUDIT.md](docs/contract-zero/AUDIT.md).
+## Status
 
-## Run the current build
+This is being built during the hackathon. What exists today:
+
+| Part | State |
+|---|---|
+| FPS engine: movement, gunplay, enemy AI, weapons, attachments, audio | **Working.** Playable at `/training` |
+| Convoy raid mission generated from a contract (`apps/web/src/engine/fps/convoy.ts`) | **Built and tested.** Not yet reachable from a page |
+| Deterministic economy: ledger, pricing, convoys, contracts, settlement (`apps/api/crates/economy`) | **Built and tested** |
+| Fallback agent policies for the commander and merchant | **Built and tested** |
+| Contract Board, Armory, Deployment, Extraction Results, War Room, Exchange | In progress |
+| NEAR contracts (NEP-245 items, treasury, settlement) on testnet | In progress |
+| Social login (FastAuth) | In progress |
+| LLM strategic planner (NEAR AI Cloud) with validated tool calls | In progress |
+
+## Architecture
+
+```text
+apps/web    Next.js 15 + React Three Fiber
+            └─ engine/fps    headless FPS sim, missions, convoy builder
+            └─ engine/scene  the 3D scene (ContractZeroScene)
+apps/api    Rust / Actix-web + Postgres
+            └─ crates/economy  the deterministic world (no I/O)
+```
+
+Combat AI is deterministic and runs in the client sim; no LLM is involved in a gunfight. The economy runs on the server, which is the only place mission outcomes are settled.
+
+The economy's formulas, sources and sinks are in [docs/contract-zero/ECONOMY.md](docs/contract-zero/ECONOMY.md).
+
+## Run it
 
 Requires Node 22+.
 
 ```bash
 npm install
-npm run dev --workspace=apps/web     # http://localhost:3000 → redirects to the FPS sandbox
+npm run dev --workspace=apps/web    # open http://localhost:3000, which goes to /training
 ```
 
 | Control | Action |
@@ -33,12 +63,29 @@ npm run dev --workspace=apps/web     # http://localhost:3000 → redirects to th
 | Q / E | Lean |
 | M | Mission menu |
 
+To try it: open `/training`, then press **M** to pick a practice operation. You should see a briefing, then the objective text at the top of the screen as you move through the compound.
+
 ## Tests
 
 ```bash
-cd apps/web && npx vitest run && npx tsc --noEmit
-cd apps/api && cargo test        # API skeleton; needs Rust stable
+cd apps/web && npx vitest run && npx tsc --noEmit    # FPS engine, missions, convoy builder
+cd apps/api && cargo test --workspace                # economy engine + API (Rust stable)
 ```
+
+The economy tests cover:
+- conservation of every asset over a simulated week
+- ledger replay and determinism
+- atomic batches
+- insufficient stock and credits
+- stale-quote races
+- escrow, refunds and bounty bounds
+- replayed settlements
+- authorization
+- the raid → replan loop
+
+## Prior work
+
+The FPS engine predates the hackathon. It is the team's own earlier work, imported as the first commit and tagged `pre-hackathon`. Everything after that tag was built during the hackathon: `git diff pre-hackathon..HEAD`.
 
 ## License
 

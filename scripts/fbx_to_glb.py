@@ -1,5 +1,5 @@
 """
-Valor — FBX to GLB batch converter
+FBX to GLB batch converter
 
 Run with Intel (x86_64) Blender on Intel Macs:
   /Applications/Blender.app/Contents/MacOS/Blender --background --python scripts/fbx_to_glb.py -- apps/web/public/characters/raw apps/web/public/characters/glb
@@ -53,7 +53,7 @@ CLASS_FILES = {
             'death':  'death.fbx',
         },
     },
-    # Valor doorkicker enemy (the plan slice 7b). Mixamo X Bot + the Slim Shooter
+    # The doorkicker enemy. Mixamo X Bot + the Slim Shooter
     # Pack rifle set. Clip names map 1:1 onto FpsSim's enemy AI states.
     'operator': {
         'character': 'xbot.fbx',

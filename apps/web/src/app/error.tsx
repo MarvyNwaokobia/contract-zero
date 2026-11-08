@@ -29,45 +29,11 @@ export default function AppError({
     if (chunk && !hardReloadForChunkError()) setReloading(false);
   }, [chunk]);
 
-  // This boundary used to swallow the error completely: players saw "Something
-  // broke", we saw nothing, and diagnosing it meant guessing at which of a dozen
-  // client paths threw on a phone we cannot attach a console to. Log it, and put
-  // a short identifier on screen so a screenshot carries the one detail that
-  // makes the report actionable.
+  // Log it, and put a short identifier on screen so a screenshot carries the one
+  // detail that makes a report actionable.
   useEffect(() => {
     // eslint-disable-next-line no-console
-    console.error('[valor] route error', { message: error.message, digest: error.digest, stack: error.stack });
-
-    // Send it. A console line only helps someone holding the phone, and these
-    // crashes happen to players on mobile with no inspector attached — which is
-    // exactly why this one went two rounds of diagnosis on symptoms alone.
-    //
-    // Best-effort in every direction: no await, failures swallowed. A reporter
-    // that can itself throw inside an error boundary would loop.
-    try {
-      const api = process.env.NEXT_PUBLIC_API_URL;
-      if (!api) return;
-      // The signed-in wallet, read straight from the persisted store rather than
-      // a hook — this component renders outside the app's providers.
-      let wallet: string | undefined;
-      try {
-        const raw = localStorage.getItem('valor-player');
-        wallet = raw ? JSON.parse(raw)?.state?.player?.wallet_address : undefined;
-      } catch { /* not worth failing a crash report over */ }
-
-      void fetch(`${api}/client-errors`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        keepalive: true, // survives the navigation if the player reloads immediately
-        body: JSON.stringify({
-          message: error.message,
-          stack: error.stack,
-          digest: error.digest,
-          url: window.location.href,
-          wallet_address: wallet,
-        }),
-      }).catch(() => {});
-    } catch { /* never let reporting break the error screen */ }
+    console.error('[contract-zero] route error', { message: error.message, digest: error.digest, stack: error.stack });
   }, [error]);
 
   return (
@@ -95,7 +61,7 @@ export default function AppError({
             color: '#f4f3f7',
           }}
         >
-          VALOR
+          CONTRACT ZERO
         </div>
         <p style={{ marginTop: 18, fontSize: 15, lineHeight: 1.5, color: '#b7b4c0' }}>
           {reloading

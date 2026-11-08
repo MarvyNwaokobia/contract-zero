@@ -1,6 +1,6 @@
 //! Startup migrations — apply pending schema changes automatically on boot.
 //!
-//! Design (inherited from Valor):
+//! Design:
 //!   • The .sql files are hand-written and IDEMPOTENT (every CREATE/ALTER/INDEX is guarded
 //!     with IF NOT EXISTS, every seed has ON CONFLICT), so they are deliberately re-runnable.
 //!     Applied files are tracked in `_schema_migrations` and each runs once, in a fixed

@@ -1,4 +1,4 @@
-// VO generation pipeline (CLONE_PLAN.md slice 5).
+// VO generation pipeline.
 //
 // Reads the presence-line manifest and synthesizes one mp3 per line into
 // public/vo/{id}.mp3 via ElevenLabs. AudioDirector.playVo() picks the files
@@ -8,7 +8,7 @@
 //   ELEVENLABS_API_KEY=sk_... node scripts/generate-vo.mjs
 //
 // Optional per-speaker voice overrides (browse voices at elevenlabs.io):
-//   VOICE_EMBER=<voice_id> VOICE_VALOR=<voice_id> VOICE_CINDER=<voice_id>
+//   VOICE_HANDLER=<voice_id> VOICE_IRONVEIL=<voice_id> VOICE_VEX=<voice_id>
 //
 // Existing files are skipped, so re-running only generates new lines.
 
@@ -29,9 +29,9 @@ if (!API_KEY) {
 
 // Default voice ids are ElevenLabs premades; override per speaker via env.
 const VOICES = {
-  ember: process.env.VOICE_EMBER ?? 'EXAVITQu4vr4xnSDxMaL',  // "Sarah" — warm, close
-  valor: process.env.VOICE_VALOR ?? 'onwK4e9ZLuTAKqWW03F9',  // "Daniel" — low, unhurried
-  cinder: process.env.VOICE_CINDER ?? 'TX3LPaxmHKxFdv7VOQHJ', // "Liam" — rough edge
+  handler: process.env.VOICE_HANDLER ?? 'EXAVITQu4vr4xnSDxMaL',   // "Sarah": calm, close
+  ironveil: process.env.VOICE_IRONVEIL ?? 'onwK4e9ZLuTAKqWW03F9',  // "Daniel": low, unhurried
+  vex: process.env.VOICE_VEX ?? 'TX3LPaxmHKxFdv7VOQHJ',            // "Liam": a trader's edge
 };
 
 // Tolerant extraction of { id, speaker, text } from the TS manifest.

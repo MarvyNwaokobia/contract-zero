@@ -7,7 +7,7 @@ import * as THREE from 'three';
  * Load a Poly Haven (CC0) PBR set as diffuse + normal + roughness.
  *
  * Same convention AshfallCinematic uses: `{base}_diff_1k.jpg`, `{base}_nor_gl_1k.jpg`,
- * `{base}_rough_1k.jpg` under /textures/ashfall. Suspends while loading, so the
+ * `{base}_rough_1k.jpg` under /textures/dustline. Suspends while loading, so the
  * caller must sit under a <Suspense>.
  *
  * NOTE: drei caches textures by URL, so two calls with the same `base` share the
@@ -21,7 +21,7 @@ import * as THREE from 'three';
  * rebuilds it every render too.
  */
 
-const T = '/textures/ashfall';
+const T = '/textures/dustline';
 
 export type PbrMaps = {
   map: THREE.Texture;

@@ -1,12 +1,12 @@
 @import "tailwindcss";
 
 @theme {
-  --color-valor-gold: #eab308;
-  --color-valor-gold-light: #fde047;
-  --color-valor-dark: #0a0a0f;
-  --color-valor-surface: #12121a;
-  --color-valor-surface-2: #1a1a28;
-  --color-valor-border: #2a2a3a;
+  --color-cz-gold: #eab308;
+  --color-cz-gold-light: #fde047;
+  --color-cz-dark: #0a0a0f;
+  --color-cz-surface: #12121a;
+  --color-cz-surface-2: #1a1a28;
+  --color-cz-border: #2a2a3a;
 
   --color-rank-bronze: #cd7f32;
   --color-rank-silver: #c0c0c0;
@@ -53,7 +53,7 @@ html {
 }
 
 body {
-  background-color: var(--color-valor-dark);
+  background-color: var(--color-cz-dark);
   color: #e2e8f0;
   font-family: var(--font-family-body);
   -webkit-font-smoothing: antialiased;
@@ -65,9 +65,9 @@ body {
 }
 
 ::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: var(--color-valor-dark); }
-::-webkit-scrollbar-thumb { background: var(--color-valor-border); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--color-valor-gold); }
+::-webkit-scrollbar-track { background: var(--color-cz-dark); }
+::-webkit-scrollbar-thumb { background: var(--color-cz-border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-cz-gold); }
 
 /* ── Game keyframe animations ───────────────────────────────────── */
 

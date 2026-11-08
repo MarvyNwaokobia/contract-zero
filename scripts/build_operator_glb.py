@@ -1,5 +1,5 @@
 """
-Valor — build the Valor operator rig (the plan slice 7b)
+Build the operator rig
 
 The Slim Shooter Pack's `X Bot.fbx` is legacy FBX 6100, which Blender cannot
 import. Every *animation* in the pack is modern FBX 7700 and imports fine, and

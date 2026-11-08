@@ -1,5 +1,5 @@
 """
-Valor - render a quick preview thumbnail of each FBX so a human (or Claude) can
+Render a quick preview thumbnail of each FBX so a human (or Claude) can
 see what a character actually looks like instead of guessing from its filename.
 
 Mixamo downloads are named after whatever you typed in the search box, which is

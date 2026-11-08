@@ -1,38 +1,21 @@
 # Third-party asset credits
 
-## Arena / stage 3D models (`public/models/environments/`)
+## Textures
 
-Wired into the in-game arena toggle (see `engine/scene/arenas/ModelArena.tsx`).
-Full per-model license text lives next to each model in its `license.txt`.
-
-- **Battle arena** (`battle_arena`) — "battle arena" by **3D Arena**
-  (https://sketchfab.com/Jamesaalam) — licensed under **CC-BY-4.0**.
-  This work is based on "battle arena"
-  (https://sketchfab.com/3d-models/battle-arena-ac1432c2970045a0a0e92a10b288fe5b)
-  by 3D Arena licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/).
-
-- **Lava fighting stage** (`lava_arena`) — "Low Poly Lava Fighting Arena/Stage" by
-  **Umar** (https://sketchfab.com/123umar123) — licensed under **CC-BY-4.0**.
-  This work is based on "Low Poly Lava Fighting Arena/Stage"
-  (https://sketchfab.com/3d-models/low-poly-lava-fighting-arenastage-6c9918fa61014829ab10048aa6c3171b)
-  by Umar licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/).
-
-- **Sci-fi fighting stage** (`scifi_stage`) — "Low Poly Sci-fi Fighting Stage" by
-  **Umar** (https://sketchfab.com/123umar123) — Sketchfab Standard license.
-
-- **RPG environment** (`rpg_environment`, not currently wired in) — "RPG Project
-  environment (Lowpoly)" by **Bunnyyyy** (https://sketchfab.com/bunnylovesu) — CC-BY-4.0.
+- **Zone PBR textures** (`public/textures/dustline/`): [Poly Haven](https://polyhaven.com), **CC0**. Per-map sources are in that folder's README.
+- **Impact VFX sprites** (`public/textures/vfx/`): [Kenney Particle Pack](https://kenney.nl/assets/particle-pack), **CC0**.
 
 ## Weapons (`public/models/guns/`)
 
-- **Sci-fi blaster** (`blaster.glb`, in-hand gun) and **rifle** (`rifle.glb`, spare) —
-  from [Poly Pizza](https://poly.pizza), **CC0** (no attribution required).
+- **Sci-fi blaster** (`blaster.glb`) and **rifle** (`rifle.glb`): [Poly Pizza](https://poly.pizza), **CC0**.
 
-## Lighting
+## Characters (`public/characters/glb/operator.glb`)
 
-- **venice_sunset** HDRI (`public/hdri/venice_sunset_1k.hdr`) — from
-  [Poly Haven](https://polyhaven.com/a/venice_sunset), **CC0** (no attribution required).
+- **Operator rig:** a skinned body with rifle animation clips from Adobe [Mixamo](https://www.mixamo.com), assembled by `scripts/build_operator_glb.py`. Mixamo characters and animations are free to use in games under Adobe's terms.
 
-> CC-BY-4.0 requires visible credit wherever the work is shared. The notices above
-> (and each model's `license.txt`) satisfy attribution for the repo; surface an
-> in-app credits screen before a public launch.
+## Source not yet recorded
+
+These shipped files have no recorded source. Confirm each one's source and license before a public release:
+
+- `public/models/guns/sidearm.glb`, `smg.glb`, `marksman.glb`
+- `public/sounds/fps/*.mp3` and `public/sounds/combat/*.mp3` (the numeric suffixes look like stock-library IDs)

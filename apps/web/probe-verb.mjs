@@ -1,4 +1,4 @@
-// Runtime probe for the FPS sandbox (/dev/verb): loads the scene in headless Chromium
+// Runtime probe for the training route (/training): loads the scene in headless Chromium
 // with software GL, skips the briefing, then holds W and fires, and reports what changed.
 // Usage: node probe-verb.mjs [outDir]
 import { chromium } from '@playwright/test';
@@ -15,7 +15,7 @@ page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + 
 const missing = [];
 page.on('response', (r) => { if (r.status() >= 400) missing.push(`${r.status()} ${new URL(r.url()).pathname}`); });
 
-await page.goto('http://localhost:3100/dev/verb', { waitUntil: 'domcontentloaded', timeout: 180_000 });
+await page.goto('http://localhost:3100/training', { waitUntil: 'domcontentloaded', timeout: 180_000 });
 await page.waitForSelector('canvas', { timeout: 180_000 });
 await page.waitForFunction(() => typeof window.__czMission === 'function', null, { timeout: 120_000 });
 await page.waitForTimeout(2000);

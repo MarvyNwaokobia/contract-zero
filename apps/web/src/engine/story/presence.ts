@@ -45,7 +45,13 @@ export type PresenceTrigger =
   | 'zoneClear'      // a boss is down
   | 'zoneClearTag'   // the follow-up beat after zoneClear
   | 'bossEscalate'   // a boss dropped past half (phase 2)
-  | 'bossEnrage';    // a boss is nearly down (phase 3)
+  | 'bossEnrage'     // a boss is nearly down (phase 3)
+  | 'cargoSecured'   // first cargo case in hand (or the seized case)
+  | 'chargePlaced'   // first sabotage charge set
+  | 'detonation'     // the charges blow: the target reacts
+  | 'extractCalled'  // extraction called in: hold the zone
+  | 'extractBroken'  // left the zone mid-countdown
+  | 'extractDone';   // out
 
 export const SPEAKER_META: Record<Speaker, { name: string; color: string }> = {
   handler: { name: 'KESTREL', color: '#8fd6e8' },
@@ -55,6 +61,13 @@ export const SPEAKER_META: Record<Speaker, { name: string; color: string }> = {
 };
 
 export const PRESENCE_LINES: PresenceLine[] = [
+  // Field beats. Ids start "dyn-" so the audio layer plays them as radio, never a recording.
+  { id: 'dyn-default-cargo', speaker: 'handler', trigger: 'cargoSecured', text: "That's one. Carry what you can and get to the extraction zone." },
+  { id: 'dyn-default-charge', speaker: 'handler', trigger: 'chargePlaced', text: 'Charge set. One more, then we light it.' },
+  { id: 'dyn-default-boom', speaker: 'vanguard', trigger: 'detonation', text: 'Fire on the line! Seal the site. Nobody leaves.' },
+  { id: 'dyn-default-exfil', speaker: 'handler', trigger: 'extractCalled', text: 'Extraction is inbound. Hold the zone until it lands.' },
+  { id: 'dyn-default-exfil-broken', speaker: 'handler', trigger: 'extractBroken', text: "You've left the zone. They won't wait for you. Get back in." },
+  { id: 'dyn-default-exfil-done', speaker: 'handler', trigger: 'extractDone', text: "You're out. Nice work." },
   { id: 'handler-op-start', speaker: 'handler', trigger: 'opStart', text: "Contract's live. The cargo is in the yard past the hall. Load it, walk it out, get paid." },
   { id: 'handler-op-breach', speaker: 'handler', trigger: 'opBreach', text: "You're in. Escort's awake now, so make it quick." },
   { id: 'handler-troops-cleared', speaker: 'handler', trigger: 'troopsCleared', text: 'Forward escort is down. Someone just keyed in on the convoy channel.' },

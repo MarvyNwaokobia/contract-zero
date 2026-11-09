@@ -291,3 +291,94 @@ The setting, cast and writing rules are in `docs/contract-zero/STORY.md`.
    - The worker no longer overwrites a superseded row.
 
 After the full realign the batch confirmed on its first attempt, and the queue drained from about 140 to 0 in under a minute.
+
+### Physical operations: sites, conditions, objects and extraction (2026-11-09)
+
+Before Milestone 8, a playtest found that cargo, sabotage, recovery and extraction were abstract points and timers, and that the world clock moved every contract between the Depot and the Blacksite. Full detail is in `MISSIONS.md`.
+
+**Built:**
+- **Sites** (`site.rs`).
+  - Every operation is bound to a place the target holds: Dustline Depot, Blacksite, or Cinder Yard (Ashen; shares the depot map for now).
+  - The site is chosen by owner, resource and purpose, and is stored on the plan and the session.
+  - The world view and the board list each site with its production lines and when a sabotaged line comes back.
+- **The clock sets conditions, not places.**
+  - Day, dusk and night change the lighting, guard sight (30 / 26 / 20 m), guard accuracy, reinforcement pace and night-vision issue at the same site.
+  - The Hub, the board and the contract intel show the hour, the phase, the next change and the accelerated rate.
+- **Contract intel before the loadout.**
+  - Shows the site, the conditions, a map from the level's real geometry, the objectives, the resistance the faction could arm, the rewards (with the bounty rule) and what you go in with.
+  - New order: Accept → briefing → loadout.
+  - The loadout is checked against the ledger again (`POST /missions/{session}/loadout`).
+- **One interaction system for every object** (`fps/field.ts`, `FieldProps.tsx`):
+  - E to interact, with the proximity, view-cone and line-of-sight checks, prompts, hold bars and interruptions described in `MISSIONS.md`;
+  - ammunition crates, medical cases and dropped magazines;
+  - cargo cases split from the manifest, the seized case, and charges on named targets;
+  - the extraction call.
+  - Lean right moved from E to G. Touch screens get USE and MED buttons.
+- **Ammunition and dressings.**
+  - Finite reserve ammunition by round type, with reloads drawing from it.
+  - Field dressings: H applies one, and you can carry 3.
+  - The arena modes keep unlimited ammunition.
+- **Cargo.**
+  - 3 cases at most. Each costs 10% movement speed; the seized case costs 20%.
+  - A HUD shows what you carry.
+  - Going down drops it where you fell.
+- **Operation types.**
+  - Raid: secure, then extract.
+  - Sabotage: plant twice, a 12 s fuse, then a blast with fire, scorch, alarm, radio and reinforcements, then extract.
+  - Recovery: retrieve the case, then hand it over at the owner's truck.
+- **Extraction zones.**
+  - What marks them: a ground ring, a countdown arc and large timer, flares, smoke, the vehicle or a painted landing zone, and radio calls.
+  - How they run: E to call it, 8 s inside the zone. Leaving pauses the count and bleeds it back; going down cancels it.
+  - The completion screen names what came out. Training ops end at a real zone too.
+- **Economic integrity.**
+  - The server stores the object list at start; the client reports ids only, and `mission::assess` checks them.
+  - The minimum mission time scales with the claimed work.
+  - `SettleSecured` pays exactly the carried cases, and a raid bounty needs half the manifest.
+  - Death settles nothing, and replays return the first result.
+  - Probe hooks and `/dev` routes are compiled out of production builds.
+- **Training.**
+  - Practice: any implemented site, hour, operation and defense level. Unscored, no economy.
+  - Endless: the procedural room chain, now reachable.
+  - Campaign: unchanged apart from the extraction zone.
+  - Seasonal is documented as not built, with what it needs.
+
+**Verified:**
+- **Tests:**
+  - engine: all suites, including 3 site tests, 4 manifest/assessment tests and 3 secured-settlement tests;
+  - API: 18 tests;
+  - web: 469 tests, including 10 field-runtime tests (placement on both maps clear of geometry, holds, refusals, carry limit, drop on death, countdown interruption, fuse, handover) and 5 reserve/dressing tests.
+- **Browser** (`apps/web/probe-field.mjs`, Chrome, 1280×720). Dustline Depot raid day and night, sabotage at dusk, recovery by day; Blacksite raid night and day, sabotage and recovery at night. Every run:
+  - an ammunition crate taken (rifle reserve 72 → 144, the cap) and a medical case (dressings 1 → 3);
+  - a tap takes nothing, and a hold takes a case;
+  - two cases carried at 80% speed;
+  - nothing secured before extraction;
+  - extraction called, the count bleeding outside the zone, then completing;
+  - the record matching what was done, e.g. "EXTRACTED · 2 CASES · 40 AMMUNITION" or "HANDED OVER · 60 AMMUNITION";
+  - both charges set and the blast fired, on each sabotage;
+  - 60 fps throughout and no page errors.
+- **A real fight:** 3 kills, the rifle reserve spent 72 → 48 through reloads, 2 dropped magazines, and the sidearm reserve 36 → 54 from a pistol magazine.
+- **An incidental check:** a player shot down while carrying two cases dropped both, and the HUD went back to 0/3.
+- **Pages** (`apps/web/probe-modes.mjs`):
+  - the Hub clock ("Day 45 · 15:00 · Day · Dusk at 17:00, in about 2 min");
+  - board entries at their own sites ("Blacksite · medical vault · by day");
+  - contract intel before any loadout control, with a 55-shape map;
+  - Practice at Blacksite, dusk, recovery, L4 (unscored);
+  - Endless running on the generated chain with finite ammunition;
+  - the Campaign ending at an extraction zone;
+  - no page errors.
+- **Live API** (`scripts/field-e2e.mjs`), 14 of 16 checks so far:
+  - sites on the board, and the same contract at the same site;
+  - 4 cases for 123 units;
+  - an unowned gun refused at loadout;
+  - a duplicate case, an unknown case, no record and a too-fast run all rejected;
+  - death settling nothing;
+  - a partial extraction settling exactly the carried case (31 of 123 ammunition, bounty withheld);
+  - a replay settling nothing new.
+  - The two on-chain checks were waiting on the settlement queue (below).
+
+**Known limits:**
+- Cinder Yard has no map of its own.
+- Enemy weapons can't be picked up; guards drop magazines instead.
+- A modified client can claim a case it didn't carry (but never invent, repeat or exceed one).
+- No item inspection screen beyond the prompt's contents line.
+- The sabotage blast is procedural (no particle system).

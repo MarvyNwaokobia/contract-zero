@@ -28,6 +28,9 @@ import { useGunPrototypes, ALL_GUN_IDS, GUN_LENGTH } from './gunModels';
 import { OperatorRig, type OperatorApi } from './OperatorRig';
 import { LEVELS } from '../fps/levels';
 import { LevelArt } from './LevelArt';
+import { FieldProps } from './FieldProps';
+import { FieldRuntime, trainingField, BLAST_RADIUS, CARRY_MAX, type FieldEvent, type FieldRecord } from '../fps/field';
+import { ammoClassOf } from '../fps/FpsSim';
 import { CAMPAIGN, CAMPAIGN_KEY, PROGRESS_KEY, ZONE_THEMES, themeForMission, SURVIVAL_MISSION, GAUNTLET_MISSION, ENDLESS_MISSION, SEASONAL_MISSION, survivalWaveCount, survivalWaveHp, gauntletWaveCount, gauntletWaveHp, type Mission } from '../fps/campaign';
 import {
   buildChain, generateRoom, entryCap, spawnPointFor, zForWaveStart, firstRoomOfWave, roomsForWave, ROOM_W,
@@ -454,7 +457,16 @@ const XP_POPS = 4;
 /** Placeholder body, real rifle animation. Swapping the mesh is one asset change. */
 const OPERATOR_GLB = '/characters/glb/operator.glb';
 
+/** Probe hooks (window.__cz*) exist only in development builds, or when a build opts
+ *  in with NEXT_PUBLIC_CZ_DEV_HOOKS=1. A production player can't teleport, kill a
+ *  room or skip a briefing from the console. The server still checks every claimed
+ *  result against time and the session manifest regardless. */
+const DEV_HOOKS = process.env.NODE_ENV !== 'production' || process.env.NEXT_PUBLIC_CZ_DEV_HOOKS === '1';
+
 interface Hud {
+  field: HTMLDivElement | null;
+  fieldPrompt: HTMLDivElement | null;
+  fieldExfil: HTMLDivElement | null;
   root: HTMLDivElement | null;
   ammo: HTMLDivElement | null;
   fireMode: HTMLDivElement | null;
@@ -531,6 +543,10 @@ interface Controls {
   reload: boolean;
   fireMode: boolean;
   swap: boolean;
+  /** Touch interact, held (the E key). */
+  interact: boolean;
+  /** Touch: apply a field dressing (the H key). */
+  heal: boolean;
   toggle: Attachment | null; // mobile attachment chip → toggle this
   // ── Assisted targeting (mobile) ──
   lockCycle: boolean;          // Target button tapped → acquire nearest / cycle to next
@@ -568,7 +584,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
   // lowSpec = touch device (drives touch input/aim-assist). lightFx = drop the
   // expensive postprocessing. minimal = the aggressive tier for a struggling
   // desktop/laptop: also kills shadows + set-dressing (mobile never sets this).
-  audio: FpsAudio; lowSpec: boolean; lightFx: boolean; minimal: boolean; mission: Mission; onComplete: (stats: { kills: number; headshots: number }) => void;
+  audio: FpsAudio; lowSpec: boolean; lightFx: boolean; minimal: boolean; mission: Mission; onComplete: (stats: { kills: number; headshots: number; record?: FieldRecord }) => void;
   // Fires once per death, just before the op auto-restarts. The scene records the loss
   // (campaign only). Omitted where losses aren't recorded (/dev/verb).
   onDeath?: (stats: { kills: number; headshots: number }) => void;
@@ -603,7 +619,20 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
   // switch, so treating these as constants is safe. Aliased to the old names so
   // the rest of the world reads unchanged.
   const ENEMIES = mission.enemies;
-  const OBJECTIVES = mission.objectives;
+  // A training compound's last "extract" walk becomes a real extraction zone.
+  const OBJECTIVES = useMemo(() => {
+    if (mission.field || mission.survival || mission.endless) return mission.objectives;
+    return mission.objectives.map((o, i) =>
+      i === mission.objectives.length - 1 && o.kind === 'reach' && /EXTRACT|FALL BACK|GET CLEAR/.test(o.text) ? { ...o, kind: 'extract' as const } : o);
+  }, [mission]);
+  // The physical objects of this op (fps/field): one runtime per mount.
+  const FIELD = useMemo(() => {
+    if (mission.field) return new FieldRuntime(mission.field);
+    const last = OBJECTIVES[OBJECTIVES.length - 1];
+    return new FieldRuntime(trainingField(last?.kind === 'extract' ? last.pos : null));
+  }, [mission, OBJECTIVES]);
+  /** Field modes count rounds and loot more; the arenas keep an unlimited reserve. */
+  const FINITE_AMMO = !mission.survival && !mission.gauntlet;
   // Your equipped gun overrides the op's issued primary when it's the stronger
   // tier (the mission gun is the floor). A boss finale still issues its scripted
   // weapon unless you own something better.
@@ -730,7 +759,13 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
   const sim = useMemo(() => {
     // The op's issued kit (e.g. NVG in the Rift) plus the player's chosen field kit.
     const attachments = [...new Set([...(mission.attachments ?? []), ...(fieldKit ?? [])])];
-    const s = new FpsSim({ loadout: LOADOUT, attachments, ammoId: equippedAmmo, gunMods: equippedMods, enemies: ENEMIES, cover: COLLIDERS, hostage: mission.hostage, respawnEnabled: false, nav: LEVEL?.bounds, searchSecs: LEVEL ? 20 : undefined });
+    const s = new FpsSim({
+      loadout: LOADOUT, attachments, ammoId: equippedAmmo, gunMods: equippedMods, enemies: ENEMIES, cover: COLLIDERS, hostage: mission.hostage, respawnEnabled: false, nav: LEVEL?.bounds, searchSecs: LEVEL ? 20 : undefined,
+      reserveMags: FINITE_AMMO ? (mission.reserveMags ?? 4) : undefined,
+      medkits: FINITE_AMMO ? (mission.medkits ?? 1) : 0,
+      engageRange: mission.conditions?.engageRange,
+      enemyAccuracy: mission.conditions?.enemyAccuracy,
+    });
     s.setAllActive(false); // rooms start dormant; breaching each one wakes it
     if (endless) {
       const seed = endlessOpts?.seed ?? 1;
@@ -996,6 +1031,11 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
   const completeAt = useRef(-99);
   // varied objectives (A2): defend hold timer + reinforcement cadence
   const holdProgress = useRef(0);       // sim-seconds held on a defend point
+  const wantHeal = useRef(false);
+  const fieldToast = useRef<{ text: string; until: number; color: string }>({ text: '', until: 0, color: '#e9edf2' });
+  const lastFieldHtml = useRef('');
+  const lastBeep = useRef(-1);
+  const extractedLabel = useRef('');
   const lastReinforceAt = useRef(0);    // sim-time of the last reinforcement drop
   const hostageRef = useRef<THREE.Group>(null);
   // ── Survival wave state ──
@@ -1229,6 +1269,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       if (e.repeat) return;
       keys.current.add(e.code);
       if (e.code === 'KeyR') wantReload.current = true;
+      if (e.code === 'KeyH') wantHeal.current = true;      // apply a field dressing
       if (e.code === 'KeyB') cycleFireMode.current = true; // toggle semi/burst/auto
       if (e.code === 'Digit1') wantSlot.current = 0;       // primary
       if (e.code === 'Digit2') wantSlot.current = 1;       // sidearm slot
@@ -1304,9 +1345,17 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
   // remounts per op, so this fires whenever the zone changes).
   useEffect(() => { audio.setZone(mission.zone); }, [audio, mission.zone]);
 
-  // ── Probe hooks (headless verification) ──
+  // ── Probe hooks (headless verification; development builds only, see DEV_HOOKS) ──
   useEffect(() => {
+    if (!DEV_HOOKS) return;
     const w = window as unknown as Record<string, unknown>;
+    w.__czField = () => ({
+      kind: FIELD.spec.kind, phase: FIELD.exfilPhase, progress: FIELD.exfilProgress, carried: FIELD.carried.slice(), planted: FIELD.planted.slice(),
+      detonated: FIELD.detonated, target: FIELD.target?.id ?? null, hold: FIELD.hold, record: FIELD.record(),
+      exfil: FIELD.spec.exfil ? { pos: FIELD.spec.exfil.pos, radius: FIELD.spec.exfil.radius, mode: FIELD.spec.exfil.mode } : null,
+      items: [...FIELD.items.values()].map((i) => ({ id: i.id, kind: i.kind, pos: i.pos, state: i.state, rounds: i.rounds, medkits: i.medkits, units: i.units })),
+      reserve: sim.reserve, medkits: sim.medkits, ammo: sim.ammo, speed: FIELD.speedMult,
+    });
     w.__czState = () => sim.snapshot();
     w.__czProps = () => dressingFor(mission); // set-dressing placements (headless visual check)
     w.__czKillAll = () => sim.debugKillAll();
@@ -1315,7 +1364,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
     w.__czKillRoom = () => sim.debugKillRoom(chain.current.cursor + 1);
     w.__czKillPlayer = () => sim.debugKillPlayer();
     // Read-only: the mission's objectives, for scripted demo runs.
-    w.__czObjectives = () => OBJECTIVES.map((o) => ({ kind: o.kind, text: o.text, pos: o.pos, room: o.room, holdSecs: o.holdSecs }));
+    w.__czObjectives = () => OBJECTIVES.map((o) => ({ kind: o.kind, text: o.text, pos: o.pos, room: o.room, holdSecs: o.holdSecs, item: o.item }));
     w.__czAim = () => ({ pitch: pitch.current, yaw: yaw.current });
     w.__czAudio = () => audio.stats();
     // `alive` / `refills` / `reviving` make the second wind observable: a mission
@@ -1414,7 +1463,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       delete w.__czState; delete w.__czKillAll; delete w.__czKillRoom; delete w.__czKillPlayer; delete w.__czAim; delete w.__czAudio;
       delete w.__czMission; delete w.__czEndless; delete w.__czWarp; delete w.__czSkipBriefing;
       delete w.__czXp; delete w.__czSetXp; delete w.__czStory; delete w.__czVo; delete w.__czRig; delete w.__czPlayer; delete w.__czColliders; delete w.__czCam; delete w.__czStagger; delete w.__czHurtBoss; delete w.__czWakeRoom; delete w.__czSwitch; delete w.__czFire; delete w.__czToggle;
-      delete w.__czRevive; delete w.__czResupply; delete w.__czWaveSkip; delete w.__czPerf;
+      delete w.__czRevive; delete w.__czResupply; delete w.__czWaveSkip; delete w.__czPerf; delete w.__czField;
     };
   }, [sim, audio]);
 
@@ -1453,7 +1502,8 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
     // ── Stances FIRST (look sensitivity is reduced while aiming down sights) ──
     const adsWant = held('ShiftLeft') || held('ShiftRight') || mouseBtn.current.has(2) || ct.ads ? 1 : 0;
     const crouchWant = held('KeyC') || ct.crouch ? 1 : 0;
-    const leanWant = (held('KeyE') ? 1 : 0) - (held('KeyQ') ? 1 : 0);
+    // E is interact; lean right moved to G.
+    const leanWant = (held('KeyG') ? 1 : 0) - (held('KeyQ') ? 1 : 0);
     adsCur.current += (adsWant - adsCur.current) * Math.min(1, dt * 12);
     crouchCur.current += (crouchWant - crouchCur.current) * Math.min(1, dt * 10);
     leanCur.current += (leanWant - leanCur.current) * Math.min(1, dt * 12);
@@ -1627,6 +1677,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
     const moving = Math.abs(mf) > 0.02 || Math.abs(ms) > 0.02;
     let speed = WALK * (1 - 0.45 * adsCur.current) * (1 - (1 - CROUCH_MOVE) * crouchCur.current);
     if (adsCur.current > 0.5) speed = Math.min(speed, WALK * ADS_MOVE);
+    speed *= FIELD.speedMult; // carried cargo weighs you down
     const sinY = Math.sin(yaw.current), cosY = Math.cos(yaw.current);
     // forward on ground = (-sinY, 0, -cosY); right = (cosY, 0, -sinY)
     let nx = pos.current.x + (-sinY * mf + cosY * ms) * speed * dt;
@@ -1789,6 +1840,10 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
 
     // ── Fire input → sim ──
     if (ct.reload) { wantReload.current = true; ct.reload = false; }
+    if (wantHeal.current || ct.heal) {
+      wantHeal.current = false; ct.heal = false;
+      if (!sim.useMedkit()) toast(sim.medkits <= 0 ? 'NO DRESSINGS' : sim.playerHp >= sim.snapshot().maxPlayerHp ? 'HEALTH FULL' : '', '#ffb454');
+    }
     if (cycleFireMode.current || ct.fireMode) {
       cycleFireMode.current = false; ct.fireMode = false;
       sim.cycleFireMode();
@@ -1870,6 +1925,12 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
           if (ev.killed) {
             addXp(xpForKill(ev.part)); // earn loop: XP per kill
             spawnDeathPool(ev.enemyId);
+            // Some guards drop a spare magazine where they fall: walk over and take it.
+            if (FINITE_AMMO && ev.enemyId % 3 !== 1) {
+              const en = sim.getEnemies().find((x) => x.id === ev.enemyId);
+              const cls = ev.enemyId % 2 === 0 ? ammoClassOf(LOADOUT[0]) : ammoClassOf(LOADOUT[1] ?? LOADOUT[0]);
+              if (en) FIELD.dropPouch(en.x + 0.4, en.z + 0.3, cls, cls === 'rifle' ? 24 : 18);
+            }
           }
         } else if (ev.kind === 'wall') {
           audio.impact('wall', ev.point);
@@ -1885,6 +1946,14 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
         audio.reloadDone();         // mag-in + charging-handle rack
       } else if (ev.kind === 'empty') {
         audio.empty();
+      } else if (ev.kind === 'noReserve') {
+        audio.empty();
+        toast('NO SPARE ROUNDS · FIND AMMUNITION', '#ff6a5a');
+      } else if (ev.kind === 'healStart') {
+        audio.pickup();
+        toast('APPLYING DRESSING…', '#5fe0a8');
+      } else if (ev.kind === 'healEnd') {
+        toast(`PATCHED UP · ${Math.round(ev.hp)} HP`, '#5fe0a8');
       } else if (ev.kind === 'enemyFire') {
         // BRIGHT muzzle flash at the shooter — the clearly-visible "they fired" cue
         const fi = eFlashHead.current = (eFlashHead.current + 1) % EFLASH;
@@ -1920,6 +1989,8 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
         showHitDir(ev.fromDir);
       } else if (ev.kind === 'playerDown') {
         downAt.current = now;
+        // Whatever you were carrying hits the ground where you fell.
+        for (const fe of FIELD.down(pos.current.x, pos.current.z)) if (fe.kind === 'dropped') toast(`CARGO DROPPED · ${fe.ids.length} CASE${fe.ids.length === 1 ? '' : 'S'}`, '#ff6a5a');
         dropWeapon(cam);            // your hands let go of it
         if (refills.current > 0) {
           // Second wind: this attempt is not over. The endless and campaign
@@ -1941,6 +2012,20 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
         bossFlash.current = 1;
         shake.current = Math.min(0.05, shake.current + 0.028);
         say(ev.phase >= 3 ? 'bossEnrage' : 'bossEscalate');
+      }
+    }
+
+    // ── Field: E interactions, supplies, cargo, charges, extraction (fps/field) ──
+    {
+      const cur = OBJECTIVES[objective.current];
+      FIELD.exfilAllowed = !!cur && completeAt.current < 0 && sim.time > briefingUntil.current
+        && (cur.kind === 'extract' || (cur.kind === 'secure' && FIELD.carried.length > 0));
+      const view = { x: pos.current.x, z: pos.current.z, eyeY: cam.position.y, yaw: yaw.current, pitch: pitch.current };
+      const interact = sim.playerAlive && completeAt.current < 0 && (held('KeyE') || ct.interact);
+      for (const fe of FIELD.update(dt, view, interact, sim, losClear)) onFieldEvent(fe);
+      if (FIELD.exfilPhase === 'counting' && FIELD.spec.exfil) {
+        const left = Math.ceil(FIELD.spec.exfil.secs - FIELD.exfilProgress);
+        if (left !== lastBeep.current) { lastBeep.current = left; audio.beep(left <= 3); }
       }
     }
 
@@ -2492,6 +2577,20 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
           sim.reinforce(obj.reinforceRoom ?? obj.room ?? 0, obj.reinforceCount ?? 2);
         }
         done = holdProgress.current >= hold;
+      } else if (obj.kind === 'secure' || obj.kind === 'plant' || obj.kind === 'retrieve' || obj.kind === 'extract') {
+        // The physical objectives: the field runtime says what has actually been done.
+        const near = Math.hypot(pos.current.x - obj.pos[0], pos.current.z - obj.pos[1]) < HOLD_RADIUS;
+        const working = obj.kind === 'extract' ? FIELD.exfilPhase === 'counting'
+          : obj.kind === 'secure' ? near && FIELD.carried.length < FIELD.cases.length
+          : near;
+        if (working && (obj.reinforceCount ?? 0) > 0 && sim.time - lastReinforceAt.current > (obj.reinforceEvery ?? 3.5)) {
+          lastReinforceAt.current = sim.time;
+          sim.reinforce(obj.reinforceRoom ?? obj.room ?? 0, obj.reinforceCount ?? 2);
+        }
+        if (obj.kind === 'secure') done = FIELD.carried.length >= Math.min(FIELD.cases.length, CARRY_MAX) || FIELD.exfilPhase === 'counting' || FIELD.exfilPhase === 'done';
+        else if (obj.kind === 'plant') done = FIELD.planted.includes(obj.item ?? '');
+        else if (obj.kind === 'retrieve') done = FIELD.carried.includes(obj.item ?? '');
+        else done = FIELD.exfilPhase === 'done';
       } else if (obj.kind === 'rescue') {
         // Reach the hostage; from here they trail you to extract.
         const h = snap.hostage;
@@ -2534,7 +2633,10 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
           addXp(XP_REWARD.MISSION_COMPLETE); // completion bonus on top of the kills
           if (isFinale) { say('zoneClear'); say('zoneClearTag'); } // the payoff lands here, not every op
           else say('missionCleared');
-          if (hud.current.complete) hud.current.complete.style.opacity = '1';
+          if (hud.current.complete) {
+            if (extractedLabel.current) hud.current.complete.textContent = extractedLabel.current;
+            hud.current.complete.style.opacity = '1';
+          }
         }
       }
     }
@@ -2576,13 +2678,102 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
     if (completeAt.current > 0 && performance.now() - completeWallAt.current > 2200 && !advanced.current) {
       advanced.current = true;
       const st = sim.snapshot().stats;
-      onComplete({ kills: st.kills, headshots: st.headshots }); // per-run performance → capped skill bonus
+      onComplete({ kills: st.kills, headshots: st.headshots, record: FIELD.record() }); // per-run performance → capped skill bonus
     }
 
     updateHud(snap);
   });
 
   // ── helpers bound to refs ──
+  /** A short line under the crosshair: what you just picked up, or why you couldn't. */
+  function toast(text: string, color = '#e9edf2') {
+    if (!text) return;
+    fieldToast.current = { text, color, until: performance.now() + 2600 };
+  }
+
+  /** Nothing solid between two points (walls, crates, vehicles). */
+  function losClear(a: [number, number, number], b: [number, number, number]): boolean {
+    const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
+    const d = Math.hypot(dx, dy, dz);
+    if (d < 1e-3) return true;
+    const dir: Vec3 = [dx / d, dy / d, dz / d];
+    for (const c of COLLIDERS) {
+      const t = rayAABB(a as Vec3, dir, aabbOfCover(c));
+      if (t !== null && t < d - 0.35) return false;
+    }
+    return true;
+  }
+
+  /** Turn what the field runtime did this frame into sound, radio, and the sim. */
+  function onFieldEvent(fe: FieldEvent) {
+    switch (fe.kind) {
+      case 'ammo':
+        audio.pickup();
+        toast(`+${fe.rounds} ${fe.cls.toUpperCase()} ROUNDS${fe.left > 0 ? ` · ${fe.left} LEFT IN THE CRATE` : ''}`, '#e6c766');
+        break;
+      case 'med':
+        audio.pickup();
+        toast(`+${fe.taken} FIELD DRESSING${fe.taken === 1 ? '' : 'S'} · H TO USE`, '#5fe0a8');
+        break;
+      case 'full':
+        toast(fe.what === 'ammo' ? 'AMMUNITION FULL' : fe.what === 'med' ? 'CARRYING ALL THE DRESSINGS YOU CAN' : `HANDS FULL · ${CARRY_MAX} CASES AT MOST`, '#ffb454');
+        break;
+      case 'secured': {
+        audio.reloadDone();
+        const c = FIELD.items.get(fe.id);
+        toast(c?.kind === 'seized_case' ? 'SEIZED CASE IN HAND · IT IS HEAVY' : `CASE SECURED · CARRYING ${fe.carried} · ${FIELD.carriedUnits} UNITS`, '#5fe0a8');
+        say('cargoSecured');
+        break;
+      }
+      case 'planted':
+        audio.reloadDone();
+        say('chargePlaced');
+        if (fe.planted >= fe.total) {
+          toast('BOTH CHARGES SET · FUSE LIT · GET CLEAR', '#ff8a5a');
+          audio.alarm(5);
+          sim.setRoomActive(1, true); sim.setRoomActive(2, true);
+        } else toast(`CHARGE SET · ${fe.planted}/${fe.total}`, '#ff8a5a');
+        break;
+      case 'detonation':
+        for (const [x, z] of fe.at) {
+          audio.explosion([x, 1, z]);
+          const d = Math.hypot(pos.current.x - x, pos.current.z - z);
+          if (d < BLAST_RADIUS && sim.playerAlive) {
+            sim.playerHp = Math.max(1, sim.playerHp - Math.round(80 * (1 - d / BLAST_RADIUS)));
+            vignetteHit.current = 1;
+          }
+          shake.current = Math.min(0.08, shake.current + (d < 25 ? 0.05 : 0.015));
+        }
+        say('detonation');
+        toast('THE LINE IS BURNING', '#ff8a5a');
+        sim.reinforce(2, 2);
+        break;
+      case 'extractCalled':
+        say('extractCalled');
+        toast(FIELD.spec.exfil?.mode === 'handover' ? 'HANDOVER SIGNALLED · HOLD THE ZONE' : 'EXTRACTION CALLED · HOLD THE ZONE', '#5fe0a8');
+        break;
+      case 'extractLeft':
+        say('extractBroken');
+        toast('OUTSIDE THE ZONE · COUNTDOWN SLIPPING', '#ff6a5a');
+        break;
+      case 'extracted': {
+        say('extractDone');
+        const k = FIELD.spec.kind;
+        const label = FIELD.spec.cargoLabel ?? '';
+        const units = fe.carried.reduce((n, id) => n + (FIELD.items.get(id)?.units ?? 0), 0);
+        extractedLabel.current = k === 'raid' ? `EXTRACTED · ${fe.carried.length} CASE${fe.carried.length === 1 ? '' : 'S'} · ${units} ${label}`
+          : k === 'recovery' ? `HANDED OVER · ${units} ${label}`
+          : k === 'sabotage' ? 'EXTRACTED · CHARGES SET' : 'EXTRACTED';
+        break;
+      }
+      case 'refused':
+        toast(fe.why, '#ffb454');
+        break;
+      case 'dropped':
+        break;
+    }
+  }
+
   /** True if a point (inflated by `pad`) sits inside any wall or crate. */
   function blocked(x: number, z: number, pad: number): boolean {
     for (const c of COLLIDERS) {
@@ -2806,7 +2997,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
   function updateHud(snap: ReturnType<FpsSim['snapshot']>) {
     const h = hud.current;
     if (h.ammo) {
-      h.ammo.textContent = `${snap.ammo} / ${snap.magazine}`;
+      h.ammo.textContent = Number.isFinite(snap.reserve) ? `${snap.ammo} / ${snap.reserve}` : `${snap.ammo} / ${snap.magazine}`;
       h.ammo.style.color = snap.ammo === 0 ? '#ff4d3d' : snap.ammo <= 5 ? '#ffb454' : '#e9edf2';
     }
     if (h.reload && h.reloadBar) {
@@ -2897,7 +3088,21 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
         }
       } else if (objN && completeAt.current < 0 && sim.time > briefingUntil.current - 0.5) {
         h.objText.style.opacity = '1';
-        if (objN.kind === 'defend') {
+        const dm = Math.round(Math.hypot(pos.current.x - objN.pos[0], pos.current.z - objN.pos[1]));
+        if (objN.kind === 'secure') {
+          const total = FIELD.cases.length;
+          h.objText.textContent = `OBJECTIVE  ·  ${objN.text}  ·  ${FIELD.carried.length}/${total} CASES${FIELD.carried.length ? '  ·  OR EXTRACT WITH WHAT YOU CARRY' : `  ·  ${dm}m`}`;
+        } else if (objN.kind === 'plant' || objN.kind === 'retrieve') {
+          h.objText.textContent = `OBJECTIVE  ·  ${objN.text}  ·  ${dm}m`;
+        } else if (objN.kind === 'extract') {
+          const z = FIELD.spec.exfil;
+          if (FIELD.exfilPhase === 'counting' && z) {
+            const inside = Math.hypot(pos.current.x - z.pos[0], pos.current.z - z.pos[1]) <= z.radius;
+            h.objText.textContent = `${z.mode === 'handover' ? 'HANDOVER' : 'EXTRACTION'}  ·  ${Math.ceil(z.secs - FIELD.exfilProgress)}s  ·  ${inside ? 'HOLD THE ZONE' : 'GET BACK IN THE ZONE'}`;
+          } else {
+            h.objText.textContent = `OBJECTIVE  ·  ${objN.text}  ·  ${dm}m${dm <= (z?.radius ?? 3) ? '  ·  E TO CALL IT' : ''}`;
+          }
+        } else if (objN.kind === 'defend') {
           // a hold objective counts down the seconds you still owe on the point
           const left = Math.max(0, Math.ceil((objN.holdSecs ?? 20) - holdProgress.current));
           // Match the banking ring (HOLD_RADIUS), not the tighter reach ring, so holding
@@ -2913,6 +3118,44 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       }
     }
     if (h.briefing) h.briefing.style.opacity = String(Math.max(0, Math.min(1, briefingUntil.current - sim.time)));
+
+    // ── Field HUD ──
+    {
+      const t = FIELD.target;
+      let prompt = '';
+      if (t && snap.playerAlive && completeAt.current < 0) {
+        const verb = t.kind === 'cargo_case' ? 'SECURE' : t.kind === 'seized_case' ? 'RETRIEVE' : t.kind === 'charge' ? '' : t.kind === 'exfil' ? '' : 'TAKE';
+        const extra = t.kind === 'ammo_crate' || t.kind === 'pouch' ? ` · ${t.rounds} RDS` : t.kind === 'med_case' ? ` · ${t.medkits} LEFT` : '';
+        const p = t.holdSecs > 0 ? Math.round(Math.min(1, FIELD.hold / t.holdSecs) * 20) * 5 : 0;
+        prompt = `<div style="font-size:15px;letter-spacing:2px;color:#e9edf2"><span style="display:inline-block;min-width:22px;padding:1px 6px;margin-right:8px;border:1px solid #e9edf2;border-radius:4px;font-weight:800">E</span>${verb ? verb + ' ' : ''}${t.label}${extra}</div>`
+          + `<div style="margin:6px auto 0;width:180px;height:4px;background:#ffffff22;border-radius:2px;overflow:hidden"><div style="height:100%;width:${p}%;background:#5fe0a8"></div></div>`;
+      }
+      const ft = fieldToast.current;
+      if (performance.now() < ft.until) prompt += `<div style="margin-top:8px;font-size:13px;letter-spacing:2px;color:${ft.color}">${ft.text}</div>`;
+      if (snap.healing) prompt += `<div style="margin-top:6px;font-size:12px;letter-spacing:2px;color:#5fe0a8">DRESSING THE WOUND</div>`;
+      const inv: string[] = [];
+      if (Number.isFinite(snap.reserve)) inv.push(`<span style="color:#9fb4c8">DRESSINGS</span> ${snap.medkits} <span style="opacity:.55">[H]</span>`);
+      if (FIELD.cases.length) {
+        const c = FIELD.carried.length;
+        inv.push(`<span style="color:#9fb4c8">CARGO</span> ${c}/${CARRY_MAX}${c ? ` · ${FIELD.carriedUnits} ${FIELD.spec.cargoLabel ?? ''}` : ''}${c ? ` · <span style="color:#ffb454">-${Math.round((1 - FIELD.speedMult) * 100)}% SPEED</span>` : ''}`);
+      }
+      if (FIELD.spec.charges?.length) inv.push(`<span style="color:#9fb4c8">CHARGES</span> ${FIELD.planted.length}/${FIELD.spec.charges.length}${FIELD.fuseAt > 0 && !FIELD.detonated ? ' · <span style="color:#ff6a5a">FUSE LIT</span>' : ''}`);
+      const html = prompt + '\u0001' + inv.join('<br/>');
+      if (html !== lastFieldHtml.current) {
+        lastFieldHtml.current = html;
+        if (h.fieldPrompt) h.fieldPrompt.innerHTML = prompt;
+        if (h.field) h.field.innerHTML = inv.join('<br/>');
+      }
+      if (h.fieldExfil) {
+        const z = FIELD.spec.exfil;
+        if (z && FIELD.exfilPhase === 'counting') {
+          h.fieldExfil.style.opacity = '1';
+          const inside = Math.hypot(pos.current.x - z.pos[0], pos.current.z - z.pos[1]) <= z.radius;
+          h.fieldExfil.style.color = inside ? '#5fe0a8' : '#ff6a5a';
+          h.fieldExfil.textContent = `${Math.max(0, Math.ceil(z.secs - FIELD.exfilProgress))}`;
+        } else h.fieldExfil.style.opacity = '0';
+      }
+    }
 
     // boss health bar (top-centre) — only while a boss is alive on a boss op
     if (h.bossWrap && h.bossFill && h.bossName) {
@@ -3172,6 +3415,9 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
           (struggling desktop/laptop) to cut draw calls; the colliders stay, so on
           that tier alone the clutter is felt rather than seen. */}
       {!minimal && <SetDressing props={DRESSING} mats={propMaterials} />}
+
+      {/* the op's physical objects: supplies, cargo, charges, the extraction zone */}
+      <FieldProps field={FIELD} lowSpec={lowSpec || minimal} />
 
       {/* waypoint beacon at the current objective */}
       <group ref={waypointRef}>
@@ -3524,7 +3770,7 @@ function MissionDebrief({ mode, cleared, next, reward, onDeploy, onRetry, onExit
 }
 
 /** Outcome stats for a contract run. `secs` is wall time from deploy to the end. */
-export interface ContractRunStats { kills: number; headshots: number; secs: number }
+export interface ContractRunStats { kills: number; headshots: number; secs: number; record?: FieldRecord }
 
 export interface ContractRun {
   mission: Mission;
@@ -3600,7 +3846,7 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
     root: null, ammo: null, fireMode: null, weapon: null, loadout: null, attachments: null, nvgTint: null, scope: null, reload: null, reloadBar: null, reloadHint: null, hit: null,
     ch: { t: null, b: null, l: null, r: null }, lock: null, kills: null,
     healthFill: null, refills: null, vignette: null, hitDir: null, down: null, arrows: [],
-    objText: null, survEnd: null, survEndText: null, waveHud: null, waveLabel: null, waveRooms: null, waveDone: null, waveDoneText: null, waveDoneSub: null, objArrow: null, briefing: null, complete: null, perf: null,
+    field: null, fieldPrompt: null, fieldExfil: null, objText: null, survEnd: null, survEndText: null, waveHud: null, waveLabel: null, waveRooms: null, waveDone: null, waveDoneText: null, waveDoneSub: null, objArrow: null, briefing: null, complete: null, perf: null,
     lockReticle: null,
     adsBtn: null,
     crouchBtn: null,
@@ -3612,7 +3858,7 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
 
   // Mobile is a first-class target: a left move-stick, a right
   // look-pad, and fire/ADS/reload buttons write into this, read by FpsWorld.
-  const controls = useRef<Controls>({ moveX: 0, moveY: 0, lookX: 0, lookY: 0, lookSens: loadLookSens(), fire: false, ads: false, crouch: false, reload: false, fireMode: false, swap: false, toggle: null, lockCycle: false, tapAimX: null, tapAimY: null });
+  const controls = useRef<Controls>({ moveX: 0, moveY: 0, lookX: 0, lookY: 0, lookSens: loadLookSens(), fire: false, ads: false, crouch: false, reload: false, fireMode: false, swap: false, interact: false, heal: false, toggle: null, lockCycle: false, tapAimX: null, tapAimY: null });
   const audio = useMemo(() => new FpsAudio(), []);
   useEffect(() => () => audio.dispose(), [audio]);
 
@@ -3741,7 +3987,7 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
 
   // ── Between-mission debrief: clear an op → story of the next → deploy/retry/exit ──
   const clearComplete = () => { if (hud.current.complete) hud.current.complete.style.opacity = '0'; };
-  const handleComplete = (stats: { kills: number; headshots: number }) => {
+  const handleComplete = (stats: { kills: number; headshots: number; record?: FieldRecord }) => {
     if (mode === 'contract') {
       menuOpenRef.current = true; // freeze the scene; the page takes over
       try { document.exitPointerLock?.(); } catch { /* ignore */ }
@@ -4272,6 +4518,10 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
 
         {/* objective banner (top-centre) */}
         <div ref={(r) => { hud.current.objText = r; }} style={{ position: 'absolute', left: '50%', top: 66, transform: 'translateX(-50%)', fontSize: 14, letterSpacing: 2, color: '#37d0e0', textShadow: '0 0 6px #000', opacity: 0, whiteSpace: 'nowrap' }}>OBJECTIVE</div>
+        {/* field: the E prompt with its hold bar, what you picked up, what you carry */}
+        <div ref={(r) => { hud.current.fieldPrompt = r; }} data-testid="field-prompt" style={{ position: 'absolute', left: '50%', top: '58%', transform: 'translateX(-50%)', textAlign: 'center', pointerEvents: 'none', textShadow: '0 0 6px #000' }} />
+        <div ref={(r) => { hud.current.field = r; }} data-testid="field-inventory" style={{ position: 'absolute', left: 18, bottom: 128, fontSize: 12, letterSpacing: 1.5, color: '#cfd8df', textShadow: '0 0 6px #000', pointerEvents: 'none', lineHeight: 1.7 }} />
+        <div ref={(r) => { hud.current.fieldExfil = r; }} data-testid="field-exfil" style={{ position: 'absolute', left: '50%', top: 96, transform: 'translateX(-50%)', fontSize: 34, fontWeight: 800, letterSpacing: 4, color: '#5fe0a8', textShadow: '0 0 10px #000', opacity: 0, pointerEvents: 'none' }} />
 
         {/* boss health bar */}
         <div ref={(r) => { hud.current.bossWrap = r; }} style={{ position: 'absolute', left: '50%', top: 96, transform: 'translateX(-50%)', width: 360, opacity: 0, transition: 'opacity .3s', textAlign: 'center' }}>
@@ -4401,7 +4651,7 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
         </div>
         {!isTouch && (
           <div style={{ position: 'absolute', right: 26, top: 20, fontSize: 11, lineHeight: 1.7, textAlign: 'right', color: '#6f7d8c' }}>
-            WASD move · MOUSE / ARROWS look<br />SPACE fire · SHIFT ads · T target · Q/E lean · C crouch · R reload · B fire-mode<br />1 / 2 or X swap weapon · N nvg · F light · L laser · O optic · M ops · ESC release mouse
+            WASD move · MOUSE / ARROWS look<br />SPACE fire · SHIFT ads · T target · E use (hold) · H dressing · Q/G lean · C crouch · R reload · B fire-mode<br />1 / 2 or X swap weapon · N nvg · F light · L laser · O optic · M ops · ESC release mouse
           </div>
         )}
 
@@ -4524,6 +4774,12 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
           {/* secondary actions — a slim column hugging the right edge, up off the gun */}
           <div {...tap('#ffb454', () => { controls.current.reload = true; })}
             style={{ ...touchBtn('#ffb454', 44), right: 22, bottom: 116 }}><Icon name="refresh" size={19} /></div>
+          {/* USE: hold to interact (the E key) · MED: apply a dressing (the H key) */}
+          <div onPointerDown={(e) => { e.preventDefault(); controls.current.interact = true; }}
+            onPointerUp={() => { controls.current.interact = false; }} onPointerLeave={() => { controls.current.interact = false; }} onPointerCancel={() => { controls.current.interact = false; }}
+            style={{ ...touchBtn('#e9edf2', 52), right: 232, bottom: 30, fontSize: 11 }}>USE</div>
+          <div {...tap('#5fe0a8', () => { controls.current.heal = true; })}
+            style={{ ...touchBtn('#5fe0a8', 42), right: 24, bottom: 274, fontSize: 10 }}>MED</div>
           <div {...tap('#5fe0a8', () => { controls.current.swap = true; })}
             style={{ ...touchBtn('#5fe0a8', 44), right: 22, bottom: 170 }}><Icon name="swap" size={19} /></div>
           <div {...tap('#8fb8d0', () => { controls.current.fireMode = true; })}

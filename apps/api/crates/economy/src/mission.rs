@@ -75,6 +75,15 @@ pub struct RaidPlan {
     pub defense: u8,
     pub guards: GuardPlan,
     pub seed: u32,
+    /// The site it happens at (`site::site_for`). Empty on plans saved before sites.
+    #[serde(default)]
+    pub site: String,
+}
+
+impl RaidPlan {
+    pub fn site(&self) -> &'static crate::site::Site {
+        crate::site::site(&self.site).unwrap_or_else(|| crate::site::site_for(&self.target, self.kind, self.resource))
+    }
 }
 
 /// Guards called for by a defense posture: a forward squad plus a yard squad.
@@ -143,7 +152,8 @@ pub fn raid_plan(w: &World, target: &str, resource: Resource) -> Option<RaidPlan
     let ammo_available = if resource == Resource::Ammo { ammo - manifest } else { ammo };
     let guards = guard_plan(a.defense, ammo_available, bal(Resource::Med), a.requirement(Resource::Med));
     let seed = (crate::splitmix(w.seed ^ (w.tick << 8) ^ resource.idx() as u64) & 0xffff_ffff) as u32;
-    Some(RaidPlan { target: target.into(), resource, manifest, kind: crate::OpKind::Raid, contract: None, defense: a.defense, guards, seed })
+    let site = crate::site::site_for(target, crate::OpKind::Raid, resource).id.into();
+    Some(RaidPlan { target: target.into(), resource, manifest, kind: crate::OpKind::Raid, contract: None, defense: a.defense, guards, seed, site })
 }
 
 /// Every raid currently available, faction by faction, resource by resource.
@@ -256,5 +266,196 @@ pub fn operation_plan(w: &World, kind: crate::OpKind, target: &str, resource: Re
     let ammo = bal(Resource::Ammo);
     let guards = guard_plan(a.defense, ammo, bal(Resource::Med), a.requirement(Resource::Med));
     let seed = (crate::splitmix(w.seed ^ (w.tick << 8) ^ (resource.idx() as u64 + 16 * contract.id)) & 0xffff_ffff) as u32;
-    Some(RaidPlan { target: target.into(), resource, manifest, kind, contract: Some(contract.id), defense: a.defense, guards, seed })
+    let site = crate::site::site_for(target, kind, resource).id.into();
+    Some(RaidPlan { target: target.into(), resource, manifest, kind, contract: Some(contract.id), defense: a.defense, guards, seed, site })
+}
+
+// ── The physical objects of an operation ─────────────────────────────────────
+//
+// What the player can touch on the map, fixed when the operation starts and stored
+// with the session. The client places these objects; the server only ever credits
+// what is in this list, by id, so a completion can name objects but never amounts.
+
+/// Economic units carried in one cargo case. A 60-unit shipment is three cases.
+pub const UNITS_PER_CASE: i64 = 25;
+pub const MAX_CASES: i64 = 4;
+/// Seconds of holding E to secure one cargo case.
+pub const CASE_SECS: f64 = 2.0;
+/// Seconds to plant one sabotage charge.
+pub const CHARGE_SECS: f64 = 5.0;
+/// Seconds to free the recovery case from where it is held.
+pub const RETRIEVE_SECS: f64 = 3.0;
+/// Seconds inside the extraction zone once extraction is called.
+pub const EXTRACT_SECS: f64 = 8.0;
+/// Walking the site in and back out.
+pub const TRAVERSAL_SECS: f64 = 25.0;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CargoCase {
+    pub id: String,
+    pub units: i64,
+}
+
+/// Loose supplies on site: `ammo` crates hold magazines, `med` cases hold field
+/// dressings. They are used up in the fight and are never economic.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FieldContainer {
+    pub id: String,
+    pub kind: String,
+    pub qty: i64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FieldManifest {
+    /// Raid: the cargo split into cases. Recovery: the one seized case.
+    pub cases: Vec<CargoCase>,
+    /// Sabotage: the charge sites, both required.
+    pub charges: Vec<String>,
+    pub containers: Vec<FieldContainer>,
+}
+
+impl FieldManifest {
+    pub fn case_units(&self, id: &str) -> Option<i64> {
+        self.cases.iter().find(|c| c.id == id).map(|c| c.units)
+    }
+}
+
+/// Split `units` into `n` cases as evenly as possible (the first cases take the remainder).
+pub fn split_cases(units: i64, prefix: &str) -> Vec<CargoCase> {
+    let n = ((units + UNITS_PER_CASE - 1) / UNITS_PER_CASE).clamp(1, MAX_CASES);
+    (0..n).map(|i| CargoCase { id: format!("{prefix}-{}", i + 1), units: units / n + i64::from(i < units % n) }).collect()
+}
+
+/// The objects for `plan` against the faction's live stock: loose ammunition is what
+/// the faction has to spare, and medical cases exist only if it holds medicine.
+pub fn field_manifest(w: &World, plan: &RaidPlan) -> FieldManifest {
+    let cases = match plan.kind {
+        crate::OpKind::Raid => split_cases(plan.manifest, "case"),
+        crate::OpKind::Recovery => vec![CargoCase { id: "seized-case".into(), units: plan.manifest }],
+        crate::OpKind::Sabotage => vec![],
+    };
+    let charges = if plan.kind == crate::OpKind::Sabotage { vec!["charge-1".into(), "charge-2".into()] } else { vec![] };
+    let med = w.actors.get(&plan.target).map_or(0, |a| w.balance(&a.account, Asset::Res(Resource::Med)));
+    let ammo_crates = 1 + (plan.guards.ammo_available.max(0) / 60).min(3);
+    let med_cases = if med <= 0 { 0 } else if med < 20 { 1 } else { 2 };
+    let mut containers: Vec<FieldContainer> = (0..ammo_crates).map(|i| FieldContainer { id: format!("ammo-{}", i + 1), kind: "ammo".into(), qty: 3 }).collect();
+    containers.extend((0..med_cases).map(|i| FieldContainer { id: format!("med-{}", i + 1), kind: "med".into(), qty: 2 }));
+    FieldManifest { cases, charges, containers }
+}
+
+/// The least time an operation can physically take, given how many cases were secured.
+pub fn min_secs(kind: crate::OpKind, cases_secured: usize) -> f64 {
+    TRAVERSAL_SECS
+        + EXTRACT_SECS
+        + match kind {
+            crate::OpKind::Raid => CASE_SECS * cases_secured.max(1) as f64,
+            crate::OpKind::Sabotage => 2.0 * CHARGE_SECS,
+            crate::OpKind::Recovery => RETRIEVE_SECS,
+        }
+}
+
+/// What the client says the player did. Only ids: amounts come from the manifest.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FieldRecord {
+    #[serde(default)]
+    pub secured: Vec<String>,
+    #[serde(default)]
+    pub charges: Vec<String>,
+    #[serde(default)]
+    pub delivered: Option<String>,
+    #[serde(default)]
+    pub looted: Vec<String>,
+}
+
+/// Checks a record against the manifest and returns the units it earns.
+pub fn assess(kind: crate::OpKind, m: &FieldManifest, r: &FieldRecord) -> Result<i64, &'static str> {
+    fn unique(v: &[String]) -> bool {
+        let mut s: Vec<&String> = v.iter().collect();
+        s.sort();
+        s.windows(2).all(|p| p[0] != p[1])
+    }
+    if !unique(&r.secured) || !unique(&r.charges) || !unique(&r.looted) {
+        return Err("an object was reported twice");
+    }
+    if r.looted.iter().any(|id| !m.containers.iter().any(|c| &c.id == id)) {
+        return Err("looted a container that isn't on site");
+    }
+    match kind {
+        crate::OpKind::Raid => {
+            if r.secured.is_empty() {
+                return Err("no cargo was secured");
+            }
+            r.secured.iter().map(|id| m.case_units(id).ok_or("secured a case that isn't on site")).sum()
+        }
+        crate::OpKind::Sabotage => {
+            if r.charges.len() != m.charges.len() || r.charges.iter().any(|c| !m.charges.contains(c)) {
+                return Err("not every charge was placed");
+            }
+            Ok(0)
+        }
+        crate::OpKind::Recovery => {
+            let want = m.cases.first().ok_or("nothing to recover")?;
+            if r.delivered.as_deref() != Some(want.id.as_str()) {
+                return Err("the seized case was not delivered");
+            }
+            Ok(want.units)
+        }
+    }
+}
+
+#[cfg(test)]
+mod field_tests {
+    use super::*;
+    use crate::OpKind;
+
+    #[test]
+    fn cargo_splits_into_a_few_cases_that_sum_to_the_manifest() {
+        let c = split_cases(60, "case");
+        assert_eq!(c.len(), 3);
+        assert_eq!(c.iter().map(|c| c.units).sum::<i64>(), 60);
+        assert_eq!(split_cases(10, "case").len(), 1);
+        assert_eq!(split_cases(1_000, "case").len(), MAX_CASES as usize);
+        assert_eq!(split_cases(61, "case").iter().map(|c| c.units).collect::<Vec<_>>(), vec![21, 20, 20]);
+    }
+
+    fn manifest() -> FieldManifest {
+        FieldManifest {
+            cases: split_cases(60, "case"),
+            charges: vec!["charge-1".into(), "charge-2".into()],
+            containers: vec![FieldContainer { id: "ammo-1".into(), kind: "ammo".into(), qty: 3 }],
+        }
+    }
+    fn rec(secured: &[&str]) -> FieldRecord {
+        FieldRecord { secured: secured.iter().map(|s| s.to_string()).collect(), ..Default::default() }
+    }
+
+    #[test]
+    fn amounts_come_from_the_manifest_never_the_client() {
+        let m = manifest();
+        assert_eq!(assess(OpKind::Raid, &m, &rec(&["case-1", "case-3"])), Ok(40));
+        assert_eq!(assess(OpKind::Raid, &m, &rec(&["case-1", "case-1"])), Err("an object was reported twice"));
+        assert_eq!(assess(OpKind::Raid, &m, &rec(&["case-9"])), Err("secured a case that isn't on site"));
+        assert_eq!(assess(OpKind::Raid, &m, &rec(&[])), Err("no cargo was secured"));
+        let loot = FieldRecord { looted: vec!["ammo-7".into()], ..rec(&["case-1"]) };
+        assert_eq!(assess(OpKind::Raid, &m, &loot), Err("looted a container that isn't on site"));
+    }
+
+    #[test]
+    fn sabotage_needs_both_charges_and_recovery_the_case() {
+        let m = manifest();
+        let one = FieldRecord { charges: vec!["charge-1".into()], ..Default::default() };
+        assert!(assess(OpKind::Sabotage, &m, &one).is_err());
+        let both = FieldRecord { charges: vec!["charge-2".into(), "charge-1".into()], ..Default::default() };
+        assert_eq!(assess(OpKind::Sabotage, &m, &both), Ok(0));
+        let r = FieldManifest { cases: vec![CargoCase { id: "seized-case".into(), units: 30 }], ..Default::default() };
+        assert!(assess(OpKind::Recovery, &r, &FieldRecord::default()).is_err());
+        let d = FieldRecord { delivered: Some("seized-case".into()), ..Default::default() };
+        assert_eq!(assess(OpKind::Recovery, &r, &d), Ok(30));
+    }
+
+    #[test]
+    fn minimum_time_grows_with_what_was_done() {
+        assert!(min_secs(OpKind::Raid, 3) > min_secs(OpKind::Raid, 1));
+        assert!(min_secs(OpKind::Sabotage, 0) >= TRAVERSAL_SECS + 2.0 * CHARGE_SECS);
+    }
 }

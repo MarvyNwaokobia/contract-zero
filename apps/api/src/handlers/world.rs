@@ -48,7 +48,42 @@ pub fn mission_json(w: &World, plan: &RaidPlan, raid_id: Option<u64>) -> Value {
         "seed": plan.seed,
         "zone": zone_for_tick(w.tick),
         "guards": plan.guards,
+        "site": site_json(plan),
+        "conditions": cz_economy::site::conditions(w.tick),
+        "field": mission::field_manifest(w, plan),
     })
+}
+
+/// Where an operation happens: the site, the facility in it, and the map it plays on.
+pub fn site_json(plan: &RaidPlan) -> Value {
+    let s = plan.site();
+    json!({
+        "id": s.id, "name": s.name, "region": s.region, "environment": s.environment,
+        "owner": s.owner, "layout": s.layout.name(), "shared_layout": s.shared_layout,
+        "facility": cz_economy::site::facility(s, plan.kind, plan.resource),
+        "exfil": if plan.kind == cz_economy::OpKind::Recovery { s.handover } else { s.exfil },
+    })
+}
+
+/// The world clock as players see it. One game hour is `WORLD_TICK_SECS` real seconds.
+pub fn clock_json(w: &World) -> Value {
+    let tick_secs = std::env::var("WORLD_TICK_SECS").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(60).max(1);
+    json!({
+        "tick": w.tick, "day": w.tick / TICKS_PER_DAY, "hour": w.tick % TICKS_PER_DAY,
+        "tick_secs": tick_secs,
+        "conditions": cz_economy::site::conditions(w.tick),
+    })
+}
+
+/// Each site and what is wrong with it right now: production lines that are down.
+pub fn site_status(w: &World) -> Value {
+    json!(cz_economy::site::SITES.iter().map(|s| {
+        let lines: Vec<Value> = Resource::ALL.iter().filter(|r| !s.lines[r.idx()].is_empty()).map(|r| {
+            let until = w.actors.get(s.owner).map_or(0, |a| a.disrupted_until[r.idx()]);
+            json!({ "line": s.lines[r.idx()], "resource": r.name(), "down_until": if until > w.tick { Some(until) } else { None } })
+        }).collect();
+        json!({ "id": s.id, "name": s.name, "owner": s.owner, "layout": s.layout.name(), "shared_layout": s.shared_layout, "environment": s.environment, "lines": lines })
+    }).collect::<Vec<_>>())
 }
 
 /// One board entry: a raidable depot, why it looks the way it does, and its bounty.
@@ -58,6 +93,7 @@ pub fn board_entry(w: &World, plan: &RaidPlan) -> Value {
     json!({
         "kind": plan.kind.name(),
         "disrupted": w.disrupted(&plan.target, plan.resource),
+        "site": site_json(plan),
         "target": plan.target, "target_name": a.name,
         "resource": plan.resource.name(),
         "manifest": plan.manifest,
@@ -92,6 +128,8 @@ pub fn world_view(w: &World) -> Value {
     json!({
         "tick": w.tick, "day": w.tick / TICKS_PER_DAY, "hour": w.tick % TICKS_PER_DAY, "version": w.version,
         "zone": zone_for_tick(w.tick),
+        "clock": clock_json(w),
+        "sites": site_status(w),
         "actors": actors,
         "market": { "merchant": w.market.merchant, "target": w.market.target, "strategy": w.market.strategy, "insolvent": w.merchant_insolvent() },
         "prices": prices,
@@ -106,8 +144,8 @@ pub async fn get_world(state: web::Data<AppState>) -> HttpResponse {
 }
 
 pub async fn get_board(state: web::Data<AppState>) -> HttpResponse {
-    let board = state.world.read(|w| mission::available_operations(w).iter().map(|p| board_entry(w, p)).collect::<Vec<_>>()).await;
-    HttpResponse::Ok().json(json!({ "board": board }))
+    let (board, clock, sites) = state.world.read(|w| (mission::available_operations(w).iter().map(|p| board_entry(w, p)).collect::<Vec<_>>(), clock_json(w), site_status(w))).await;
+    HttpResponse::Ok().json(json!({ "board": board, "clock": clock, "sites": sites }))
 }
 
 pub async fn get_player(state: web::Data<AppState>, path: web::Path<String>) -> HttpResponse {

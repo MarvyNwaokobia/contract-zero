@@ -14,6 +14,8 @@ import type { ContractRunStats } from '@/engine/scene/ContractZeroScene'
 import { useQuery } from '@tanstack/react-query'
 import { useSession } from '@/lib/useSession'
 import { api, RESOURCE_LABEL, type OpKind, type BoardEntry, type MissionResult, type MissionStart, type ResourceName, type WorldView } from '@/lib/api'
+import { OperationIntel } from '@/components/world/OperationIntel'
+import { WorldClockPanel } from '@/components/world/WorldClock'
 import { retryImport } from '@/lib/retryImport'
 
 const tactical = Rajdhani({ subsets: ['latin'], weight: ['500', '600', '700'], variable: '--font-tactical', display: 'swap' })
@@ -27,10 +29,14 @@ const GunTurntable = dynamic(() => import('@/components/armory/GunTurntable'), {
 /** Standard issue until the Armory sells gear. */
 const ISSUE: GunId[] = ['smg', 'assault_rifle']
 
+// The flow: what the job is (intel) → accept, and the sponsor's briefing → choose a
+// weapon → fight → results. The weapon comes last so you choose it for the job.
 type Phase =
-  | { kind: 'loadout' }
+  | { kind: 'intel' }
   | { kind: 'starting' }
   | { kind: 'briefing'; start: MissionStart; before: WorldView; story: MissionStory | null }
+  | { kind: 'loadout'; start: MissionStart; before: WorldView; story: MissionStory | null; error?: string }
+  | { kind: 'arming'; start: MissionStart; before: WorldView; story: MissionStory | null }
   | { kind: 'fighting'; start: MissionStart; before: WorldView; story: MissionStory | null }
   | { kind: 'reporting' }
   | { kind: 'results'; result: MissionResult; before: WorldView; after: WorldView }
@@ -77,14 +83,16 @@ function Deploy() {
   const player = session?.account ?? null
   const [gun, setGun] = useState<GunId>('assault_rifle')
   const armory = useQuery({ queryKey: ['armory', player], queryFn: () => api.exchange(player).then((e) => e.armory ?? []), enabled: !!player })
-  const [phase, setPhase] = useState<Phase>({ kind: 'loadout' })
+  const [phase, setPhase] = useState<Phase>({ kind: 'intel' })
+  const world = useQuery({ queryKey: ['world'], queryFn: api.world, refetchInterval: 10_000, enabled: phase.kind === 'intel' })
+  const entry = world.data?.board.find((b) => b.kind === kind && b.target === target && b.resource === resource)
 
-  const deploy = async () => {
+  const accept = async () => {
     if (!player) return
     setPhase({ kind: 'starting' })
     try {
       const before = await api.world()
-      const start = await api.startMission(target, resource, kind, gun)
+      const start = await api.startMission(target, resource, kind)
       setPhase({ kind: 'briefing', start, before, story: null })
       // The voiced story when the server has a model (checked line by line), else
       // the authored one it started with. Never wait more than 12 s for it.
@@ -99,11 +107,25 @@ function Deploy() {
     }
   }
 
+  // The weapon is checked against the ledger again here: you can't carry in a gun you don't own.
+  const arm = async () => {
+    if (phase.kind !== 'loadout') return
+    const p = phase
+    setPhase({ ...p, kind: 'arming' })
+    try {
+      await api.missionLoadout(p.start.session, gun)
+      setPhase({ kind: 'fighting', start: p.start, before: p.before, story: p.story })
+    } catch (e) {
+      setPhase({ ...p, kind: 'loadout', error: (e as Error).message })
+    }
+  }
+
   const finish = async (outcome: 'extracted' | 'killed', stats: ContractRunStats, start: MissionStart, before: WorldView) => {
     if (!player) return
     setPhase({ kind: 'reporting' })
     try {
-      const { result } = await api.completeMission(start.session, outcome, stats.kills)
+      // Object ids only: the server counts the units from its own manifest.
+      const { result } = await api.completeMission(start.session, outcome, stats.kills, outcome === 'extracted' ? stats.record : undefined)
       // Give the world clock a moment so the agents' response is visible.
       const after = await api.world()
       setPhase({ kind: 'results', result, before, after })
@@ -125,7 +147,7 @@ function Deploy() {
       codename: `${kind.toUpperCase()} · ${target.toUpperCase()}`, location: start.mission.zone ?? 'DUSTLINE', time: '', source: 'authored', radio: {},
       briefing: [{ id: 'fallback', speaker: 'handler', text: `${start.mission.cargo.units} units of ${RESOURCE_LABEL[resource].toLowerCase()} at ${target}'s site. Get in, do the job, get out.` }],
     }
-    return <Briefing story={shown} pending={!story} onDeploy={() => setPhase({ kind: 'fighting', start, before, story: shown })} />
+    return <Briefing story={shown} pending={!story} actionLabel="Choose loadout" onDeploy={() => setPhase({ kind: 'loadout', start, before, story: shown })} />
   }
 
   if (phase.kind === 'fighting' && mission) {
@@ -162,12 +184,13 @@ function Deploy() {
       <Shell title="Extraction Results" back={{ href: '/contracts', label: 'Contract Board' }}>
         <Panel>
           <div className={`text-2xl font-bold ${won ? 'text-emerald-400' : 'text-rose-400'}`}>
-            {won ? 'CARGO EXTRACTED' : result.outcome === 'killed' ? 'KILLED IN ACTION' : 'RUN REJECTED'}
+            {won ? (result.kind === 'sabotage' ? 'LINE DESTROYED' : result.kind === 'recovery' ? 'CARGO HANDED OVER' : 'CARGO EXTRACTED') : result.outcome === 'killed' ? 'KILLED IN ACTION · NOTHING SECURED' : 'RUN REJECTED'}
           </div>
           {result.reason && <p className="mt-1 text-sm text-amber-400">The server rejected the run: {result.reason}.</p>}
           {result.settlement && <div className="mt-2"><SettlementStatus opId={result.settlement.op_id} /></div>}
           <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <Stat label="Extracted" value={`${result.extracted_units} ${result.resource}`} />
+            <Stat label={result.kind === 'sabotage' ? 'Destroyed' : result.kind === 'recovery' ? 'Returned' : 'Extracted'} value={`${result.extracted_units} ${result.resource}`}
+              hint={result.kind === 'raid' && result.record ? `${result.record.secured.length} case${result.record.secured.length === 1 ? '' : 's'} carried out of ${result.manifest ?? '?'} units on site` : result.kind === 'sabotage' && result.record ? `${result.record.charges.length} charges set` : undefined} />
             <Stat label="Bounty" value={`${result.bounty} cr`} />
             <Stat label="Mission time" value={`${Math.round(result.elapsed_secs)} s`} hint={`minimum ${result.min_secs} s`} />
             <Stat label="You now hold" value={`${result.player_holdings.cargo} ${result.resource}`} hint={`${result.player_holdings.credits} credits`} />
@@ -202,9 +225,43 @@ function Deploy() {
     )
   }
 
+  if (phase.kind === 'intel' || phase.kind === 'starting') {
+    return (
+      <Shell title="Contract Intel" back={{ href: '/contracts', label: 'Contract Board' }} wide>
+        <div className="mb-4"><WorldClockPanel clock={world.data?.clock} compact /></div>
+        {world.isLoading && <Panel><p className="text-muted">Pulling the contract…</p></Panel>}
+        {world.data && !entry && <Panel><p className="text-muted">This contract is no longer on the board. The world moved on: <Link href="/contracts" className="text-amber-hi">see what&apos;s open now</Link>.</p></Panel>}
+        {entry && (
+          <OperationIntel
+            contract={entry.mission}
+            kind={kind}
+            reward={{ fee: entry.bounty?.amount ?? 0, sponsor: entry.bounty?.sponsor_name, cargoValue: entry.market_value.bid }}
+          />
+        )}
+        <button onClick={accept} disabled={!entry || phase.kind === 'starting'} className="cz-btn cz-btn-primary mt-6 px-6 py-3" data-testid="accept-contract">
+          {phase.kind === 'starting' ? 'Locking in the contract…' : 'Accept and get briefed'}
+        </button>
+        <p className="mt-2 text-xs text-dim">Accepting locks this plan in and opens a 30-minute deployment window. You choose your weapon after the briefing.</p>
+      </Shell>
+    )
+  }
+
+  if (phase.kind === 'error') {
+    return (
+      <Shell title="Deploy" back={{ href: '/contracts', label: 'Contract Board' }}>
+        <Panel><p className="text-rose-400">Could not deploy: {phase.message}</p></Panel>
+        <Link href="/contracts" className="cz-btn cz-btn-ghost mt-4 inline-block px-5 py-2 text-sm">Back to the board</Link>
+      </Shell>
+    )
+  }
+
+  if (phase.kind !== 'loadout' && phase.kind !== 'arming') {
+    return <Shell title="Deploy"><Panel><p className="text-muted">Reporting to command…</p></Panel></Shell>
+  }
+
   return (
     <Shell title="Armory · Loadout" back={{ href: '/contracts', label: 'Contract Board' }}>
-      <Panel title={`TARGET · ${target.toUpperCase()} · ${RESOURCE_LABEL[resource].toUpperCase()} DEPOT`}>
+      <Panel title={`${(phase.start.mission.site?.name ?? target).toUpperCase()} · ${phase.start.mission.site?.facility?.toUpperCase() ?? RESOURCE_LABEL[resource].toUpperCase()}`}>
         <div className="grid gap-4 md:grid-cols-[1fr_280px]">
           <div className="grid gap-2">
             {ISSUE.map((id) => {
@@ -246,13 +303,9 @@ function Deploy() {
           <div className="h-56 border border-line" style={{ background: 'radial-gradient(ellipse at 50% 55%, #23272e 0%, #0e1013 70%)' }}><GunTurntable gunId={gun} className="h-full w-full" /></div>
         </div>
       </Panel>
-      {phase.kind === 'error' && <p className="mt-4 text-sm text-rose-400">Could not deploy: {phase.message}</p>}
-      <button
-        onClick={deploy}
-        disabled={phase.kind === 'starting' || phase.kind === 'reporting'}
-        className="cz-btn cz-btn-primary mt-6 px-6 py-3"
-      >
-        {phase.kind === 'starting' ? 'Locking in the mission…' : phase.kind === 'reporting' ? 'Reporting to command…' : 'Deploy'}
+      {phase.kind === 'loadout' && phase.error && <p className="mt-4 text-sm text-rose-400">Could not arm: {phase.error}</p>}
+      <button onClick={arm} disabled={phase.kind === 'arming'} className="cz-btn cz-btn-primary mt-6 px-6 py-3" data-testid="deploy">
+        {phase.kind === 'arming' ? 'Checking your gear…' : 'Deploy'}
       </button>
     </Shell>
   )

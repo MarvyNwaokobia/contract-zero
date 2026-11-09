@@ -11,7 +11,7 @@
 
 use actix_web::{web, HttpRequest, HttpResponse};
 use chrono::{DateTime, Utc};
-use cz_economy::mission::load_seconds;
+use cz_economy::mission::{self as field, FieldManifest, FieldRecord};
 use cz_economy::{Action, Caller, Event, RaidStatus, Resource};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -71,9 +71,6 @@ pub struct StartRequest {
 /// Always available, never a token.
 pub const STANDARD_ISSUE: [&str; 3] = ["smg", "assault_rifle", "sidearm"];
 
-/// Seconds to plant one sabotage charge (two per op).
-pub const PLANT_SECS: f64 = 5.0;
-
 pub async fn start(state: web::Data<AppState>, req: HttpRequest, body: web::Json<StartRequest>) -> HttpResponse {
     let ip = req.connection_info().realip_remote_addr().unwrap_or("unknown").to_string();
     if !state.mission_limiter.check(&ip) {
@@ -92,15 +89,8 @@ pub async fn start(state: web::Data<AppState>, req: HttpRequest, body: web::Json
     let res = state
         .world
         .transact(async move |w, db| {
-            // Owned gear is checked against the economy, which mirrors the player's
-            // NEAR balance: a gun you don't own can't be carried in.
             if let Some(gun) = body.gun.as_deref() {
-                if !STANDARD_ISSUE.contains(&gun) {
-                    let g = cz_economy::Gear::parse(gun).ok_or_else(|| WorldError::Other(format!("unknown weapon {gun}")))?;
-                    if !w.owns(&body.player, g) {
-                        return Err(WorldError::Other(format!("you don't own the {}; buy one from Vex's armory", g.title())));
-                    }
-                }
+                check_gun(w, &body.player, gun)?;
             }
             let action = match body.kind {
                 cz_economy::OpKind::Raid => Action::StartRaid { target: body.target.clone(), resource: body.resource },
@@ -109,11 +99,11 @@ pub async fn start(state: web::Data<AppState>, req: HttpRequest, body: web::Json
             let ev = w.execute(&Caller::Player(body.player.clone()), &action)?;
             let raid = *w.raids.keys().last().expect("raid just created");
             let plan = w.raids[&raid].plan.clone();
-            // What the op physically takes: loading cargo, or planting two charges.
-            let min_secs = match plan.kind {
-                cz_economy::OpKind::Sabotage => 2.0 * PLANT_SECS + MIN_TRAVERSAL_SECS,
-                _ => load_seconds(plan.manifest) as f64 + MIN_TRAVERSAL_SECS,
-            };
+            // The physical objects of this op, fixed now. What the op takes at the least
+            // (one case, both charges, or the seized case, plus the extraction hold);
+            // completion raises it by what the player says they did.
+            let objects = field::field_manifest(w, &plan);
+            let min_secs = field::min_secs(plan.kind, 1).max(MIN_TRAVERSAL_SECS);
             let mut facts = story::facts(w, &plan, &body.player);
             facts.callsign = sqlx::query_scalar("SELECT callsign FROM player_profiles WHERE account = $1").bind(&body.player).fetch_optional(db).await?;
             if let Some(sponsor) = &facts.sponsor {
@@ -128,8 +118,8 @@ pub async fn start(state: web::Data<AppState>, req: HttpRequest, body: web::Json
             }
             let tale = story::authored(&facts);
             sqlx::query(
-                "INSERT INTO mission_sessions (id, player, raid_id, min_secs, expires_at, story)
-                 VALUES ($1, $2, $3, $4, now() + make_interval(secs => $5), $6)",
+                "INSERT INTO mission_sessions (id, player, raid_id, min_secs, expires_at, story, site, field, gun)
+                 VALUES ($1, $2, $3, $4, now() + make_interval(secs => $5), $6, $7, $8, $9)",
             )
             .bind(session)
             .bind(&body.player)
@@ -137,10 +127,15 @@ pub async fn start(state: web::Data<AppState>, req: HttpRequest, body: web::Json
             .bind(min_secs)
             .bind(SESSION_TTL_SECS as f64)
             .bind(json!({ "facts": facts, "story": tale, "voiced": false }))
+            .bind(plan.site().id)
+            .bind(json!(objects))
+            .bind(&body.gun)
             .execute(db)
             .await?;
             log_event(db, w.tick, &format!("player:{}", body.player), "mission", &json!({ "phase": "start", "session": session, "raid": raid, "plan": plan, "gun": body.gun, "events": summarize(&ev) })).await?;
-            Ok(json!({ "session": session, "raid": raid, "min_secs": min_secs, "mission": crate::handlers::world::mission_json(w, &plan, Some(raid)), "story": tale }))
+            let mut mission = crate::handlers::world::mission_json(w, &plan, Some(raid));
+            mission["field"] = json!(objects);
+            Ok(json!({ "session": session, "raid": raid, "min_secs": min_secs, "mission": mission, "story": tale }))
         })
         .await;
     respond(res)
@@ -153,6 +148,10 @@ pub struct CompleteRequest {
     pub outcome: Outcome,
     #[serde(default)]
     pub kills: i64,
+    /// What the player physically did: object ids only, checked against the
+    /// session's manifest. Required for sessions that have one.
+    #[serde(default)]
+    pub record: Option<FieldRecord>,
 }
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -162,7 +161,7 @@ pub enum Outcome {
     Killed,
 }
 
-type SessionRow = (String, i64, f64, DateTime<Utc>, Option<DateTime<Utc>>, Option<Value>);
+type SessionRow = (String, i64, f64, DateTime<Utc>, Option<DateTime<Utc>>, Option<Value>, Option<Value>);
 
 pub async fn complete(state: web::Data<AppState>, req: HttpRequest, path: web::Path<Uuid>, body: web::Json<CompleteRequest>) -> HttpResponse {
     let who = match crate::handlers::auth::player(&state, &req).await {
@@ -180,12 +179,12 @@ pub async fn complete(state: web::Data<AppState>, req: HttpRequest, path: web::P
         .world
         .transact(async move |w, db| {
             let row: Option<SessionRow> = sqlx::query_as(
-                "SELECT player, raid_id, min_secs, started_at, completed_at, result FROM mission_sessions WHERE id = $1",
+                "SELECT player, raid_id, min_secs, started_at, completed_at, result, field FROM mission_sessions WHERE id = $1",
             )
             .bind(session)
             .fetch_optional(db)
             .await?;
-            let Some((player, raid_id, min_secs, started_at, completed_at, stored)) = row else {
+            let Some((player, raid_id, min_secs, started_at, completed_at, stored, objects)) = row else {
                 return Err(WorldError::Other("unknown session".into()));
             };
             if player != body.player {
@@ -200,9 +199,23 @@ pub async fn complete(state: web::Data<AppState>, req: HttpRequest, path: web::P
             let elapsed = (Utc::now() - started_at).num_milliseconds() as f64 / 1000.0;
             let max_kills = plan.guards.deployed() + KILL_SLACK;
 
+            // Sessions with a manifest must say what was done; amounts come from the
+            // manifest. Sessions from before manifests settle the old way.
+            let objects: Option<FieldManifest> = objects.and_then(|v| serde_json::from_value(v).ok());
+            let assessed: Result<(Option<i64>, f64), &'static str> = match (&objects, &body.record) {
+                (None, _) => Ok((None, min_secs)),
+                (Some(_), None) => Err("no mission record: nothing was secured"),
+                (Some(m), Some(r)) => field::assess(plan.kind, m, r).map(|u| (Some(u), field::min_secs(plan.kind, r.secured.len()).max(min_secs))),
+            };
             let (outcome, verdict, ev) = match body.outcome {
-                Outcome::Extracted => match validate_extraction(elapsed, min_secs, body.kills, max_kills) {
-                    Ok(()) => ("extracted", None, w.execute(&Caller::System, &Action::SettleRaid { raid, player: player.clone() })?),
+                Outcome::Extracted => match assessed.and_then(|(units, need)| validate_extraction(elapsed, need, body.kills, max_kills).map(|_| units)) {
+                    Ok(units) => {
+                        let act = match (plan.kind, units) {
+                            (cz_economy::OpKind::Sabotage, _) | (_, None) => Action::SettleRaid { raid, player: player.clone() },
+                            (_, Some(units)) => Action::SettleSecured { raid, player: player.clone(), units },
+                        };
+                        ("extracted", None, w.execute(&Caller::System, &act)?)
+                    }
                     Err(why) => ("rejected", Some(why), w.execute(&Caller::System, &Action::FailRaid { raid, player: player.clone() })?),
                 },
                 Outcome::Killed => ("killed", None, w.execute(&Caller::System, &Action::FailRaid { raid, player: player.clone() })?),
@@ -231,6 +244,9 @@ pub async fn complete(state: web::Data<AppState>, req: HttpRequest, path: web::P
                 "target": plan.target,
                 "resource": plan.resource.name(),
                 "extracted_units": units,
+                "manifest": plan.manifest,
+                "record": body.record,
+                "site": crate::handlers::world::site_json(&plan),
                 "bounty": bounty,
                 "player_holdings": {
                     "credits": w.balance(&cz_economy::player_account(&player), cz_economy::Asset::Credits),
@@ -246,14 +262,61 @@ pub async fn complete(state: web::Data<AppState>, req: HttpRequest, path: web::P
                 result["debrief"] = json!(story::debrief(&f, &result, after));
                 result["codename"] = stored_story.as_ref().map(|s| s["story"]["codename"].clone()).unwrap_or(Value::Null);
             }
-            sqlx::query("UPDATE mission_sessions SET completed_at = now(), outcome = $2, result = $3 WHERE id = $1")
+            sqlx::query("UPDATE mission_sessions SET completed_at = now(), outcome = $2, result = $3, record = $4 WHERE id = $1")
                 .bind(session)
                 .bind(outcome)
                 .bind(&result)
+                .bind(body.record.as_ref().map(|r| json!(r)))
                 .execute(db)
                 .await?;
             log_event(db, w.tick, &format!("player:{player}"), "mission", &json!({ "phase": "complete", "session": session, "result": result })).await?;
             Ok(json!({ "replayed": false, "result": result }))
+        })
+        .await;
+    respond(res)
+}
+
+/// A gun the player may carry in: standard issue, or gear they own on the ledger.
+fn check_gun(w: &cz_economy::World, player: &str, gun: &str) -> Result<(), WorldError> {
+    if STANDARD_ISSUE.contains(&gun) {
+        return Ok(());
+    }
+    let g = cz_economy::Gear::parse(gun).ok_or_else(|| WorldError::Other(format!("unknown weapon {gun}")))?;
+    if !w.owns(player, g) {
+        return Err(WorldError::Other(format!("you don't own the {}; buy one from Vex's armory", g.title())));
+    }
+    Ok(())
+}
+
+#[derive(Deserialize)]
+pub struct LoadoutRequest {
+    pub gun: String,
+}
+
+/// Choose the weapon after the briefing. Ownership is checked against the economy
+/// (which mirrors the player's NEAR balance) exactly as at start.
+pub async fn loadout(state: web::Data<AppState>, req: HttpRequest, path: web::Path<Uuid>, body: web::Json<LoadoutRequest>) -> HttpResponse {
+    let who = match crate::handlers::auth::player(&state, &req).await {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
+    let session = path.into_inner();
+    let gun = body.into_inner().gun;
+    let res = state
+        .world
+        .transact(async move |w, db| {
+            let row: Option<(String, Option<DateTime<Utc>>)> = sqlx::query_as("SELECT player, completed_at FROM mission_sessions WHERE id = $1").bind(session).fetch_optional(db).await?;
+            let Some((player, done)) = row else { return Err(WorldError::Other("unknown session".into())) };
+            if player != who.account {
+                return Err(WorldError::Other("session belongs to another player".into()));
+            }
+            if done.is_some() {
+                return Err(WorldError::Other("that operation is over".into()));
+            }
+            check_gun(w, &player, &gun)?;
+            sqlx::query("UPDATE mission_sessions SET gun = $2 WHERE id = $1").bind(session).bind(&gun).execute(db).await?;
+            log_event(db, w.tick, &format!("player:{player}"), "mission", &json!({ "phase": "loadout", "session": session, "gun": gun })).await?;
+            Ok(json!({ "session": session, "gun": gun }))
         })
         .await;
     respond(res)

@@ -1,5 +1,6 @@
 // Typed client for the CONTRACT ZERO API (apps/api).
-import type { ConvoyContract } from '@/engine/fps/convoy';
+import type { ConvoyContract, SiteConditions, SiteRef } from '@/engine/fps/convoy';
+import type { FieldRecord } from '@/engine/fps/field';
 import type { MissionStory, StoryLine } from '@/engine/story/presence';
 
 /** The API base URL. Sessions are a SameSite cookie, so in local development the API
@@ -47,7 +48,18 @@ export interface BoardEntry {
   guards: GuardPlan;
   bounty: { id: number; sponsor: string; sponsor_name: string; amount: number; expires_at: number } | null;
   market_value: { bid: number; unit_bid: number };
+  /** Where it happens. Absent from servers before sites. */
+  site?: SiteRef;
   mission: ConvoyContract;
+}
+
+/** The world clock: one game hour is `tick_secs` real seconds. */
+export interface WorldClock { tick: number; day: number; hour: number; tick_secs: number; conditions: SiteConditions }
+
+/** A site and the production lines that are down there. */
+export interface SiteStatus {
+  id: string; name: string; owner: string; layout: string; shared_layout: boolean; environment: string;
+  lines: { line: string; resource: ResourceName; down_until: number | null }[];
 }
 
 export interface Holdings { credits: number; ammo: number; med: number; fuel: number }
@@ -75,6 +87,8 @@ export interface WorldView {
   day: number;
   hour: number;
   zone: string;
+  clock?: WorldClock;
+  sites?: SiteStatus[];
   actors: ActorView[];
   market: { insolvent: boolean; strategy: { margin_bp: number; spread_bp: number } };
   prices: PriceView[];
@@ -98,6 +112,10 @@ export interface MissionResult {
   /** Present when NEAR settlement is enabled. 'queued' here is NOT settlement. */
   settlement: { op_id: string; status: string } | null;
   kind?: OpKind;
+  /** What the cargo was, and what the player reported doing (object ids). */
+  manifest?: number;
+  record?: FieldRecord | null;
+  site?: SiteRef;
   /** The cast's account of what happened, written from the result. */
   debrief?: StoryLine[];
   codename?: string | null;
@@ -260,8 +278,11 @@ export const api = {
   career: () => req<Career>('/me/career'),
   missionStory: (session: string) => req<{ story: MissionStory }>(`/missions/${session}/story`).then((r) => r.story),
   settlement: (opId: string) => req<SettlementView>(`/settlements/${encodeURIComponent(opId)}`),
-  completeMission: (session: string, outcome: 'extracted' | 'killed', kills: number) =>
-    req<{ replayed: boolean; result: MissionResult }>(`/missions/${session}/complete`, { method: 'POST', body: JSON.stringify({ outcome, kills }) }),
+  completeMission: (session: string, outcome: 'extracted' | 'killed', kills: number, record?: FieldRecord) =>
+    req<{ replayed: boolean; result: MissionResult }>(`/missions/${session}/complete`, { method: 'POST', body: JSON.stringify({ outcome, kills, record }) }),
+  /** Choose the weapon after the briefing; ownership is checked against the ledger. */
+  missionLoadout: (session: string, gun: string) =>
+    req<{ session: string; gun: string }>(`/missions/${session}/loadout`, { method: 'POST', body: JSON.stringify({ gun }) }),
   profile: () => req<{ account: string; method: string; provider: string | null; callsign: string | null; enlisted_at: string | null }>('/me/profile'),
   setProfile: (callsign: string) => req<{ callsign: string }>('/me/profile', { method: 'POST', body: JSON.stringify({ callsign }) }),
   exchange: (player?: string | null) => req<ExchangeView>(`/exchange${player ? `?player=${encodeURIComponent(player)}` : ''}`),

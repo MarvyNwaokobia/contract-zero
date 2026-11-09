@@ -18,6 +18,7 @@ pub mod mission;
 pub mod policy;
 pub mod pricing;
 pub mod scenario;
+pub mod site;
 
 use std::collections::BTreeMap;
 
@@ -508,6 +509,10 @@ pub enum Action {
     SetStrategy { strategy: Strategy },
     StartRaid { target: String, resource: Resource },
     SettleRaid { raid: u64, player: String },
+    /// Settle with only the cargo the player physically secured (`units`, counted by
+    /// the server from the session's own manifest). A raid's bounty needs at least
+    /// half the manifest; sabotage and recovery are all-or-nothing upstream.
+    SettleSecured { raid: u64, player: String, units: i64 },
     FailRaid { raid: u64, player: String },
     /// A sabotage or recovery operation (a raid is `StartRaid`).
     StartOperation { kind: OpKind, target: String, resource: Resource },
@@ -526,6 +531,7 @@ impl Action {
             Action::SetStrategy { .. } => "set_strategy",
             Action::StartRaid { .. } => "start_raid",
             Action::SettleRaid { .. } => "settle_raid",
+            Action::SettleSecured { .. } => "settle_secured",
             Action::FailRaid { .. } => "fail_raid",
             Action::StartOperation { .. } => "start_operation",
             Action::PostContract { .. } => "post_contract",
@@ -884,7 +890,8 @@ impl World {
                 Ok(vec![Event::StrategyChanged { strategy: self.market.strategy }])
             }
             Action::StartRaid { target, resource } => self.start_raid(caller_player(caller), target, *resource),
-            Action::SettleRaid { raid, player } => self.settle_raid(*raid, player),
+            Action::SettleRaid { raid, player } => self.settle_raid(*raid, player, None),
+            Action::SettleSecured { raid, player, units } => self.settle_raid(*raid, player, Some(*units)),
             Action::FailRaid { raid, player } => self.fail_raid(*raid, player),
             Action::StartOperation { kind, target, resource } => self.start_operation(caller_player(caller), *kind, target, *resource),
             Action::PostContract { kind, target, resource, amount, convoy } => self.post_contract(caller_actor(caller), *kind, target, *resource, *amount, *convoy),
@@ -915,7 +922,7 @@ impl World {
                 if *id == self.market.merchant { Ok(self.actor(id)?.account.clone()) } else { Err(deny()) }
             }
             (Caller::Player(p), Action::Trade { .. } | Action::StartRaid { .. } | Action::StartOperation { .. }) => Ok(player_account(p)),
-            (Caller::System, Action::SettleRaid { .. } | Action::FailRaid { .. }) => Ok(WORLD.into()),
+            (Caller::System, Action::SettleRaid { .. } | Action::SettleSecured { .. } | Action::FailRaid { .. }) => Ok(WORLD.into()),
             _ => Err(deny()),
         }
     }
@@ -1065,7 +1072,7 @@ impl World {
     /// The raid succeeded: the depot's cargo goes to the player, plus any open bounty on
     /// that depot. The player receives what the depot actually holds now, up to the
     /// planned manifest, so nothing is ever created. Settling twice is rejected.
-    fn settle_raid(&mut self, id: u64, player: &str) -> Result<Vec<Event>, EconError> {
+    fn settle_raid(&mut self, id: u64, player: &str, secured: Option<i64>) -> Result<Vec<Event>, EconError> {
         let raid = self.raids.get(&id).ok_or_else(|| unknown("raid", &id.to_string()))?.clone();
         match &raid.status {
             RaidStatus::Extracted { .. } => return Err(EconError::AlreadySettled { raid: id }),
@@ -1075,7 +1082,8 @@ impl World {
         }
         let target = self.actor(&raid.plan.target)?.account.clone();
         let asset = Asset::Res(raid.plan.resource);
-        let units = raid.plan.manifest.min(self.balance(&target, asset));
+        let cap = secured.map_or(raid.plan.manifest, |u| u.clamp(0, raid.plan.manifest));
+        let units = cap.min(self.balance(&target, asset));
         let to = player_account(player);
         let mut batch = Vec::new();
         let kind = raid.plan.kind;
@@ -1090,7 +1098,9 @@ impl World {
                 }
             }
         }
-        let bounty = if kind == OpKind::Raid { self.bounty_for(&raid.plan.target, raid.plan.resource).cloned() } else { contract };
+        // A raid bounty pays for hitting the depot properly: half the manifest or more.
+        let enough = secured.is_none_or(|u| 2 * u.max(0) >= raid.plan.manifest);
+        let bounty = if kind == OpKind::Raid { self.bounty_for(&raid.plan.target, raid.plan.resource).filter(|_| enough).cloned() } else { contract };
         if let Some(b) = &bounty {
             batch.push(Transfer { from: b.escrow(), to, asset: Asset::Credits, qty: b.amount, reason: Reason::BountyPaid { bounty: b.id, raid: id } });
         }

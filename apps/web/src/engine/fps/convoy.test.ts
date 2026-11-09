@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildConvoyMission, convoyDifficulty, loadSeconds, CARGO_POINT, type ConvoyContract } from './convoy';
+import { buildConvoyMission, buildSabotageMission, buildRecoveryMission, conditionsFor, convoyDifficulty, loadSeconds, CARGO_POINT, type ConvoyContract } from './convoy';
 import type { CoverBox } from './index';
 
 const base: ConvoyContract = {
@@ -21,13 +21,39 @@ describe('convoy mission', () => {
     expect(a).not.toEqual(b);
   });
 
-  it('runs intercept → clear → push → load → extract', () => {
+  it('runs breach → clear → push → secure the cases → extract', () => {
     const m = buildConvoyMission(base);
-    expect(m.objectives.map((o) => o.kind)).toEqual(['reach', 'clear', 'reach', 'defend', 'reach']);
+    expect(m.objectives.map((o) => o.kind)).toEqual(['reach', 'clear', 'reach', 'secure', 'extract']);
     const load = m.objectives[3];
     expect(load.pos).toEqual(CARGO_POINT);
     expect(load.holdSecs).toBe(loadSeconds(120));
-    expect(m.objectives[4].pos).toEqual(m.start); // walk the cargo back out
+    expect(m.objectives[4].pos).toEqual(m.field!.exfil!.pos);
+    // 120 units → 4 cases (the cap), summing to the manifest
+    const cases = m.field!.items.filter((i) => i.kind === 'cargo_case');
+    expect(cases.length).toBe(4);
+    expect(cases.reduce((n, c) => n + (c.units ?? 0), 0)).toBe(120);
+  });
+
+  it('plays at its site whatever the hour, and the hour sets the conditions', () => {
+    const site = { id: 'blacksite', name: 'Blacksite', layout: 'blacksite' as const, facility: 'medical vault', exfil: 'landing zone outside the gate' };
+    const day = buildConvoyMission({ ...base, site, conditions: conditionsFor('day') });
+    const night = buildConvoyMission({ ...base, site, conditions: conditionsFor('night') });
+    expect(day.level).toBe('blacksite');
+    expect(night.level).toBe('blacksite');
+    expect(day.zone).toBe('DUSTLINE'); // daylight theme
+    expect(night.zone).toBe('BLACKSITE');
+    expect(day.attachments).toBeUndefined();
+    expect(night.attachments).toEqual(['nvg']);
+    expect(night.conditions!.engageRange).toBeLessThan(day.conditions!.engageRange);
+    expect(day.enemies).toEqual(night.enemies); // same guards, same posts
+  });
+
+  it('sabotage plants on two named targets; recovery carries one seized case to a handover', () => {
+    const sab = buildSabotageMission({ ...base, kind: 'sabotage' });
+    expect(sab.objectives.filter((o) => o.kind === 'plant').map((o) => o.item)).toEqual(['charge-1', 'charge-2']);
+    const rec = buildRecoveryMission({ ...base, kind: 'recovery' });
+    expect(rec.objectives.map((o) => o.kind)).toEqual(['reach', 'reach', 'retrieve', 'extract']);
+    expect(rec.field!.exfil!.mode).toBe('handover');
   });
 
   it('spawns every escort clear of walls and cover', () => {

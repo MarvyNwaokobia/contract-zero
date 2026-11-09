@@ -7,20 +7,24 @@
  * existing FPS engine. It is pure and seeded: the same contract always produces
  * the same mission, so the server can recompute exactly what the player faced.
  *
- * The level comes from the contract's zone (fps/levels): DUSTLINE and REDYARD play
- * the Dustline depot, BLACKSITE the night facility. Flow on either:
- *   1. BREACH                reach the entry point, wakes the outer guard (room 1)
- *   2. CLEAR                 kill the outer guard
- *   3. PUSH IN               reach the inner threshold, wakes the inner guard (room 2)
- *   4. LOAD THE CARGO        hold the cargo point while reinforcements come
- *   5. EXTRACT WITH CARGO    walk the cargo back out
+ * The map comes from the contract's SITE (a place in the world the target holds:
+ * Dustline Depot, Blacksite, Cinder Yard). The hour sets the CONDITIONS there:
+ * lighting, how far guards see and how well they shoot, how fast relief arrives,
+ * and whether night vision is issued. The clock never moves the objective.
+ *
+ *   RAID      breach → clear → push in → SECURE the cargo cases (E) → EXTRACT
+ *   SABOTAGE  breach → PLANT charge one (E) → push in → PLANT charge two → EXTRACT
+ *   RECOVERY  breach → push in → RETRIEVE the seized case (E) → HANDOVER
+ *
+ * Contracts from before sites were bound play where their old zone said.
  */
 
 import type { CoverBox, EnemySpec } from './index';
 import type { GunId } from '../combat/GunStats';
 import type { Mission } from './campaign';
 import { mulberry32 } from './endless';
-import { LEVELS, levelForZone, type LevelDef, type Rect } from './levels';
+import { LEVELS, levelForZone, type LevelDef, type LevelId, type Rect } from './levels';
+import { buildField, practiceManifest, type FieldManifest } from './field';
 
 export type Resource = 'ammo' | 'med' | 'fuel';
 export type ConvoyZone = 'DUSTLINE' | 'REDYARD' | 'BLACKSITE';
@@ -61,6 +65,46 @@ export interface ConvoyContract {
   /** The guards the faction could actually arm. When absent (training), escorts come
    *  from `defense` alone via `convoyDifficulty`. */
   guards?: GuardPlan;
+  /** Where it happens (the server's `site_json`). Absent: the old zone rule. */
+  site?: SiteRef;
+  /** What the hour does there (the server's `conditions`). */
+  conditions?: SiteConditions;
+  /** The physical objects (the server's `field_manifest`). Absent: built locally. */
+  field?: FieldManifest;
+}
+
+export interface SiteRef {
+  id: string; name: string; region?: string; environment?: string; owner?: string;
+  layout: LevelId; shared_layout?: boolean; facility: string; exfil: string;
+}
+
+export type Phase = 'day' | 'dusk' | 'night';
+export interface SiteConditions {
+  phase: Phase; hour?: number; lighting?: string; sight_m: number; accuracy_bp: number; reinforce_bp: number; nvg: boolean;
+  patrol?: string; next_phase?: Phase; next_change_hour?: number; ticks_to_change?: number;
+}
+
+/** The lighting theme each phase uses (campaign ZONE_THEMES). */
+export const PHASE_THEME: Record<Phase, string> = { day: 'DUSTLINE', dusk: 'REDYARD', night: 'BLACKSITE' };
+export const ZONE_PHASE: Record<string, Phase> = { DUSTLINE: 'day', REDYARD: 'dusk', BLACKSITE: 'night' };
+
+/** Conditions for practice, mirroring the server's `site::conditions`. */
+export function conditionsFor(phase: Phase): SiteConditions {
+  return phase === 'day' ? { phase, sight_m: 30, accuracy_bp: 10_000, reinforce_bp: 10_000, nvg: false, lighting: 'Full daylight', patrol: 'Day shift: full patrols, long sight lines' }
+    : phase === 'dusk' ? { phase, sight_m: 26, accuracy_bp: 9_200, reinforce_bp: 8_000, nvg: false, lighting: 'Low sun, long shadows', patrol: 'Shift change: relief squads arrive faster' }
+    : { phase, sight_m: 20, accuracy_bp: 8_000, reinforce_bp: 11_000, nvg: true, lighting: 'Dark: floodlights and lamps only', patrol: 'Night watch: short sight lines, slower to reinforce; NVG issued' };
+}
+
+/** Practice sites: the same places the server binds contracts to. */
+export const PRACTICE_SITES: SiteRef[] = [
+  { id: 'dustline-depot', name: 'Dustline Depot', owner: 'vanguard', layout: 'dustline_depot', facility: 'munitions warehouse', exfil: "Vex's flatbed at the south gate", environment: 'Outdoor logistics yard' },
+  { id: 'blacksite', name: 'Blacksite', owner: 'vanguard', layout: 'blacksite', facility: 'armoury vault', exfil: 'landing zone outside the gate', environment: 'Fortified research facility' },
+];
+
+/** Names of the two charge targets on each map, by site. */
+function chargeTargets(site: SiteRef | undefined, layout: LevelId): [string, string] {
+  if (site?.id === 'cinder-yard') return ['refinery tanks', 'pump house'];
+  return layout === 'blacksite' ? ['APC motor bay', 'server room'] : ['fuel depot', 'munitions line'];
 }
 
 export const RESOURCE_LABEL: Record<Resource, string> = {
@@ -137,103 +181,152 @@ export function escortsFor(c: ConvoyContract) {
   };
 }
 
-export function buildConvoyMission(c: ConvoyContract, gun: GunId = 'assault_rifle' as GunId): Mission {
-  const esc = escortsFor(c);
-  const rng = mulberry32(c.seed >>> 0);
-  const label = RESOURCE_LABEL[c.cargo.resource];
-  const zone = c.zone ?? 'DUSTLINE';
-  const lv: LevelDef = LEVELS[levelForZone(zone)];
-  const p = lv.points;
-  const geometry = [...lv.walls, ...lv.cover];
-  const night = lv.id === 'blacksite';
+interface Setting {
+  lv: LevelDef;
+  night: boolean;
+  theme: string;
+  site?: SiteRef;
+  cond: SiteConditions;
+  place: string;
+  label: string;
+  esc: ReturnType<typeof escortsFor>;
+  reinforceEvery: number;
+}
 
+function setting(c: ConvoyContract): Setting {
+  const layout: LevelId = c.site?.layout ?? levelForZone(c.zone ?? 'DUSTLINE');
+  const lv = LEVELS[layout];
+  const cond = c.conditions ?? conditionsFor(ZONE_PHASE[c.zone ?? 'DUSTLINE'] ?? 'day');
+  const esc = escortsFor(c);
   return {
-    id: `contract-${c.id}`,
-    zone,
-    level: lv.id,
-    op: c.issuer ? `CONTRACT · ${c.issuer.toUpperCase()}` : `RAID · ${c.target.toUpperCase()}`,
-    name: night ? `${label} · BLACKSITE` : `${label} · DUSTLINE DEPOT`,
-    brief: `raid ${c.target}'s ${night ? 'facility' : 'depot'} · load ${c.cargo.units} ${label.toLowerCase()} · extract`,
-    story: night
-      ? `${c.target} moved ${c.cargo.units} units of ${label.toLowerCase()} into the blacksite vault. ${esc.hall.length} guards hold the courtyard, ${esc.yard.length} the facility.${c.issuer ? ` ${c.issuer} is paying a bounty on it.` : ''} Get in, load it, walk it out.`
-      : `${c.target} has ${c.cargo.units} units of ${label.toLowerCase()} staged in the depot warehouse. ${esc.hall.length} guards on the motor pool, ${esc.yard.length} in the yard.${c.issuer ? ` ${c.issuer} is paying a bounty on it.` : ''} Load it and drive it out the gate.`,
-    gun,
-    start: lv.start,
-    walls: [...lv.walls],
-    cover: [...lv.cover],
-    enemies: [
-      ...placeEscorts(1, lv.rooms[1], esc.hall, esc.hp, geometry, rng),
-      ...placeEscorts(2, lv.rooms[2], esc.yard, esc.hp, geometry, rng),
-    ],
-    objectives: [
-      { text: night ? 'BREACH THE COURTYARD' : 'HIT THE MOTOR POOL', kind: 'reach', pos: p.entry, activateRoom: 1, beats: ['opBreach'] },
-      { text: night ? 'CLEAR THE COURTYARD' : 'CLEAR THE MOTOR POOL', kind: 'clear', room: 1, pos: p.entry, beats: ['troopsCleared', 'rivalFirstWord'] },
-      { text: night ? 'ENTER THE FACILITY' : 'CROSS INTO THE YARD', kind: 'reach', pos: p.push, activateRoom: 2, beats: ['opPushIn'] },
-      {
-        text: `LOAD THE ${label}`, kind: 'defend', pos: p.cargo, holdSecs: loadSeconds(c.cargo.units),
-        reinforceRoom: 2, reinforceEvery: esc.reinforceEvery, reinforceCount: esc.reinforceCount,
-      },
-      { text: 'EXTRACT WITH THE CARGO', kind: 'reach', pos: p.extract },
-    ],
-    attachments: night ? ['nvg'] : undefined,
+    lv, cond, site: c.site, esc,
+    night: cond.phase === 'night',
+    theme: PHASE_THEME[cond.phase],
+    place: c.site?.name ?? (layout === 'blacksite' ? 'Blacksite' : 'Dustline Depot'),
+    label: RESOURCE_LABEL[c.cargo.resource],
+    reinforceEvery: +(esc.reinforceEvery * cond.reinforce_bp / 10_000).toFixed(2),
   };
 }
 
-/** Seconds to plant one charge. Matches PLANT_SECS on the server. */
+function fieldFor(c: ConvoyContract, kind: OpKind, st: Setting) {
+  const m = c.field ?? practiceManifest(kind, c.cargo.units, c.defense);
+  return buildField(kind, st.lv.field, m, {
+    charges: st.lv.points.charges,
+    chargeTargets: chargeTargets(st.site, st.lv.id),
+    cargoLabel: st.label,
+    exfilLabel: st.site?.exfil ?? (st.lv.id === 'blacksite' ? 'landing zone outside the gate' : 'the flatbed at the south gate'),
+    handoverLabel: kind === 'recovery' && st.site ? st.site.exfil : `${c.issuer ?? 'the owner'}'s truck`,
+  });
+}
+
+function shell(c: ConvoyContract, st: Setting, gun: GunId, kind: OpKind) {
+  const geometry = [...st.lv.walls, ...st.lv.cover];
+  const rng = mulberry32(c.seed >>> 0);
+  return {
+    zone: st.theme,
+    level: st.lv.id,
+    gun,
+    start: st.lv.start,
+    walls: [...st.lv.walls],
+    cover: [...st.lv.cover],
+    enemies: [
+      ...placeEscorts(1, st.lv.rooms[1], st.esc.hall, st.esc.hp, geometry, rng),
+      ...placeEscorts(2, st.lv.rooms[2], st.esc.yard, st.esc.hp, geometry, rng),
+    ],
+    attachments: st.cond.nvg ? (['nvg'] as Mission['attachments']) : undefined,
+    field: fieldFor(c, kind, st),
+    reserveMags: 3,
+    medkits: 1,
+    conditions: { phase: st.cond.phase, engageRange: st.cond.sight_m, enemyAccuracy: st.cond.accuracy_bp / 10_000 },
+    site: { id: st.site?.id ?? st.lv.id, name: st.place, facility: st.site?.facility ?? '', exfil: st.site?.exfil ?? '' },
+  };
+}
+
+const cinder = (st: Setting) => st.site?.id === 'cinder-yard';
+const entryObj = (st: Setting) => (cinder(st) ? 'HIT THE YARD GATE' : st.lv.id === 'blacksite' ? 'BREACH THE COURTYARD' : 'HIT THE MOTOR POOL');
+const clearObj = (st: Setting) => (cinder(st) ? 'CLEAR THE GATE YARD' : st.lv.id === 'blacksite' ? 'CLEAR THE COURTYARD' : 'CLEAR THE MOTOR POOL');
+const pushObj = (st: Setting) => (cinder(st) ? 'CROSS INTO THE TANK FARM' : st.lv.id === 'blacksite' ? 'ENTER THE FACILITY' : 'CROSS INTO THE YARD');
+
+export function buildConvoyMission(c: ConvoyContract, gun: GunId = 'assault_rifle' as GunId): Mission {
+  const st = setting(c);
+  const p = st.lv.points;
+  const base = shell(c, st, gun, 'raid');
+  const cases = base.field.items.filter((i) => i.kind === 'cargo_case').length;
+  const where = st.site?.facility ? `the ${st.site.facility}` : st.lv.id === 'blacksite' ? 'the vault' : 'the depot warehouse';
+  return {
+    ...base,
+    id: `contract-${c.id}`,
+    op: c.issuer ? `CONTRACT · ${c.issuer.toUpperCase()}` : `RAID · ${c.target.toUpperCase()}`,
+    name: `${st.label} · ${st.place.toUpperCase()}`,
+    brief: `raid ${c.target} at ${st.place} · secure ${c.cargo.units} ${st.label.toLowerCase()} in ${cases} case${cases === 1 ? '' : 's'} · extract`,
+    story: `${c.target} has ${c.cargo.units} units of ${st.label.toLowerCase()} in ${where} at ${st.place}, packed in ${cases} case${cases === 1 ? '' : 's'}. ${st.esc.hall.length} guards on the outer zone, ${st.esc.yard.length} inside.${c.issuer ? ` ${c.issuer} is paying a bounty on it.` : ''} Carry out what you can; only what reaches the extraction counts.`,
+    objectives: [
+      { text: entryObj(st), kind: 'reach', pos: p.entry, activateRoom: 1, beats: ['opBreach'] },
+      { text: clearObj(st), kind: 'clear', room: 1, pos: p.entry, beats: ['troopsCleared', 'rivalFirstWord'] },
+      { text: pushObj(st), kind: 'reach', pos: p.push, activateRoom: 2, beats: ['opPushIn'] },
+      {
+        text: `SECURE THE ${st.label}`, kind: 'secure', pos: p.cargo, holdSecs: loadSeconds(c.cargo.units),
+        reinforceRoom: 2, reinforceEvery: st.reinforceEvery, reinforceCount: st.esc.reinforceCount,
+      },
+      { text: 'EXTRACT WITH THE CARGO', kind: 'extract', pos: base.field.exfil!.pos, reinforceRoom: 2, reinforceEvery: st.reinforceEvery * 1.6, reinforceCount: st.esc.reinforceCount },
+    ],
+  };
+}
+
+/** Seconds to plant one charge. Matches CHARGE_SECS on the server. */
 export const PLANT_SECS = 5;
 
 /**
- * SABOTAGE: knock out the faction's production line. Two charges in two parts of the
- * site, no need to clear anyone (stealth pays), then get clear. The server destroys
- * the stock and halts that production for 36 hours on success.
+ * SABOTAGE: knock out the faction's production line. Two charges on two real targets,
+ * no need to clear anyone (stealth pays), then get clear before the fuse runs out.
+ * The server destroys the stock and halts that production for 36 hours on success.
  */
 export function buildSabotageMission(c: ConvoyContract, gun: GunId = 'assault_rifle' as GunId): Mission {
-  const base = buildConvoyMission(c, gun);
-  const lv = LEVELS[base.level!];
-  const p = lv.points;
-  const night = lv.id === 'blacksite';
-  const label = RESOURCE_LABEL[c.cargo.resource].toLowerCase();
-  const esc = escortsFor(c);
+  const st = setting(c);
+  const p = st.lv.points;
+  const base = shell(c, st, gun, 'sabotage');
+  const [a, b] = chargeTargets(st.site, st.lv.id);
+  const label = st.label.toLowerCase();
   return {
     ...base,
     id: `sabotage-${c.id}`,
-    name: night ? 'SABOTAGE · BLACKSITE' : 'SABOTAGE · DUSTLINE DEPOT',
-    brief: `plant two charges · knock out ${c.target}'s ${label} production · get clear`,
-    story: `${c.issuer ?? 'A sponsor'} wants ${c.target}'s ${label} line down. Plant one charge ${night ? 'on the APC motor bay' : 'at the fuel depot'} and one ${night ? 'in the server room' : 'on the munitions line inside the warehouse'}. You don't have to fight them all, just get out before they work out what you did.`,
+    op: c.issuer ? `CONTRACT · ${c.issuer.toUpperCase()}` : `SABOTAGE · ${c.target.toUpperCase()}`,
+    name: `SABOTAGE · ${st.place.toUpperCase()}`,
+    brief: `plant charges on the ${a} and the ${b} · knock out ${c.target}'s ${label} production · get clear`,
+    story: `${c.issuer ?? 'A sponsor'} wants ${c.target}'s ${label} line at ${st.place} down. Set one charge on the ${a} and one on the ${b}. The fuse is short once the second is set. You don't have to fight them all, just get out before they work out what you did.`,
     objectives: [
-      { text: night ? 'BREACH THE COURTYARD' : 'HIT THE MOTOR POOL', kind: 'reach', pos: p.entry, activateRoom: 1, beats: ['opBreach'] },
-      { text: night ? 'PLANT CHARGE · MOTOR BAY' : 'PLANT CHARGE · FUEL DEPOT', kind: 'defend', pos: p.charges[0], holdSecs: PLANT_SECS, beats: ['rivalFirstWord'] },
-      { text: night ? 'GET INSIDE' : 'CROSS INTO THE YARD', kind: 'reach', pos: p.push, activateRoom: 2, beats: ['opPushIn'] },
-      { text: night ? 'PLANT CHARGE · SERVER ROOM' : 'PLANT CHARGE · MUNITIONS LINE', kind: 'defend', pos: p.charges[1], holdSecs: PLANT_SECS, reinforceRoom: 2, reinforceEvery: esc.reinforceEvery, reinforceCount: esc.reinforceCount },
-      { text: 'GET CLEAR', kind: 'reach', pos: p.extract },
+      { text: entryObj(st), kind: 'reach', pos: p.entry, activateRoom: 1, beats: ['opBreach'] },
+      { text: `PLANT CHARGE · ${a.toUpperCase()}`, kind: 'plant', item: 'charge-1', pos: p.charges[0], beats: ['rivalFirstWord'] },
+      { text: pushObj(st), kind: 'reach', pos: p.push, activateRoom: 2, beats: ['opPushIn'] },
+      { text: `PLANT CHARGE · ${b.toUpperCase()}`, kind: 'plant', item: 'charge-2', pos: p.charges[1], reinforceRoom: 2, reinforceEvery: st.reinforceEvery, reinforceCount: st.esc.reinforceCount },
+      { text: 'GET CLEAR · EXTRACT', kind: 'extract', pos: base.field.exfil!.pos, reinforceRoom: 2, reinforceEvery: st.reinforceEvery * 1.4, reinforceCount: st.esc.reinforceCount },
     ],
   };
 }
 
 /**
  * RECOVERY: a faction seized a merchant caravan; bring the cargo back to its owner.
- * The cargo sits somewhere else on the site, has to be secured under fire, and is
- * handed over to the owner's people, not walked out the way you came.
+ * The one seized case sits where the faction holds such things, has to be freed
+ * under fire, and is handed over to the owner's people at their vehicle.
  */
 export function buildRecoveryMission(c: ConvoyContract, gun: GunId = 'assault_rifle' as GunId): Mission {
-  const base = buildConvoyMission(c, gun);
-  const lv = LEVELS[base.level!];
-  const p = lv.points;
-  const night = lv.id === 'blacksite';
-  const label = RESOURCE_LABEL[c.cargo.resource];
-  const esc = escortsFor(c);
+  const st = setting(c);
+  const p = st.lv.points;
+  const base = shell(c, st, gun, 'recovery');
   const owner = c.issuer ?? 'the owner';
+  const held = st.site?.facility ?? (st.lv.id === 'blacksite' ? 'control room' : 'container yard');
   return {
     ...base,
     id: `recovery-${c.id}`,
-    name: night ? 'RECOVERY · BLACKSITE' : 'RECOVERY · DUSTLINE DEPOT',
-    brief: `find ${owner}'s seized ${label.toLowerCase()} · secure it · hand it over`,
-    story: `${c.target} took ${owner}'s caravan on the road: ${c.cargo.units} units of ${label.toLowerCase()}, now held ${night ? 'in the control room' : 'in the container yard'}. ${owner} pays when it is back in their hands${night ? ' at the gate' : ', at their truck by the east fence'}.`,
+    op: c.issuer ? `CONTRACT · ${c.issuer.toUpperCase()}` : `RECOVERY · ${c.target.toUpperCase()}`,
+    name: `RECOVERY · ${st.place.toUpperCase()}`,
+    brief: `find ${owner}'s seized ${st.label.toLowerCase()} in the ${held} · carry it out · hand it over`,
+    story: `${c.target} took ${owner}'s caravan on the road: ${c.cargo.units} units of ${st.label.toLowerCase()}, sealed in one case and held in the ${held} at ${st.place}. It's heavy. ${owner} pays when it is back in their hands at ${base.field.exfil!.label}.`,
     objectives: [
-      { text: night ? 'BREACH THE COURTYARD' : 'HIT THE MOTOR POOL', kind: 'reach', pos: p.entry, activateRoom: 1, beats: ['opBreach'] },
-      { text: night ? 'GET INSIDE' : 'CROSS INTO THE YARD', kind: 'reach', pos: p.push, activateRoom: 2, beats: ['rivalFirstWord', 'opPushIn'] },
-      { text: `SECURE THE ${label}`, kind: 'defend', pos: p.cache, holdSecs: loadSeconds(c.cargo.units), reinforceRoom: 2, reinforceEvery: esc.reinforceEvery, reinforceCount: esc.reinforceCount },
-      { text: `DELIVER TO ${owner.toUpperCase()}`, kind: 'reach', pos: p.handover },
+      { text: entryObj(st), kind: 'reach', pos: p.entry, activateRoom: 1, beats: ['opBreach'] },
+      { text: pushObj(st), kind: 'reach', pos: p.push, activateRoom: 2, beats: ['rivalFirstWord', 'opPushIn'] },
+      { text: `RETRIEVE THE SEIZED ${st.label}`, kind: 'retrieve', item: 'seized-case', pos: st.lv.field.seized, reinforceRoom: 2, reinforceEvery: st.reinforceEvery, reinforceCount: st.esc.reinforceCount },
+      { text: `DELIVER TO ${owner.toUpperCase()}`, kind: 'extract', pos: base.field.exfil!.pos, reinforceRoom: 2, reinforceEvery: st.reinforceEvery * 1.6, reinforceCount: st.esc.reinforceCount },
     ],
   };
 }

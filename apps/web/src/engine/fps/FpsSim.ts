@@ -141,6 +141,9 @@ export type FpsEvent =
   | { kind: 'weaponSwitch'; gunId: GunId; slot: number; name: string }
   | { kind: 'reloadStart'; duration: number }
   | { kind: 'reloadEnd' }
+  | { kind: 'noReserve' }
+  | { kind: 'healStart'; duration: number }
+  | { kind: 'healEnd'; hp: number }
   | { kind: 'spawn'; enemyId: number }
   // ── slice 3: enemies fighting back ──
   | { kind: 'enemyAim'; enemyId: number; from: Vec3 }               // windup tell begins
@@ -221,7 +224,28 @@ export interface FpsSimOptions {
   /** How long a guard keeps hunting a last-known position before going back to its
    *  post. Defaults to SEARCH_SECS (sized for single rooms); big levels need longer. */
   searchSecs?: number;
+  /** Spare rounds carried per weapon, in magazines. Absent: unlimited (the arena
+   *  modes and the sandbox). Field operations carry a finite reserve and loot more. */
+  reserveMags?: number;
+  /** Field dressings carried at the start (use with the heal key). Default 0. */
+  medkits?: number;
+  /** Time of day: how far guards engage from (default ENGAGE_RANGE) and how well
+   *  they shoot (1 = daylight; lower opens their cone). */
+  engageRange?: number;
+  enemyAccuracy?: number;
 }
+
+/** Which rounds a weapon takes. Loose ammunition on site comes in these two kinds. */
+export type AmmoClass = 'pistol' | 'rifle';
+export function ammoClassOf(id: GunId): AmmoClass {
+  return id === 'sidearm' || id === 'smg' ? 'pistol' : 'rifle';
+}
+/** Most spare magazines a weapon can carry. */
+export const RESERVE_CAP_MAGS = 6;
+export const MAX_MEDKITS = 3;
+/** Seconds to apply a dressing (no firing meanwhile), and what it restores. */
+export const HEAL_SECS = 1.4;
+export const HEAL_HP = 55;
 
 /** A rescue op's hostage: a non-combatant who waits, then trails the player out. */
 export interface Hostage {
@@ -354,6 +378,15 @@ export class FpsSim {
   activeSlot = 0;
   /** Ammo is tracked PER slot, so swapping never refills the other weapon. */
   private ammoBySlot: number[];
+  /** Spare rounds per slot (Infinity when the mode doesn't count them). */
+  private reserveBySlot: number[];
+  private readonly reserveStart: number[];
+  medkits = 0;
+  private readonly medkitsStart: number;
+  healing = false;
+  private healEndsAt = 0;
+  private readonly engageRange: number;
+  private readonly enemySpreadMult: number;
   /** Currently-fitted attachments (the operator's kit, toggled in-mission). */
   readonly attachments = new Set<Attachment>();
   /** The player's equipped ammo (B) — resolves gun stats + drives incendiary burn. */
@@ -436,6 +469,12 @@ export class FpsSim {
     this.ammoId = opts.ammoId ?? 'standard';
     this.gunMods = opts.gunMods ?? {};
     this.ammoBySlot = loadout.map((id) => this.resolveGun(id).magazine);
+    this.reserveStart = loadout.map((id) => (opts.reserveMags === undefined ? Infinity : opts.reserveMags * this.resolveGun(id).magazine));
+    this.reserveBySlot = this.reserveStart.slice();
+    this.medkitsStart = opts.medkits ?? 0;
+    this.medkits = this.medkitsStart;
+    this.engageRange = opts.engageRange ?? FPS_TUNING.ENEMY.ENGAGE_RANGE;
+    this.enemySpreadMult = 1 / Math.max(0.3, opts.enemyAccuracy ?? 1);
     this.gun = this.resolveGun(loadout[0]);
     this.fireMode = (GUN_FIRE_MODES[this.gun.id] ?? ['auto'])[0];
     for (const a of opts.attachments ?? []) this.attachments.add(a);
@@ -699,8 +738,55 @@ export class FpsSim {
     return this.switchGun((this.activeSlot + 1) % this.loadout.length);
   }
 
+  /** Spare rounds for the active weapon. */
+  get reserve(): number { return this.reserveBySlot[this.activeSlot]; }
+
+  /** Room for more rounds of a class across the carried weapons. */
+  reserveRoom(cls: AmmoClass): number {
+    let room = 0;
+    this.loadout.forEach((id, i) => {
+      if (ammoClassOf(id) !== cls || !Number.isFinite(this.reserveBySlot[i])) return;
+      room += Math.max(0, RESERVE_CAP_MAGS * this.resolveGun(id).magazine - this.reserveBySlot[i]);
+    });
+    return room;
+  }
+
+  /** Take `rounds` of a class into the matching weapons, active weapon first, up to
+   *  each one's cap. Returns how many were taken (the rest stay in the container). */
+  addReserve(cls: AmmoClass, rounds: number): number {
+    let left = Math.max(0, Math.floor(rounds));
+    const order = [this.activeSlot, ...this.loadout.map((_, i) => i).filter((i) => i !== this.activeSlot)];
+    for (const i of order) {
+      const id = this.loadout[i];
+      if (left <= 0 || ammoClassOf(id) !== cls || !Number.isFinite(this.reserveBySlot[i])) continue;
+      const take = Math.min(left, Math.max(0, RESERVE_CAP_MAGS * this.resolveGun(id).magazine - this.reserveBySlot[i]));
+      this.reserveBySlot[i] += take;
+      left -= take;
+    }
+    return Math.max(0, Math.floor(rounds)) - left;
+  }
+
+  /** Pick up a field dressing. False when already carrying the most you can. */
+  addMedkit(): boolean {
+    if (this.medkits >= MAX_MEDKITS) return false;
+    this.medkits++;
+    return true;
+  }
+
+  /** Apply a dressing: HEAL_SECS with the weapon lowered, then HEAL_HP back. */
+  useMedkit(): boolean {
+    if (!this.playerAlive || this.healing || this.medkits <= 0 || this.playerHp >= FPS_TUNING.PLAYER_HP) return false;
+    this.medkits--;
+    this.healing = true;
+    this.reloading = false;
+    this.healEndsAt = this.time + HEAL_SECS;
+    this.events.push({ kind: 'healStart', duration: HEAL_SECS });
+    return true;
+  }
+
   startReload(): void {
-    if (this.reloading || this.ammo >= this.gun.magazine) return;
+    if (this.reloading || this.healing || this.ammo >= this.gun.magazine) return;
+    if (this.reserve <= 0) { this.events.push({ kind: 'noReserve' }); return; }
     this.reloading = true;
     this.reloadEndsAt = this.time + this.gun.reloadTime;
     this.events.push({ kind: 'reloadStart', duration: this.gun.reloadTime });
@@ -714,11 +800,18 @@ export class FpsSim {
     // Reload completion.
     if (this.reloading && this.time >= this.reloadEndsAt) {
       this.reloading = false;
-      this.ammo = this.gun.magazine;
+      const take = Math.min(this.gun.magazine - this.ammo, this.reserve);
+      this.ammo += take;
+      if (Number.isFinite(this.reserve)) this.reserveBySlot[this.activeSlot] -= take;
     this.fireMode = (GUN_FIRE_MODES[this.gun.id] ?? ['auto'])[0];
       this.push(produced, { kind: 'reloadEnd' });
     }
     if (input.wantReload) this.startReload();
+    if (this.healing && this.time >= this.healEndsAt) {
+      this.healing = false;
+      if (this.playerAlive) this.playerHp = Math.min(FPS_TUNING.PLAYER_HP, this.playerHp + HEAL_HP);
+      this.push(produced, { kind: 'healEnd', hp: this.playerHp });
+    }
 
     // Respawns (sandbox only — a mission leaves cleared enemies down).
     for (const e of this.enemies) {
@@ -782,7 +875,7 @@ export class FpsSim {
       this.burstLeft > 0;                                       // burst: fire out the queue
     this.prevFiring = input.firing;
 
-    if (wantShoot && !this.reloading && this.time >= this.nextShotAt) {
+    if (wantShoot && !this.reloading && !this.healing && this.time >= this.nextShotAt) {
       this.nextShotAt = this.time + 60 / this.gun.fireRate;
       if (this.ammo <= 0) {
         this.burstLeft = 0;
@@ -1132,7 +1225,7 @@ export class FpsSim {
       // separate aliveness check is needed here — and must not hardcode
       // `this.playerAlive`, which would wrongly block a valid engagement
       // against a still-living teammate after the local player has died.
-      if ((e.boss || tokens < E.MAX_ATTACKERS) && los && dist < E.ENGAGE_RANGE && this.time >= e.aiUntil) {
+      if ((e.boss || tokens < E.MAX_ATTACKERS) && los && dist < this.engageRange && this.time >= e.aiUntil) {
         e.token = true; if (!e.boss) tokens++;
         e.ai = 'aim';
         const aimMs = e.boss ? B.AIM_MS[ph] : E.AIM_MS;
@@ -1182,7 +1275,7 @@ export class FpsSim {
     const aim: Vec3 = [px, eyeY - 0.28, pz];
     const dist = Math.hypot(px - from[0], pz - from[2]);
     const t = clamp01((dist - E.NEAR) / Math.max(1, E.FAR - E.NEAR));
-    const spread = (E.SPREAD_NEAR + (E.SPREAD_FAR - E.SPREAD_NEAR) * t) * spreadMult;
+    const spread = (E.SPREAD_NEAR + (E.SPREAD_FAR - E.SPREAD_NEAR) * t) * spreadMult * this.enemySpreadMult;
     const dir = jitter(normalize([aim[0] - from[0], aim[1] - from[1], aim[2] - from[2]]), spread, this.rng);
 
     // Trace it: cover eats rounds, otherwise find which part of you it strikes.
@@ -1343,6 +1436,9 @@ export class FpsSim {
     // Back to the primary, both weapons topped up.
     this.activeSlot = 0;
     this.ammoBySlot = this.loadout.map((id) => this.resolveGun(id).magazine);
+    this.reserveBySlot = this.reserveStart.slice();
+    this.medkits = this.medkitsStart;
+    this.healing = false;
     this.gun = this.resolveGun(this.loadout[0]);
     this.fireMode = (GUN_FIRE_MODES[this.gun.id] ?? ['auto'])[0];
     this.reloading = false;
@@ -1558,6 +1654,9 @@ export class FpsSim {
       ammo: this.ammo,
       magazine: this.gun.magazine,
       reloading: this.reloading,
+      reserve: this.reserve,
+      medkits: this.medkits,
+      healing: this.healing,
       fireMode: this.fireMode,
       reloadRemaining: this.reloading ? Math.max(0, this.reloadEndsAt - this.time) : 0,
       gunId: this.gun.id,

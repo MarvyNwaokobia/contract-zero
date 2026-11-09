@@ -8,6 +8,7 @@ import { TopBar } from '@/components/ui/Shell'
 import { api, RESOURCE_LABEL, type ActorView, type BoardEntry, type ResourceName } from '@/lib/api'
 import { loadSettings, type Quality } from '@/lib/settings'
 import { useProfile, useSession, useStash } from '@/lib/useSession'
+import { WorldClockPanel } from '@/components/world/WorldClock'
 
 const HangarScene = dynamic(() => import('@/components/hub/HangarScene'), { ssr: false })
 
@@ -41,7 +42,7 @@ function NextOperation({ e, others, signedIn }: { e: BoardEntry; others: BoardEn
     <section className="cz-panel cz-rise p-5">
       <div className="cz-label text-amber">Next operation</div>
       <div className="mt-1 font-display text-3xl font-bold uppercase leading-none tracking-wide">{e.kind === 'sabotage' ? `Sabotage: ${e.resource} line` : e.kind === 'recovery' ? `Recover seized ${e.resource}` : `${RESOURCE_LABEL[e.resource]} raid`}</div>
-      <div className="mt-1 text-sm text-muted">{e.target_name} depot · Dustline · defense level {e.defense}</div>
+      <div className="mt-1 text-sm text-muted">{e.site ? `${e.site.name} · ${e.site.facility}` : `${e.target_name} depot · Dustline`} · defense level {e.defense}</div>
       <div className="mt-4 grid grid-cols-3 gap-3">
         <div><div className="cz-label !text-[10px]">Cargo</div><div className="cz-num font-display text-xl font-bold">{e.manifest}</div><div className="text-xs text-muted">units of {e.resource}</div></div>
         <div><div className="cz-label !text-[10px]">Resale</div><div className="cz-num font-display text-xl font-bold text-amber-hi">{e.market_value.bid}</div><div className="text-xs text-muted">credits at Vex</div></div>
@@ -135,6 +136,7 @@ export default function Hub() {
           {/* operations console */}
           <div className="flex flex-col justify-end gap-4">
             {world.isError && <section className="cz-panel p-4 text-sm text-hostile">Command is unreachable: the game server is down.</section>}
+            <WorldClockPanel clock={world.data?.clock} />
             {next ? (
               <NextOperation e={next} others={board.filter((b) => b !== next)} signedIn={!!session} />
             ) : (

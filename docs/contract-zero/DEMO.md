@@ -20,11 +20,11 @@ There are two ways to run it:
 |---|---|---|
 | 1 | Open the site and click **Continue with Google**. | "A Google account. No wallet, no seed phrase." A NEAR account is created behind it. |
 | 2 | Choose a callsign, then land on the **Hub**. | The hangar, operator, stash and world status, all live data. |
-| 3 | Open **Contracts**, pick the raid with a bounty, then **Deploy**. The briefing types out. | The sponsor's reason is the faction AI's own logged rationale for posting this contract. |
-| 4 | Back on the board before deploying, point out the three kinds. | A raid takes cargo; a sabotage destroys stock and halts production for 36 hours; a recovery returns stolen goods. Each has different objectives and a different route. |
-| 5 | **Armory**: pick a weapon, then **Deploy**. | Dustline Depot by day, Blacksite at night: different maps and lighting. |
-| 6 | Play the raid. | The radio follows the fight. The target faction comes on the channel in its own voice, and remembers you if you've hit it before. |
-| 7 | Extract. Results screen. | The debrief, and what the raid did to the target's stock. |
+| 3 | Open **Contracts**: the clock at the top, then a raid with a bounty → **View intel**. | Each contract sits at a real site (Dustline Depot, Blacksite, Cinder Yard); the hour sets the conditions there. The intel shows the map, objectives, resistance and rewards before anything is chosen. |
+| 4 | Back on the board, point out the three kinds. | A raid takes cargo; a sabotage destroys stock and halts production for 36 hours; a recovery returns stolen goods. Each has different objectives, objects and exit. |
+| 5 | **Accept and get briefed**. The briefing types out. Then **Choose loadout**, pick an owned weapon, **Deploy**. | The sponsor's reason is the faction AI's own logged rationale. The weapon is checked against the player's NEAR balance. |
+| 6 | Play the raid: take ammunition from a crate (E), clear the motor pool, hold E on the cargo cases. | Finite ammunition, real cases. Carrying them slows you, and the HUD shows what you carry. The target comes on the channel in its own voice. |
+| 7 | At the flatbed, press E to call extraction and hold the zone. Results screen. | Only the cases carried out count: the result names them, and the debrief says what the raid did to the target's stock. |
 | 8 | Wait for **Settled on NEAR testnet** and click the transaction. | The cargo is now a token in the player's own account on `assets.contract-zero.testnet`. |
 | 9 | **Exchange**: sell part of the haul to Vex. | Vex is an autonomous merchant: prices move with its stock, and it can decline to buy. With quick trade on, the sale goes on chain without a prompt. |
 | 10 | Wait a game hour or two (a minute or two of real time). | The raided faction reacts on its own: posture, restocking, bounties on rivals. |
@@ -49,6 +49,6 @@ node demo-run.mjs http://127.0.0.1:3000 http://127.0.0.1:8080 ./demo-out
 
 ## Known gaps in the demo
 
-- **§5, "equip owned items":** the loadout is standard issue. Owned gear, as tokens, is Milestone 7 and not yet built.
+- **Cinder Yard** has no map of its own yet; it plays on the depot layout and the intel says so.
 - **§1:** Google sign-in needs the NEAR Auth / Auth0 configuration in `apps/web/.env.local` (see `AUTH.md`). Wallet sign-in works without it.
 - **The NEAR AI planner** needs credits on the NEAR AI Cloud account. Without them the agents run deterministic policies, and the War Room says so.

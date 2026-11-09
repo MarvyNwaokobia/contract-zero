@@ -1,7 +1,7 @@
 'use client'
 
-// The insertion briefing: a letterboxed card between choosing a loadout and the
-// fight. The operation's codename, where and when, then the cast's lines one at a
+// The insertion briefing: a letterboxed card between accepting a contract and
+// choosing a loadout. The operation's codename, where and when, then the cast's lines one at a
 // time over radio static. Every line comes from the server's story (facts it can
 // vouch for); nothing here is invented on the client.
 
@@ -15,7 +15,7 @@ function speaker(id: string) {
   return SPEAKER_META[id as Speaker] ?? { name: id.toUpperCase(), color: '#c9ced6' }
 }
 
-export function Briefing({ story, pending, onDeploy }: { story: MissionStory; pending: boolean; onDeploy: () => void }) {
+export function Briefing({ story, pending, onDeploy, actionLabel = 'Deploy' }: { story: MissionStory; pending: boolean; onDeploy: () => void; actionLabel?: string }) {
   const lines = story.briefing
   const [shown, setShown] = useState(0) // lines fully shown
   const [chars, setChars] = useState(0) // characters of the current line
@@ -72,9 +72,9 @@ export function Briefing({ story, pending, onDeploy }: { story: MissionStory; pe
             })}
           </div>
           <div className="mt-10 flex flex-wrap items-center gap-4">
-            <button className="cz-btn cz-btn-primary px-8 py-3 text-base" onClick={onDeploy} disabled={pending} autoFocus>Deploy</button>
+            <button className="cz-btn cz-btn-primary px-8 py-3 text-base" onClick={onDeploy} disabled={pending} autoFocus>{actionLabel}</button>
             {!done && !pending && <button className="cz-label hover:text-fog" onClick={() => setShown(lines.length)}>Skip ▸</button>}
-            <span className="text-xs text-dim">Enter to deploy · Space to skip</span>
+            <span className="text-xs text-dim">Enter to continue · Space to skip</span>
           </div>
         </div>
       </div>

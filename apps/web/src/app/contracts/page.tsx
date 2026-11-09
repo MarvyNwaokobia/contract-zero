@@ -4,6 +4,9 @@ import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
 import { Panel, Shell, Stat } from '@/components/ui/Shell'
 import { api, RESOURCE_LABEL, type BoardEntry } from '@/lib/api'
+import { WorldClockPanel } from '@/components/world/WorldClock'
+
+const PHASE_WORD = { day: 'by day', dusk: 'at dusk', night: 'at night' } as const
 
 function Guards({ e }: { e: BoardEntry }) {
   const g = e.guards
@@ -27,19 +30,19 @@ const KIND: Record<string, { label: string; badge: string; title: (e: BoardEntry
   raid: {
     label: 'Depot raid', badge: 'bg-amber/15 !text-amber-hi',
     title: (e) => `${RESOURCE_LABEL[e.resource]}: ${e.manifest} units`,
-    does: (e) => `Break into ${e.target_name}'s depot, load the cargo under fire and walk it out. It's yours to keep or sell.`,
+    does: (e) => `Break into ${e.site?.name ?? `${e.target_name}'s depot`}, take the cargo cases from the ${e.site?.facility ?? 'store'} and carry them to the extraction. What you bring out is yours to keep or sell.`,
     changes: (e) => `${e.target_name} loses ${e.manifest} ${e.resource}. Expect it to restock from Vex and field fewer armed guards next time.`,
   },
   sabotage: {
     label: 'Sabotage', badge: 'bg-hostile/15 !text-hostile',
     title: (e) => `${e.target_name}'s ${e.resource} line`,
-    does: () => 'Plant two charges and get clear. No need to fight them all; you take nothing home but the fee.',
+    does: (e) => `Set two charges at ${e.site?.name ?? 'the site'} and get clear before the fuse runs out. No need to fight them all; you take nothing home but the fee.`,
     changes: (e) => `Destroys ${e.manifest} ${e.resource} and stops ${e.target_name} producing it for 36 hours, so it has to buy from the market.`,
   },
   recovery: {
     label: 'Recovery', badge: 'bg-steel/15 !text-steel',
     title: (e) => `Seized ${e.resource}: ${e.manifest} units`,
-    does: (e) => `${e.target_name} took a caravan on the road. Find the cargo, secure it, and hand it back to its owner.`,
+    does: (e) => `${e.target_name} took a caravan on the road and holds it in the ${e.site?.facility ?? 'yard'} at ${e.site?.name ?? 'its site'}. Carry the sealed case out and hand it back to its owner.`,
     changes: (e) => `The ${e.resource} goes back on the owner's shelf and ${e.target_name} loses what it stole. You're paid the fee, not the cargo.`,
   },
 }
@@ -51,13 +54,17 @@ export default function ContractBoard() {
   return (
     <Shell title="Contract Board" back={{ href: '/', label: 'Hub' }}>
       {world.isError && <p className="text-rose-400">The economy server is not reachable.</p>}
+      <div className="mb-4"><WorldClockPanel clock={world.data?.clock} /></div>
       {world.data && board.length === 0 && (
         <Panel><p className="text-muted">Nothing on the board right now. Vanguard may be out of fuel to stage a depot, and nobody is paying for anything else.</p></Panel>
       )}
       <div className="grid gap-3">
         {board.map((e) => {
           const k = KIND[e.kind] ?? KIND.raid
-          const site = world.data?.zone === 'BLACKSITE' ? 'Blacksite · night' : world.data?.zone === 'REDYARD' ? 'Dustline Depot · dusk' : 'Dustline Depot · day'
+          const phase = world.data?.clock?.conditions.phase
+          // Each contract is at its own site; the hour only changes the conditions there.
+          const site = e.site ? `${e.site.name} · ${e.site.facility}${phase ? ` · ${PHASE_WORD[phase]}` : ''}`
+            : world.data?.zone === 'BLACKSITE' ? 'Blacksite · night' : world.data?.zone === 'REDYARD' ? 'Dustline Depot · dusk' : 'Dustline Depot · day'
           const fee = e.bounty?.amount ?? 0
           return (
             <section key={`${e.kind}-${e.target}-${e.resource}`} className="cz-panel p-5">
@@ -77,7 +84,7 @@ export default function ContractBoard() {
                     {e.kind === 'raid' && <Stat label="Cargo sells for" value={`${e.market_value.bid} cr`} hint={`${e.market_value.unit_bid} cr/unit at Vex`} />}
                     <Stat label={e.kind === 'raid' ? 'Bounty' : 'Contract fee'} value={fee ? `${fee} cr` : 'none'} hint={e.bounty ? `from ${e.bounty.sponsor_name}` : undefined} />
                   </div>
-                  <Link href={`/deploy?target=${e.target}&resource=${e.resource}&kind=${e.kind}`} className="cz-btn cz-btn-primary px-6 py-2 text-sm">Deploy</Link>
+                  <Link href={`/deploy?target=${e.target}&resource=${e.resource}&kind=${e.kind}`} className="cz-btn cz-btn-primary px-6 py-2 text-sm">View intel</Link>
                 </div>
               </div>
             </section>

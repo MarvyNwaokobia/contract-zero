@@ -365,6 +365,89 @@ export class FpsAudio {
     osc.stop(now + 0.1);
   }
 
+  /** Picking something up: a soft canvas-and-latch sound. */
+  pickup(): void {
+    this.clack(700, 0.12, 0, 0.07);
+    this.clack(1100, 0.09, 0.06, 0.05);
+  }
+
+  /** Extraction countdown pip; `hi` on the last seconds. */
+  beep(hi = false): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.value = hi ? 1320 : 880;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.05, now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
+    osc.connect(g).connect(this.uiBus);
+    osc.start(now);
+    osc.stop(now + 0.1);
+  }
+
+  /** A demolition charge: a low boom with a long noisy tail, spatialised. */
+  explosion(at: [number, number, number]): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const sp = spatialize(this.lx, this.lz, this.lyaw, at[0], at[2]);
+    const now = ctx.currentTime;
+    const g = ctx.createGain();
+    g.gain.value = Math.max(0.35, sp.gain) * 1.4;
+    const pan = ctx.createStereoPanner();
+    pan.pan.value = sp.pan;
+    g.connect(pan).connect(this.impactBus);
+    const boom = ctx.createOscillator();
+    boom.type = 'sine';
+    boom.frequency.setValueAtTime(90, now);
+    boom.frequency.exponentialRampToValueAtTime(28, now + 0.9);
+    const bg = ctx.createGain();
+    bg.gain.setValueAtTime(1, now);
+    bg.gain.exponentialRampToValueAtTime(0.001, now + 1.2);
+    boom.connect(bg).connect(g);
+    boom.start(now);
+    boom.stop(now + 1.25);
+    const n = ctx.createBufferSource();
+    n.buffer = this.noise(2.2);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(2400, now);
+    lp.frequency.exponentialRampToValueAtTime(180, now + 2);
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.9, now);
+    ng.gain.exponentialRampToValueAtTime(0.001, now + 2.2);
+    n.connect(lp).connect(ng).connect(g);
+    n.start(now);
+    n.stop(now + 2.2);
+    this.duck(0.8, 0.6);
+  }
+
+  /** A site alarm: a rising two-tone wail for a few seconds. */
+  alarm(secs = 4): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.linearRampToValueAtTime(0.035, now + 0.3);
+    g.gain.setValueAtTime(0.035, now + secs - 0.4);
+    g.gain.linearRampToValueAtTime(0.0001, now + secs);
+    for (let t = 0; t < secs; t += 1) {
+      osc.frequency.setValueAtTime(520, now + t);
+      osc.frequency.linearRampToValueAtTime(780, now + t + 0.5);
+      osc.frequency.linearRampToValueAtTime(520, now + t + 1);
+    }
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 1800;
+    osc.connect(lp).connect(g).connect(this.uiBus);
+    osc.start(now);
+    osc.stop(now + secs);
+  }
+
   /** Dry hammer click on an empty magazine. */
   empty(): void {
     this.tick(1500, 0.09, 0);

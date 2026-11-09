@@ -19,7 +19,13 @@ export interface Objective {
   // clear  — kill everyone in a room
   // defend — hold a point for `holdSecs` while reinforcements keep coming
   // rescue — reach the hostage (then a following `reach` walks them to extract)
-  kind: 'reach' | 'clear' | 'defend' | 'rescue';
+  // secure  — take cargo cases with E (done when all are carried, or extraction is called)
+  // plant   — set the charge `item` with E
+  // retrieve — take the seized case `item` with E
+  // extract — call extraction with E, then hold the zone for the countdown
+  kind: 'reach' | 'clear' | 'defend' | 'rescue' | 'secure' | 'plant' | 'retrieve' | 'extract';
+  /** The field object this objective is about (plant / retrieve). */
+  item?: string;
   pos: [number, number];
   room?: number;
   activateRoom?: number;
@@ -61,6 +67,17 @@ export interface Mission {
   level?: import('./levels').LevelId;
   /** A live contract's radio lines from the server, replacing the defaults per trigger. */
   radio?: import('../story/presence').MissionRadio;
+  /** The physical objects of an operation (fps/field). Training compounds get a
+   *  derived field (just the extraction zone) from the scene. */
+  field?: import('./field').FieldSpec;
+  /** Spare magazines per weapon (finite reserve), and dressings at the start.
+   *  Absent: the mode's default (see the scene). */
+  reserveMags?: number;
+  medkits?: number;
+  /** What the hour does: guard reach and accuracy, and the phase for the HUD. */
+  conditions?: { phase: 'day' | 'dusk' | 'night'; engageRange: number; enemyAccuracy: number };
+  /** Where it is, for the HUD and the briefing. */
+  site?: { id: string; name: string; facility: string; exfil: string };
 }
 
 /** Survival escalation: how many attackers and how tough, by 1-based wave. */

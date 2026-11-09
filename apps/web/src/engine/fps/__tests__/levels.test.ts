@@ -102,12 +102,13 @@ describe('operation kinds play differently', () => {
       const shape = (m: typeof raid) => m.objectives.map((o) => `${o.kind}@${o.pos}`).join(' ')
       expect(new Set([shape(raid), shape(sab), shape(rec)]).size).toBe(3)
       // Sabotage plants two charges and never asks you to clear a room.
-      expect(sab.objectives.filter((o) => o.kind === 'defend')).toHaveLength(2)
+      expect(sab.objectives.filter((o) => o.kind === 'plant')).toHaveLength(2)
       expect(sab.objectives.some((o) => o.kind === 'clear')).toBe(false)
       // Recovery secures the cargo away from the raid's cargo point.
       const lv = LEVELS[rec.level!]
-      expect(rec.objectives.find((o) => o.kind === 'defend')!.pos).toEqual(lv.points.cache)
-      expect(rec.objectives[rec.objectives.length - 1].pos).toEqual(lv.points.handover)
+      expect(rec.objectives.find((o) => o.kind === 'retrieve')!.pos).toEqual(lv.field.seized)
+      expect(rec.objectives[rec.objectives.length - 1].pos).toEqual(lv.field.handover.pos)
+      expect(raid.objectives[raid.objectives.length - 1].pos).toEqual(lv.field.exfil.pos)
     })
   }
 })

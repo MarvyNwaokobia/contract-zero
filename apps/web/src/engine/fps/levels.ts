@@ -58,8 +58,31 @@ export interface LevelDef {
     cache: [number, number]; handover: [number, number]
   }
   floor: { kind: 'dirt' | 'concrete' }
+  /** Where the physical objects of an operation stand (fps/field). */
+  field: FieldLayout
   /** Distance the sun's shadow camera must cover. */
   shadowHalf: number
+}
+
+/** An extraction or handover zone, and the vehicle waiting at it (if any). */
+export interface ExfilSpot {
+  pos: [number, number]
+  radius: number
+  vehicle?: { pos: [number, number]; rot: number; kind: 'flatbed' | 'truck' }
+  /** No vehicle: a marked landing zone with flares. */
+  lz?: boolean
+}
+
+export interface FieldLayout {
+  /** Cargo case slots at the cargo point (raid). */
+  cases: [number, number][]
+  /** Where the seized case sits (recovery). */
+  seized: [number, number]
+  /** Loose supplies: ammunition crates, then medical cases, in order. */
+  ammo: [number, number][]
+  med: [number, number][]
+  exfil: ExfilSpot
+  handover: ExfilSpot
 }
 
 const H = 3.4
@@ -139,6 +162,14 @@ const DEPOT: LevelDef = {
     entry: [0, 9], push: [0, -17.5], cargo: [-16, -28.5], extract: [0, 14],
     charges: [[18, 4], [-20.2, -38]],   // the fuel depot · the munitions line in the warehouse
     cache: [16, -36], handover: [26, -24], // the container yard · Vex's truck at the east fence
+  },
+  field: {
+    cases: [[-17, -28.6], [-15, -28.6], [-17, -27], [-15, -27]],
+    seized: [16, -36],
+    ammo: [[-8, 5], [12, -10], [20, -29], [-12, -42]],
+    med: [[-20, -10], [6, -45]],
+    exfil: { pos: [-14, 11.5], radius: 4.5, vehicle: { pos: [-14, 15.2], rot: Math.PI / 2, kind: 'flatbed' } },
+    handover: { pos: [25, -24], radius: 4, vehicle: { pos: [28.2, -24], rot: 0, kind: 'truck' } },
   },
   floor: { kind: 'dirt' },
   shadowHalf: 44,
@@ -222,13 +253,22 @@ const BLACKSITE: LevelDef = {
     charges: [[12.5, 12], [11, -24]],   // the APC motor bay · the server room
     cache: [10, -10], handover: [0, 19], // the control room · out the gate
   },
+  field: {
+    cases: [[-1, -35.5], [1, -35.5], [-1, -33.9], [1, -33.9]],
+    seized: [10, -10],
+    ammo: [[-10, 10], [15, -2], [-12, -20], [5, -38]],
+    med: [[-8, -4], [14, -36]],
+    exfil: { pos: [-12, 18], radius: 4.5, lz: true },
+    handover: { pos: [9, 18], radius: 4, vehicle: { pos: [9, 21], rot: Math.PI / 2, kind: 'truck' } },
+  },
   floor: { kind: 'concrete' },
   shadowHalf: 36,
 }
 
 export const LEVELS: Record<LevelId, LevelDef> = { dustline_depot: DEPOT, blacksite: BLACKSITE }
 
-/** Which level a contract's zone (time of day) plays on. */
+/** Which level a contract plays on when it carries no site (contracts from before
+ *  sites were bound to the world map played wherever the clock said). */
 export function levelForZone(zone: string): LevelId {
   return zone === 'BLACKSITE' ? 'blacksite' : 'dustline_depot'
 }

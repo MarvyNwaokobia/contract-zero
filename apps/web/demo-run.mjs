@@ -108,23 +108,33 @@ const pick = board0.find((b) => b.kind === 'raid' && b.bounty) ?? board0.find((b
 must(pick, 'no raid on the board')
 await step(4, 'Contract board', { contracts: board0.length, kinds, chosen: `${pick.kind} on ${pick.target_name}'s ${pick.resource}: ${pick.manifest} units, ${pick.guards.planned} guards, bounty ${pick.bounty?.amount ?? 0} from ${pick.bounty?.sponsor_name ?? 'nobody'}` })
 
-// 5. Equip and deploy.
+// Contract intel: the site, the hour's conditions, the map, objectives, resistance, rewards.
 const cargoBefore = await chainBalance(PLAYER, pick.resource)
 const targetBefore = (await api('/world')).actors.find((a) => a.id === pick.target)
 await p.goto(`${WEB}/deploy?target=${pick.target}&resource=${pick.resource}&kind=${pick.kind}`, { waitUntil: 'networkidle' })
-await p.getByText('Assault Rifle', { exact: true }).click()
-await wait(2500)
-await step(5, 'Loadout', { weapon: 'Assault Rifle', owned_items: 'standard issue (owned gear is Milestone 7)' })
+await p.waitForSelector('[data-testid=operation-intel]', { timeout: 60000 })
+await wait(1500)
+report[report.length - 1].intel = { site: await p.innerText('[data-testid=intel-site]'), phase: await p.innerText('[data-testid=intel-phase]'), objectives: (await p.locator('[data-testid=intel-objectives] li').allInnerTexts()).map((t) => t.replace(/\s+/g, ' ')) }
+await p.screenshot({ path: `${OUT}/04b-intel.png`, fullPage: true })
 let start = null
 p.on('response', async (r) => { if (r.url().endsWith('/missions/start') && r.ok()) start = await r.json() })
 const deployedAt = Date.now()
-await p.getByRole('button', { name: 'Deploy' }).click()
+await p.click('[data-testid=accept-contract]')
 
 // 3. The briefing.
 await p.waitForSelector('[data-testid=briefing]')
 await p.waitForFunction(() => !/skip ▸/i.test(document.body.innerText), null, { timeout: 90000 })
-await step(3, 'Briefing', { codename: start?.story?.codename, lines: start?.story?.briefing.map((l) => `${l.speaker}: ${l.text}`), source: start?.story?.source })
+await step(3, 'Briefing', { codename: start?.story?.codename, location: start?.story?.location, lines: start?.story?.briefing.map((l) => `${l.speaker}: ${l.text}`), source: start?.story?.source })
 await p.keyboard.press('Enter')
+
+// 5. Equip owned items and deploy: an owned gun if the player has one.
+await p.waitForSelector('[data-testid=deploy]', { timeout: 30000 })
+const owned = p.locator('[data-testid^=gear-]:not([disabled])')
+let weapon = 'Assault Rifle'
+if (await owned.count()) { await owned.first().click(); weapon = (await owned.first().innerText()).split('\n')[0] } else await p.getByText('Assault Rifle', { exact: true }).click()
+await wait(2500)
+await step(5, 'Loadout', { weapon, owned_items: weapon === 'Assault Rifle' ? 'standard issue (no owned gear)' : 'an owned gun token, checked against the ledger' })
+await p.click('[data-testid=deploy]')
 
 // 6. Combat, dialogue, dynamic objectives (autopilot).
 await p.waitForSelector('canvas', { timeout: 120000 })
@@ -135,18 +145,45 @@ const objectives = await p.evaluate(() => window.__czObjectives())
 const heard = new Set()
 const subtitle = async () => p.evaluate(() => [...document.querySelectorAll('div')].find((d) => /^(KESTREL|VANGUARD COMMAND|ASHEN COMPACT|VEX)$/.test(d.textContent ?? '') && d.nextElementSibling)?.nextElementSibling?.textContent ?? null)
 let midShot = false
+// Hold E on a field object until `done` says it has happened.
+const holdOn = async (pos, done, arg) => {
+  await p.evaluate(([x, z]) => { window.__czWarp(x, z + 0.5); window.__czLook(0, -1.2) }, pos)
+  await wait(300)
+  await p.keyboard.down('KeyE')
+  for (let i = 0; i < 120 && !(await p.evaluate(done, arg)); i++) await wait(250)
+  await p.keyboard.up('KeyE')
+}
 for (let guard = 0; guard < 400; guard++) {
   const m = await p.evaluate(() => window.__czMission())
   if (m.complete) break
   const o = objectives[m.objective]
-  const last = m.objective === objectives.length - 1
-  if (last) {
-    // The server rejects a run faster than the mission physically takes.
-    const need = (start?.min_secs ?? 40) * 1000 + 3000 - (Date.now() - deployedAt)
+  const f = await p.evaluate(() => window.__czField())
+  if (o.kind === 'secure') {
+    // Physically take the cases, up to what one operator can carry.
+    for (const c of f.items.filter((i) => i.kind === 'cargo_case').slice(0, 3)) await holdOn(c.pos, (id) => window.__czField().carried.includes(id), c.id)
+    report[report.length - 1].carried = (await p.evaluate(() => window.__czField())).carried
+  } else if (o.kind === 'plant' || o.kind === 'retrieve') {
+    const it = f.items.find((i) => i.id === o.item)
+    await holdOn(it.pos, (id) => window.__czField().planted.includes(id) || window.__czField().carried.includes(id), o.item)
+  }
+  if (o.kind === 'extract' || (o.kind === 'secure' && (await p.evaluate(() => window.__czField().carried.length)) > 0)) {
+    // The server rejects a run faster than its interactions physically take.
+    const carried = (await p.evaluate(() => window.__czField().carried.length))
+    const need = ((start?.min_secs ?? 40) + 2 * carried + 3) * 1000 - (Date.now() - deployedAt)
     if (need > 0) await wait(need)
+    await p.evaluate(() => window.__czKillAll())
+    const z = f.exfil
+    await p.evaluate(([x, zz]) => { window.__czWarp(x, zz); window.__czLook(0, -0.3) }, z.pos)
+    await p.keyboard.down('KeyE')
+    for (let i = 0; i < 60 && (await p.evaluate(() => window.__czField().phase)) !== 'counting'; i++) await wait(250)
+    await p.keyboard.up('KeyE')
+    await wait(3000)
+    await p.screenshot({ path: `${OUT}/06b-extraction.png` })
+    for (let i = 0; i < 120 && !(await p.evaluate(() => window.__czMission().complete)); i++) await wait(250)
+    continue
   }
   if (o.kind === 'clear') await p.evaluate(() => window.__czKillAll())
-  else await p.evaluate(([x, z]) => window.__czWarp(x, z), o.pos)
+  else if (o.kind === 'reach') await p.evaluate(([x, z]) => window.__czWarp(x, z), o.pos)
   if (o.kind === 'defend') await p.evaluate(() => window.__czKillAll())
   const s = await subtitle()
   if (s) heard.add(s)
@@ -160,7 +197,7 @@ report[report.length - 1].lines_heard = [...heard]
 // 7–8, 11. The mission changes the economy; ownership; confirmed settlement.
 await p.waitForURL(/deploy/, { timeout: 5000 }).catch(() => {})
 await p.waitForSelector('[data-testid=debrief]', { timeout: 180000 })
-await step(7, 'Extraction results', { outcome: (await text()).match(/CARGO EXTRACTED|KILLED IN ACTION|RUN REJECTED/)?.[0], debrief: (await p.innerText('[data-testid=debrief]')).replace(/\s+/g, ' ') })
+await step(7, 'Extraction results', { outcome: (await text()).match(/CARGO EXTRACTED|LINE DESTROYED|CARGO HANDED OVER|KILLED IN ACTION[^\n]*|RUN REJECTED/)?.[0], debrief: (await p.innerText('[data-testid=debrief]')).replace(/\s+/g, ' ') })
 await p.waitForFunction(() => /Settled on NEAR testnet/.test(document.body.innerText), null, { timeout: 420000 })
 const settledText = (await text()).match(/Settled on NEAR testnet:[^\n]*/)?.[0]
 const cargoAfter = await chainBalance(PLAYER, pick.resource)

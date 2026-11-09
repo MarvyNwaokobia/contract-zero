@@ -141,8 +141,19 @@ A mission is a pure function of live state, so the server validates exactly the 
 | **Depot raid** | A faction holds ≥ 20 fuel and a depot of ≥ 10 units | The cargo goes faction → player | Built |
 | **Convoy intercept** | A faction shipment is in transit | The shipment never arrives; its cargo goes to the player | Proposed (shipments already exist in the economy) |
 | **Escort** | A merchant caravan is in transit and its owner posts a contract | Success delivers the cargo and pays the contract; failure means a sponsor's raiders take it | Proposed |
-| **Sabotage** | A rival funds it against fuel stock | The target's fuel is destroyed, not transferred. Shipments ground and depots vanish | Proposed |
-| **Recovery** | A faction lost cargo to a raid and posts a buy-back contract | The player can return goods for a fee, or sell them elsewhere | Proposed |
+| **Sabotage** | A rival funds it against a produced resource | Stock is destroyed, not transferred, and that line stops producing for 36 hours | Built |
+| **Recovery** | A faction seizes a merchant caravan and the owner posts a contract | The cargo goes back to its owner for the fee | Built |
+
+**Where and how it's played** (Built; full detail in `MISSIONS.md`):
+- **Site.** Every operation is bound to a site the target holds: Dustline Depot, the Blacksite, or Cinder Yard. The site is chosen by owner, resource and purpose, so the clock never moves the objective.
+- **Conditions.** The hour sets them at the site: lighting, guard sight and accuracy, how fast relief arrives, and whether night vision is issued.
+- **Physical objects.** The player acts on objects with E:
+  - cargo cases split from the manifest, carried and slowing you down;
+  - charges set on named targets;
+  - the one seized case.
+- **Supplies.** Ammunition is finite and replenished from crates and dropped magazines; field dressings come from medical cases.
+- **Extraction.** Each operation ends at a marked zone: a vehicle or a painted landing zone, flares, smoke, and a countdown that pauses when you leave.
+- **Settlement.** The server settles only what its own manifest says the reported objects hold.
 
 **The resource rules apply to every mission type** (Built for depot raids):
 

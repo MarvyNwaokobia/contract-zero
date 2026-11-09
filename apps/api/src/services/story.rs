@@ -41,6 +41,13 @@ pub struct Facts {
     /// The sponsor's own logged rationale for posting this contract.
     pub sponsor_reason: Option<String>,
     pub zone: String,
+    /// Where it happens, and the facility in it. Empty on sessions before sites.
+    #[serde(default)]
+    pub site_name: String,
+    #[serde(default)]
+    pub facility: String,
+    #[serde(default)]
+    pub exfil: String,
     pub tick: u64,
     pub callsign: Option<String>,
     /// This player's record against the target before this mission.
@@ -87,6 +94,9 @@ pub fn facts(w: &World, plan: &RaidPlan, player: &str) -> Facts {
         amount: contract.map(|b| b.amount).unwrap_or(0),
         sponsor_reason: None,
         zone: crate::handlers::world::zone_for_tick(w.tick).to_string(),
+        site_name: plan.site().name.to_string(),
+        facility: cz_economy::site::facility(plan.site(), plan.kind, plan.resource).to_string(),
+        exfil: if plan.kind == cz_economy::OpKind::Recovery { plan.site().handover } else { plan.site().exfil }.to_string(),
         tick: w.tick,
         callsign: None,
         raids: g.raids,
@@ -127,12 +137,14 @@ pub fn authored(f: &Facts) -> Story {
     let sponsor = f.sponsor_name.as_deref();
     let sv = f.sponsor.as_deref().unwrap_or("vex");
     let kind = f.kind.as_str();
+    let place = if f.facility.is_empty() { format!("{t}'s depot") } else { format!("the {} at {}", f.facility, f.site_name) };
+    let exfil = if f.exfil.is_empty() { "the gate".to_string() } else { f.exfil.clone() };
 
     let mut briefing = vec![line("brief-job", "handler", match (kind, sponsor) {
         ("sabotage", Some(s)) => format!("{who}, {s} is paying {} credits to put {t}'s {res} line out of action. Two charges, then get clear.", f.amount),
         ("recovery", Some(s)) => format!("{who}, {t} took a {s} caravan on the road. {s} pays {} credits to get its {} {res} back.", f.amount, f.manifest),
-        ("raid", Some(s)) => format!("{who}, {s} has a {} credit bounty on {t}'s {res}. {} units in the depot, and whatever you carry out is yours.", f.amount, f.manifest),
-        _ => format!("{who}, nobody's paying on this one. {} units of {res} in {t}'s depot. Whatever you carry out is yours to sell.", f.manifest),
+        ("raid", Some(s)) => format!("{who}, {s} has a {} credit bounty on {t}'s {res}. {} units in {place}, and whatever you carry out is yours.", f.amount, f.manifest),
+        _ => format!("{who}, nobody's paying on this one. {} units of {res} in {place}. Whatever you carry out is yours to sell.", f.manifest),
     })];
     if let (Some(reason), Some(_)) = (&f.sponsor_reason, sponsor) {
         if reason.len() <= 160 {
@@ -151,6 +163,20 @@ pub fn authored(f: &Facts) -> Story {
 
     let mut radio: BTreeMap<String, Vec<Line>> = BTreeMap::new();
     let mut put = |trigger: &str, l: Line| radio.entry(trigger.to_string()).or_default().push(l);
+    // The field beats: the physical work, then the way out.
+    put("cargoSecured", line("cargo", "handler", match kind {
+        "recovery" => format!("That's the case. Get it to {exfil}."),
+        _ => format!("Case secured. Take what you can carry and get to {exfil}."),
+    }));
+    put("chargePlaced", line("charge", "handler", "Charge set. One more, then we light it.".into()));
+    put("detonation", line("boom", tv, format!("Fire on the {}! Seal the site, nobody leaves!", if f.facility.is_empty() { "line".into() } else { f.facility.clone() })));
+    put("extractCalled", line("exfil-call", if kind == "recovery" { sv } else { "vex" }, match kind {
+        "recovery" => format!("I see you. Hold at {exfil} while my people load it."),
+        "sabotage" => format!("Ride's waiting at {exfil}. Hold the zone until it rolls."),
+        _ => format!("Lovely. {exfil}, engine running. Hold the zone while we load."),
+    }));
+    put("extractBroken", line("exfil-broken", "handler", "You've left the zone. They won't wait for you, get back in.".into()));
+    put("extractDone", line("exfil-done", "handler", "Wheels up. You're clear.".into()));
 
     put("opStart", line("start", "handler", match kind {
         "sabotage" => format!("Two charge points on the {res} line. Plant both and get clear. You don't have to win the fight."),
@@ -189,7 +215,11 @@ pub fn authored(f: &Facts) -> Story {
     let a = f.seed as usize;
     Story {
         codename: format!("OPERATION {} {}", CODE_A[a % CODE_A.len()], CODE_B[(a / CODE_A.len()) % CODE_B.len()]),
-        location: format!("{} · held by {t}", if f.zone == "BLACKSITE" { "Blacksite" } else { "Dustline Depot" }),
+        location: if f.site_name.is_empty() {
+            format!("{} · held by {t}", if f.zone == "BLACKSITE" { "Blacksite" } else { "Dustline Depot" })
+        } else {
+            format!("{} · {} · held by {t}", f.site_name, f.facility)
+        },
         time: format!("{} · {}", clock(f.tick), match f.zone.as_str() { "BLACKSITE" => "night", "REDYARD" => "dusk", _ => "day" }),
         briefing,
         radio,

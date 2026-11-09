@@ -325,5 +325,5 @@ Each chain carries an **execution-path line**, "CONTRACT ZERO supply order, sett
 **What was not done:**
 - No official NEAR Intents swap was executed. Mainnet funds need explicit approval; the procedure is in §5.
 - No CONTRACT ZERO asset is tradable on NEAR Intents. The requirements are in §5.
-- Partial fills from two merchants on one order are proven in the contract and engine tests and happened live (Vanguard's order #1466, NEAR.md era). The E2E above didn't need one.
+- Partial fills from two merchants on one order are proven in the contract and engine tests and happened live: Vanguard's surplus ammunition order #1466 was filled 3 + 3 by Halcyon and Vex, both fills on chain. The E2E above didn't need one.
 

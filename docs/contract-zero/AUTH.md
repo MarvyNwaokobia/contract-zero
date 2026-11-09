@@ -52,7 +52,7 @@ Every claim below is marked:
 
 Without quick trade, each trade is approved explicitly: a wallet prompt, or a NEAR Auth popup. With quick trade, the player approves once:
 
-1. **A session key is added to their account.** It's generated in the browser and never leaves it. It's a function-call key that can call only `accept_offer`, `accept_bid` and `revoke_session` on `world2`, with a 0.25 NEAR gas allowance.
+1. **A session key is added to their account.** It's generated in the browser and never leaves it. It's a function-call key that can call only `accept_offer`, `accept_bid`, `place_order`, `accept_proposal`, `cancel_order` and `revoke_session` on `world2`, with a 1 NEAR gas allowance. (A function-call key's allowance is charged at a pessimistic gas price for every call's prepaid gas, so a supply order's 80 Tgas needs headroom; the key still can't move assets outside these methods, and the contract holds each call to the player's registered session budgets.)
 2. **A session is registered on `world2`** with a credit budget, a sale budget (units) and an expiry (≤ 7 days), plus a refundable 0.001 NEAR storage deposit.
 
 `world2` (code `2mxwU9PEbYbDuvsunxkPGBwcXPL88FPkpkgxVYLxUp5W`, [upgrade](https://testnet.nearblocks.io/txns/7dkJtkBgVvwRmAp8QpgXQAVhuzP8Ejyyr9uJzsTHQwwN)) looks up the transaction's signing key (`env::signer_account_pk`) when a quote is accepted. If that key is a session:
@@ -94,8 +94,9 @@ So a relayed call can *never* move a player's assets, and trades must be transac
 - **It holds a gas float and no game assets.**
 - **It relays only a player's own, correctly signed delegate actions,** on an allow-list:
   - open or close a session (`register_session` with exactly the 0.001 NEAR deposit, `revoke_session`);
-  - add a key to the player's own account, only if it's a function-call key scoped to `world2` and the session methods, with an allowance ≤ 0.25 NEAR;
+  - add a key to the player's own account, only if it's a function-call key scoped to `world2` and the session methods, with an allowance ≤ 1 NEAR;
   - delete one of the player's own keys.
+- **A NEAR Auth player's own signed transaction** goes through the game only if it calls one of those session methods on `world2`, with no deposit and at most 120 Tgas. The allow-list and the browser's key are pinned together by a test (`auth::tests::the_web_clients_quick_trade_key_is_one_the_relayer_accepts`).
 - **Verified:** an `mt_transfer` on `cz-assets` was refused before submission (401).
 
 ## 4. What remains to verify, and how

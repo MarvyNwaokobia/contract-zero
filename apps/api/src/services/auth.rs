@@ -49,12 +49,17 @@ const NEP413_TAG: u32 = (1 << 31) + 413;
 const NEP366_TAG: u32 = (1 << 30) + 366;
 pub const SESSION_DAYS: i64 = 7;
 pub const COOKIE: &str = "cz_session";
-/// What a session key may call on the controller.
-pub const SESSION_METHODS: [&str; 3] = ["accept_offer", "accept_bid", "revoke_session"];
+/// What a session key may call on the controller: quotes, the player's own supply
+/// orders (place, accept a proposal, cancel), and signing itself out. Every one is
+/// held to the session's budgets and expiry by the controller.
+pub const SESSION_METHODS: [&str; 6] = ["accept_offer", "accept_bid", "place_order", "accept_proposal", "cancel_order", "revoke_session"];
 /// The controller's `SESSION_DEPOSIT` (0.001 NEAR).
 const SESSION_DEPOSIT: u128 = 1_000_000_000_000_000_000_000;
 /// Gas allowance cap for a session key we agree to relay an AddKey for.
-const MAX_KEY_ALLOWANCE: u128 = 250_000_000_000_000_000_000_000; // 0.25 NEAR
+/// Prepaid gas is reserved at a pessimistic price and charged in full to a key's
+/// allowance, so a 110 Tgas accept costs ~0.11 NEAR of allowance however little it
+/// burns: 1 NEAR covers a session's worth of trades and orders.
+const MAX_KEY_ALLOWANCE: u128 = 1_000_000_000_000_000_000_000_000; // 1 NEAR
 
 #[derive(Debug, thiserror::Error)]
 pub enum AuthError {
@@ -454,10 +459,7 @@ impl AuthService {
             }
             Action::AddKey(k) if receiver == player => match &k.access_key.permission {
                 AccessKeyPermission::FunctionCall(p)
-                    if p.receiver_id == controller
-                        && !p.method_names.is_empty()
-                        && p.method_names.iter().all(|m| SESSION_METHODS.contains(&m.as_str()))
-                        && p.allowance.is_some_and(|a| a.as_yoctonear() <= MAX_KEY_ALLOWANCE) =>
+                    if p.receiver_id == controller && session_key_ok(&p.method_names, p.allowance.map(|a| a.as_yoctonear())) =>
                 {
                     Ok("add_session_key")
                 }
@@ -476,8 +478,9 @@ impl AuthService {
             return Err(denied("only your own trades on the game controller are signed through the game"));
         }
         match &tx.actions()[0] {
-            Action::FunctionCall(f) if SESSION_METHODS.contains(&f.method_name.as_str()) && f.deposit.as_yoctonear() == 0 && f.gas <= NearGas::from_tgas(100) => Ok(()),
-            _ => Err(denied("only trade acceptances are signed through the game")),
+            // An accepted proposal may chain the order's refund (110 Tgas); nothing needs more.
+            Action::FunctionCall(f) if trade_call_ok(&f.method_name, f.deposit.as_yoctonear(), f.gas.as_gas()) => Ok(()),
+            _ => Err(denied("only your own trades and supply orders are signed through the game")),
         }
     }
 
@@ -601,6 +604,18 @@ pub fn nep413_hash(message: &str, nonce: &[u8; 32], recipient: &str, callback_ur
     Sha256::digest(&bytes).into()
 }
 
+/// May the relayer add this quick-trade key? Session methods only, never an
+/// unlimited allowance, never more than the cap.
+pub fn session_key_ok(methods: &[String], allowance_yocto: Option<u128>) -> bool {
+    !methods.is_empty() && methods.iter().all(|m| SESSION_METHODS.contains(&m.as_str())) && allowance_yocto.is_some_and(|a| a <= MAX_KEY_ALLOWANCE)
+}
+
+/// May a NEAR Auth player sign this call through the game? A session method, no
+/// deposit, at most 120 Tgas.
+pub fn trade_call_ok(method: &str, deposit_yocto: u128, gas: u64) -> bool {
+    SESSION_METHODS.contains(&method) && deposit_yocto == 0 && gas <= 120_000_000_000_000
+}
+
 /// SHA-256 of the NEP-366 signable message for a delegate action.
 fn nep366_hash(d: &DelegateAction) -> [u8; 32] {
     let mut bytes = borsh::to_vec(&NEP366_TAG).unwrap();
@@ -612,6 +627,34 @@ fn nep366_hash(d: &DelegateAction) -> [u8; 32] {
 mod tests {
     use super::*;
     use ed25519_dalek::{Signer as _, SigningKey};
+
+    #[test]
+    fn the_web_clients_quick_trade_key_is_one_the_relayer_accepts() {
+        // The browser adds this key (apps/web/src/lib/auth.ts, enableQuickTrade); a
+        // NEAR Auth player's relayed AddKey is refused if the two disagree.
+        let src = include_str!("../../../web/src/lib/auth.ts");
+        let line = src.lines().find(|l| l.contains("addFunctionCallAccessKey(pk, world,")).expect("enableQuickTrade's key");
+        let methods: Vec<String> = line.split('[').nth(1).unwrap().split(']').next().unwrap().split(',').map(|m| m.trim().trim_matches('\'').to_string()).collect();
+        let allowance: u128 = line.rsplit(',').next().unwrap().trim().trim_end_matches(')').trim_end_matches('n').replace('_', "").parse().unwrap();
+        assert!(session_key_ok(&methods, Some(allowance)), "{methods:?} / {allowance}");
+        for m in ["place_order", "accept_proposal", "cancel_order"] {
+            assert!(methods.iter().any(|x| x == m), "{m} missing from the browser's key");
+        }
+    }
+
+    #[test]
+    fn the_relayer_refuses_anything_wider() {
+        let m = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(!session_key_ok(&m(&["accept_offer", "mt_transfer"]), Some(1)), "a non-session method");
+        assert!(!session_key_ok(&m(&["accept_offer"]), None), "an unlimited allowance");
+        assert!(!session_key_ok(&m(&["accept_offer"]), Some(MAX_KEY_ALLOWANCE + 1)), "over the cap");
+        assert!(!session_key_ok(&m(&[]), Some(1)), "no methods means every method");
+        assert!(trade_call_ok("place_order", 0, 80_000_000_000_000));
+        assert!(trade_call_ok("accept_proposal", 0, 110_000_000_000_000));
+        assert!(!trade_call_ok("accept_proposal", 0, 300_000_000_000_000), "more gas than any trade needs");
+        assert!(!trade_call_ok("place_order", 1, 80_000_000_000_000), "a deposit");
+        assert!(!trade_call_ok("register_session", 0, 30_000_000_000_000), "not a trade");
+    }
 
     fn key() -> (SigningKey, String) {
         let sk = SigningKey::from_bytes(&[7u8; 32]);

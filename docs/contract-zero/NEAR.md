@@ -35,7 +35,7 @@ No key is in the repository.
 | server | `ed25519:2Vp55RZXdz6iJifKDqtVzuFc1X1fJo4HYVQ3MZve5ApC` ([added](https://testnet.nearblocks.io/txns/H2C2k9AcAdGWt23xhowCfjsPYG81MS7BscbHL13h6eps); the previous `9hg6yCxY…` was [deleted](https://testnet.nearblocks.io/txns/9K64CbkJ3QXqhp2TJwxRkzJo9x3XvqDUeeaMr1LTiZWX)) | `settle_raid`, `apply_flows`, `settle_operation` |
 | vanguard | `ed25519:EVB73ozU…` | `accept_offer`, `accept_bid` |
 | vex | `ed25519:7CUkGTCt…` | `post_offer`, `post_bid`, `cancel_quote` |
-| *a player's quick-trade key* | generated in their browser | `accept_offer`, `accept_bid`, `revoke_session`, held to the budgets and expiry the player registered on `world2` ([AUTH.md](AUTH.md)) |
+| *a player's quick-trade key* | generated in their browser | `accept_offer`, `accept_bid`, `place_order`, `accept_proposal`, `cancel_order`, `revoke_session` (1 NEAR gas allowance), held to the budgets and expiry the player registered on `world2` ([AUTH.md](AUTH.md)) |
 
 The test player holds a key of the kind a wallet grants: `ed25519:B92fjTuZ…`, limited to `world2`'s `accept_offer` and `accept_bid` ([added](https://testnet.nearblocks.io/txns/4Bsm6P2hcEZeoA1rbYxo21YVCtVcnDtZxRcWa4hRSr3G)). It's stored in `~/.contract-zero/keys/players/`. Real players sign with their own wallet, and the server never holds a player key.
 

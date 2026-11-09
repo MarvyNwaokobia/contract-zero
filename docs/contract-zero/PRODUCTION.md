@@ -1,5 +1,7 @@
 # Production plan: from prototype to game
 
+> **This is a dated progress log.** Each entry records what was true on its date; later entries supersede earlier ones (for example, Cinder Yard gained its own map after the entries that say it shares the depot map). For the current state, read the [README](../../README.md) and [DESIGN.md](DESIGN.md).
+
 The master brief describes months of production. The hackathon deadline is **2026-11-14 23:59 UTC**. This plan orders the brief's milestones by what the final demonstration (brief §17) needs most, keeps every milestone playable, and says plainly what won't make the deadline.
 
 ## Audit (2026-11-08)

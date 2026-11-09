@@ -37,18 +37,18 @@ Prices, standing and the next missions all carry over between sessions.
 
 | Actor | Kind | What it wants | How it plays | Status |
 |---|---|---|---|---|
-| **Vanguard** | faction (industrial military) | Hold its territory; keep two days of every resource | Produces ammunition and receives fuel shipments. Defensive: raises escorts after raids and buys to restock. It sells surplus ammunition to merchants | Built (selling via bids: Proposed, see §9) |
-| **Ashen Compact** | faction (scavenger insurgency) | Bleed Vanguard; survive on what it can take | Little production, a lean treasury. It hires contractors (players) against Vanguard depots and convoys, buys medicine aggressively, and pays more when Vanguard is weak | Proposed |
+| **Vanguard** | faction (industrial military) | Hold its territory; keep two days of every resource | Produces ammunition and receives fuel shipments. Defensive: raises escorts after raids and buys to restock. It sells surplus ammunition to merchants | Built (selling surplus through sell orders, §8a) |
+| **Ashen Compact** | faction (fuel-refining militia, Cinder Yard) | Bleed Vanguard; survive on what it can take | Refines fuel, short of ammunition, light garrison. Aggressive: pays bounties to have Vanguard raided first, and retaliates against rivals that paid for raids on it | Built |
 | **Vex Exchange** | merchant (wholesale) | Profit on volume | Deep stock, wide margin, imports by caravan. Sponsors raids on whatever its shelves lack. Goes insolvent if it overpays | Built |
-| **Halcyon Supply** | merchant (retail) | Profit on speed | Thin stock, tight spread, restocks fast but in small lots. Undercuts Vex until its shelves empty, then its prices jump | Proposed |
+| **Halcyon Logistics** | merchant (lean supplier) | Win routine business | Smaller shelves, a thinner margin (12%, floor 8%), commits at most 60% of a shelf to one order; competes with Vex for every supply order and reprices on win/loss streaks | Built (§8a) |
 
 **Why these four:**
 - **Two factions** create sides: helping one hurts the other, and they react to each other's weakness as well as to you.
 - **Two merchants** create price competition: the cheapest seller depends on stock, so buying or dumping at the right place is a skill. Arbitrage between them is real but self-correcting, because every trade moves both price curves.
 
-**Architecture.** Actors are `Actor` records in `World` (`crates/economy/src/lib.rs`) with income, production, consumption, a reserve policy, defense and shipments. A new faction or merchant is new configuration plus a strategy profile (§5); the engine needs no change. Merchant competition needs the market to hold several merchants. Today `Market` names one; the proposal is a market per merchant, each with its own targets and strategy, and quotes that take a `merchant` argument.
+**Architecture.** Actors are `Actor` records in `World` (`crates/economy/src/lib.rs`) with income, production, consumption, a reserve policy, defense and shipments. Each merchant has a `MerchantProfile` (its own targets, strategy, floor, commit limit and record) and prices from its own shelves (`World::merchant_quote`); Vex's profile is also the instant market's.
 
-**Acceptance (Proposed):**
+**Acceptance:**
 - **Factions react to each other:** with Ashen Compact present, a simulated week shows its contracts against Vanguard rising as Vanguard's stock falls.
 - **Price competition:** with two merchants, the same purchase quotes differently, and a large purchase from the cheaper merchant raises its price above the other's. A test asserts both.
 
@@ -62,7 +62,7 @@ Prices, standing and the next missions all carry over between sessions.
 | Ammunition | fungible resource | Built |
 | Medical supplies | fungible resource | Built |
 | Fuel | fungible resource | Built |
-| Equipment | weapons, attachments, armor | Proposed |
+| Equipment | weapons (Built: gun tokens, owned-gear loadout); attachments, armor (Proposed) |
 
 **Equipment** would use the engine's existing gun catalog (`engine/combat/GunStats.ts`, tiers 1–10) and attachments (`engine/combat/Loadout.ts`). Each owned item would be a distinct NEP-245 token, so it has provenance.
 
@@ -97,11 +97,11 @@ Prices, standing and the next missions all carry over between sessions.
 | Stage | What happens | Status |
 |---|---|---|
 | Observe | The agent receives a structured observation: its holdings, requirements, budget and defense; each merchant's quote and stock; recent raids on it; open bounties and contracts; and its memory (below) | Built for the deterministic policies |
-| Plan | The planner proposes up to N actions as typed tool calls. The tools are exactly the engine's `Action`s: `request_quote` (read), `purchase_supplies`, `sell_supplies`, `post_bounty`, `post_contract`, `configure_defense` and `set_strategy`. Each carries a one-sentence rationale | Built: deterministic planner. Proposed: an LLM planner on NEAR AI Cloud |
-| Validate | The proposal is parsed against the tool schema, authorized for this agent, and dry-run in the engine on a copy of the world. Anything malformed, unauthorized or failing is rejected with its reason and logged | Built for the fallback (the engine validates every `Action`). The schema stage is Proposed |
+| Plan | The planner proposes up to N actions as typed tool calls. The tools are exactly the engine's `Action`s: `request_quote` (read), `purchase_supplies`, `sell_supplies`, `post_bounty`, `post_contract`, `configure_defense` and `set_strategy`. Each carries a one-sentence rationale | Built: the deterministic planner, and an LLM planner on NEAR AI Cloud (`services/planner.rs`, including `request_supplies`). The LLM is off until the NEAR AI account has credits |
+| Validate | The proposal is parsed against the tool schema, authorized for this agent, and dry-run in the engine on a copy of the world. Anything malformed, unauthorized or failing is rejected with its reason and logged | Built: schema, policy (`planner::validate`) and the engine, for both planners |
 | Execute | The accepted action is applied to the live world under the world lock | Built |
 | Settle | Value-moving actions are queued for NEAR and confirmed at FINAL | Built |
-| Remember | See below | Proposed |
+| Remember | See below | Built in part |
 
 **The LLM never touches keys or balances.** It produces JSON. The server validates it and signs with the agent's restricted key. If the model times out, returns an invalid schema or proposes something rejected, the deterministic policy acts for that turn and the log records which planner acted.
 
@@ -116,7 +116,7 @@ Prices, standing and the next missions all carry over between sessions.
 
 The deterministic policy is parameterized by the profile, and the LLM gets the profile as its standing orders.
 
-**Memory (Proposed).** Each agent keeps state in Postgres, summarized into its observation:
+**Memory.** **Built:** each faction remembers, per player, the operations run against it, and per rival, the bounties it paid for raids on it (`FactionMemory`); retaliation and the planner's observation use it. **Proposed:** the richer summaries below, kept in Postgres and summarized into the observation:
 - **Episodic:** the last N decisions and their outcomes. For example: "bought 24 ammo at 21; the next raid still took 39".
 - **Beliefs:** derived numbers updated each tick, such as the raid rate per depot, the price trend per merchant, and its standing with each player.
 - **Commitments:** open bounties and contracts it funded, and when they expire.
@@ -127,10 +127,8 @@ Memory changes behavior: an agent that has been raided three times on fuel prefe
 
 **Acceptance:**
 - **Built:** decisions are logged with trigger, figures, action, rationale and validation (`GET /events?kind=agent_decision`). The acceptance run shows an autonomous purchase that settled on chain.
-- **Proposed:**
-  - With a NEAR AI key set, at least one logged decision per agent per day comes from the LLM.
-  - A deliberately invalid LLM proposal is rejected and the fallback acts.
-  - A memory-driven rule changes a decision in a test.
+- **Built and tested:** an invalid LLM proposal is rejected and the fallback acts (`planner` tests); a remembered grudge changes a faction's decisions (`tests/factions.rs`).
+- **Awaiting credits:** with a funded NEAR AI key, at least one logged decision per agent per day comes from the LLM.
 
 ## 6. Missions generated by the economy
 
@@ -171,11 +169,11 @@ A mission is a pure function of live state, so the server validates exactly the 
 | Track | How it works | Status |
 |---|---|---|
 | **Rank** (reputation) | XP from kills and clears (`engine/fps/xp.ts`). Never pays currency | Built |
-| **Faction standing** | Per faction, from −100 to +100. Rises when you take its contracts or sell to its merchant; falls when you raid it. High standing unlocks its contracts and better merchant prices; very low standing raises your bounty in its rival's eyes | Proposed |
-| **Owned gear** | Equipment tokens in your account, bought at the Exchange or recovered from missions. Only owned gear can be loaded out, and the loadout screen shows each item's stats and resale value | Proposed (the loadout is standard issue today) |
+| **Faction standing** | Per faction, a score from your jobs for it against your operations on it; Vex's tiers (Known, Trusted, Partner) give better prices | Built (`Standing`). Unlocking contracts by standing: Proposed |
+| **Owned gear** | Equipment tokens in your account, bought at the Exchange or recovered from missions. Only owned gear can be loaded out, and the loadout screen shows each item's stats and resale value | Built: guns are tokens in your account, bought in the Armory; the loadout offers only what you own and the server checks it against the ledger |
 | **Consumables at risk** | You bring ammunition and medkits from your inventory; whatever you carry and lose is destroyed | Proposed |
 
-**Acceptance (Proposed):**
+**Acceptance:**
 - A player who sells ammo to Vex sees Vex's ammo stock and Vanguard's ability to restock rise in the War Room.
 - A player cannot deploy with gear they don't own; the API refuses it.
 
@@ -335,9 +333,9 @@ These build on the working FPS engine; nothing here is a rewrite.
 | 4 | CZ World v1 on testnet, settlement, reconciliation, on-chain acceptance run | Built |
 | 5 | This design | Built |
 | 6 | `cz-assets` + `cz-world` v2, migration, acceptance re-run on v2 | Built (deployed on testnet; acceptance passed on v2) |
-| 7 | Merchant bids (commander selling), player ownership, Exchange, onboarding | Built: commander selling via bids; the Exchange with player-signed buys and sells on testnet; wallet sign-in. Proposed: equipment tokens and owned-gear loadout, P2P listings, NEAR Auth sign-in, NEP-413 identity |
-| 8 | Second faction and merchant, strategy profiles, memory | Proposed |
-| 9 | LLM planner on NEAR AI Cloud with validated tool calls | Proposed |
-| 10 | War Room UI and the causal timeline | Proposed |
-| 11 | Mission types: intercept, escort, sabotage, recovery | Proposed |
-| 12 | Presentation pass and onboarding mission | Proposed |
+| 7 | Merchant bids (commander selling), player ownership, Exchange, onboarding | Built: commander selling; the Exchange with player-signed buys and sells on testnet; wallet (NEP-413) and NEAR Auth sign-in; equipment tokens and owned-gear loadout. Proposed: P2P listings |
+| 8 | Second faction and merchant, strategy profiles, memory | Built (Ashen Compact, Halcyon Logistics, doctrines, faction memory; §8a supply orders) |
+| 9 | LLM planner on NEAR AI Cloud with validated tool calls | Built (off until the NEAR AI account has credits) |
+| 10 | War Room UI and the causal timeline | Built (including supply-order procurement chains) |
+| 11 | Mission types: intercept, escort, sabotage, recovery | Built: sabotage, recovery. Proposed: intercept, escort |
+| 12 | Presentation pass and onboarding mission | Built: three site maps, Practice, the Field Manual, first-time tips (README, PLAYER_GUIDE.md) |

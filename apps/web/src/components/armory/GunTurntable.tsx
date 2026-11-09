@@ -56,20 +56,20 @@ function normalise(src: THREE.Object3D): THREE.Group {
   return g
 }
 
-function GlbGun({ url }: { url: string }) {
+export function GlbGun({ url }: { url: string }) {
   const { scene } = useGLTF(url)
   const model = useMemo(() => normalise(scene), [scene])
   return <primitive object={model} />
 }
 
-function ProcGun({ id }: { id: ProceduralGunId }) {
+export function ProcGun({ id }: { id: ProceduralGunId }) {
   const model = useMemo(() => normalise(buildProceduralGun(id, PROCEDURAL[id])), [id])
   return <primitive object={model} />
 }
 
 /** A soft studio to reflect: metal with nothing to reflect renders black. Built
  *  locally (no HDR download), once per canvas. */
-function Studio() {
+export function Studio() {
   const { gl, scene } = useThree()
   useEffect(() => {
     const pmrem = new THREE.PMREMGenerator(gl)
@@ -78,6 +78,13 @@ function Studio() {
     return () => { scene.environment = null; env.dispose(); pmrem.dispose() }
   }, [gl, scene])
   return null
+}
+
+/** The model the player holds, normalised to unit size (GLB or procedural). */
+export function GunModel({ gunId }: { gunId: GunId }) {
+  if (gunId in PROCEDURAL) return <ProcGun id={gunId as ProceduralGunId} />
+  const url = GLB_URL[gunId]
+  return url ? <GlbGun url={url} /> : null
 }
 
 function Spin({ children }: { children: React.ReactNode }) {

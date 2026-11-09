@@ -29,7 +29,7 @@ function Box({ s, p, c, e, ei = 0.6, r }: { s: [number, number, number]; p: [num
 }
 
 /** An ammunition crate: olive box, a band coded by round, a lid that opens when empty. */
-function AmmoCrate({ item }: { item: Interactable }) {
+export function AmmoCrate({ item }: { item: Interactable }) {
   const band = item.ammoClass === 'pistol' ? '#3d7fc4' : '#d6b13a';
   return (
     <group>
@@ -45,7 +45,7 @@ function AmmoCrate({ item }: { item: Interactable }) {
   );
 }
 
-function MedCase() {
+export function MedCase() {
   return (
     <group>
       <Box s={[0.56, 0.3, 0.36]} p={[0, 0.15, 0]} c="#e4e6e1" />
@@ -58,7 +58,7 @@ function MedCase() {
 }
 
 /** A cargo case coded by resource; the seized one carries a bright strap and a blinker. */
-function CargoCase({ item, label }: { item: Interactable; label: string }) {
+export function CargoCase({ item, label }: { item: Interactable; label: string }) {
   const c = RES_COLOR[label] ?? '#5b6640';
   const seized = item.kind === 'seized_case';
   return (

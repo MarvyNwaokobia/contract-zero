@@ -17,6 +17,8 @@ import { api, RESOURCE_LABEL, type OpKind, type BoardEntry, type MissionResult, 
 import { OperationIntel } from '@/components/world/OperationIntel'
 import { WorldClockPanel } from '@/components/world/WorldClock'
 import { MissionStream } from '@/lib/missionStream'
+import { ItemInspector } from '@/components/inspect/ItemInspector'
+import type { InspectItem } from '@/components/inspect/itemInfo'
 import { retryImport } from '@/lib/retryImport'
 
 const tactical = Rajdhani({ subsets: ['latin'], weight: ['500', '600', '700'], variable: '--font-tactical', display: 'swap' })
@@ -85,6 +87,7 @@ function Deploy() {
   const [gun, setGun] = useState<GunId>('assault_rifle')
   const armory = useQuery({ queryKey: ['armory', player], queryFn: () => api.exchange(player).then((e) => e.armory ?? []), enabled: !!player })
   const [phase, setPhase] = useState<Phase>({ kind: 'intel' })
+  const [inspect, setInspect] = useState<InspectItem | null>(null)
   const world = useQuery({ queryKey: ['world'], queryFn: api.world, refetchInterval: 10_000, enabled: phase.kind === 'intel' })
   const entry = world.data?.board.find((b) => b.kind === kind && b.target === target && b.resource === resource)
 
@@ -306,6 +309,11 @@ function Deploy() {
                 </button>
               )
             })}
+            <button className="cz-btn cz-btn-ghost self-start px-3 py-1 text-xs" data-testid="inspect-loadout" onClick={() => {
+              const a = (armory.data ?? []).find((x) => x.id === gun)
+              setInspect({ type: 'weapon', gun, status: a ? (a.owned > 0 ? 'owned' : 'locked') : 'standard', owned: a?.owned, price: a?.price ?? null })
+            }}>Inspect the selected weapon</button>
+            {inspect && <ItemInspector item={inspect} onClose={() => setInspect(null)} />}
             <p className="text-xs text-slate-500">SMG and assault rifle are standard issue. Owned guns are tokens in your account; <Link href="/exchange" className="text-amber-hi hover:underline">Vex&apos;s armory</Link> sells them.</p>
           </div>
           <div className="h-56 border border-line" style={{ background: 'radial-gradient(ellipse at 50% 55%, #23272e 0%, #0e1013 70%)' }}><GunTurntable gunId={gun} className="h-full w-full" /></div>

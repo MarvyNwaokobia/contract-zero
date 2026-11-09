@@ -7,6 +7,7 @@ import { Panel, Shell, Stat } from '@/components/ui/Shell'
 import dynamic from 'next/dynamic'
 import { api, RESOURCE_LABEL, type ArmoryItem, type ExchangePrice, type PlayerQuote, type ResourceName, type Standing } from '@/lib/api'
 import type { GunId } from '@/engine/combat/GunStats'
+import { ItemInspector } from '@/components/inspect/ItemInspector'
 import { acceptQuote, disableQuickTrade, enableQuickTrade, loadSessionKey } from '@/lib/auth'
 import { useSession } from '@/lib/useSession'
 import type { ChainCall } from '@/lib/wallet'
@@ -17,8 +18,10 @@ const ACCEPT_GAS = '60000000000000'
 
 /** Vex's armory: guns as tokens the player owns, at their standing price. */
 function Armory({ items, canTrade, busy, onBuy }: { items: ArmoryItem[]; canTrade: boolean; busy: boolean; onBuy: (id: string) => void }) {
+  const [inspect, setInspect] = useState<ArmoryItem | null>(null)
   return (
     <div className="grid gap-3 md:grid-cols-3">
+      {inspect && <ItemInspector item={{ type: 'weapon', gun: inspect.id as GunId, status: inspect.owned > 0 ? 'owned' : 'locked', owned: inspect.owned, price: inspect.price }} onClose={() => setInspect(null)} />}
       {items.map((g) => (
         <div key={g.id} className="flex flex-col border border-line" data-testid="armory-item">
           <div className="h-32" style={{ background: 'radial-gradient(ellipse at 50% 55%, #23272e 0%, #0e1013 70%)' }}>
@@ -35,9 +38,12 @@ function Armory({ items, canTrade, busy, onBuy }: { items: ArmoryItem[]; canTrad
               <span className="ml-2 text-xs text-muted">{g.stock > 0 ? `${g.stock} in the armory` : 'sold out · restocks within 12 hours'}</span>
             </div>
             <div className="text-[11px] text-dim">token <code>{g.token}</code></div>
-            <button className="cz-btn cz-btn-primary mt-auto px-4 py-1.5 text-sm" disabled={!canTrade || busy || g.stock < 1} onClick={() => onBuy(g.id)}>
-              {g.owned > 0 ? 'Buy another' : 'Buy'}
-            </button>
+            <div className="mt-auto flex gap-2">
+              <button className="cz-btn cz-btn-primary flex-1 px-4 py-1.5 text-sm" disabled={!canTrade || busy || g.stock < 1} onClick={() => onBuy(g.id)}>
+                {g.owned > 0 ? 'Buy another' : 'Buy'}
+              </button>
+              <button className="cz-btn cz-btn-ghost px-3 py-1.5 text-sm" onClick={() => setInspect(g)} data-testid={`inspect-${g.id}`}>Inspect</button>
+            </div>
           </div>
         </div>
       ))}

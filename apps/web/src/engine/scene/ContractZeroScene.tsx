@@ -29,6 +29,8 @@ import { OperatorRig, type OperatorApi } from './OperatorRig';
 import { LEVELS } from '../fps/levels';
 import { LevelArt } from './LevelArt';
 import { FieldProps } from './FieldProps';
+import { ItemInspector } from '@/components/inspect/ItemInspector';
+import type { InspectItem } from '@/components/inspect/itemInfo';
 import { FieldRuntime, trainingField, BLAST_RADIUS, CARRY_MAX, type FieldEvent, type FieldRecord, type ProtoEvent } from '../fps/field';
 import { CAMPAIGN, CAMPAIGN_KEY, PROGRESS_KEY, ZONE_THEMES, themeForMission, SURVIVAL_MISSION, GAUNTLET_MISSION, ENDLESS_MISSION, SEASONAL_MISSION, survivalWaveCount, survivalWaveHp, gauntletWaveCount, gauntletWaveHp, type Mission } from '../fps/campaign';
 import {
@@ -576,7 +578,7 @@ function PerfHud({ hud }: { hud: React.MutableRefObject<Hud> }) {
   return null;
 }
 
-function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, onComplete, onDeath, endOnDeath, pausedRef, gateRef, accountRank, accountXp, equippedGun, equippedAmmo, equippedMods, fieldKit, endlessOpts, coop, onProtocol }: {
+function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, onComplete, onDeath, endOnDeath, pausedRef, gateRef, accountRank, accountXp, equippedGun, equippedAmmo, equippedMods, fieldKit, endlessOpts, coop, onProtocol, onInspect, inspectingRef }: {
   /** Contract mode: a final death ends the run (the page shows the result) instead of restarting the op. */
   endOnDeath?: boolean;
   hud: React.MutableRefObject<Hud>; controls: React.MutableRefObject<Controls>;
@@ -613,6 +615,10 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
   coop?: CoopOpts;
   /** Live contracts: the mission protocol events for the server, in order. */
   onProtocol?: (events: ProtoEvent[]) => void;
+  /** I pressed: open the inspector on this item. While `inspectingRef` is set the
+   *  fight goes on but the player's input is held (standing still, weapon down). */
+  onInspect?: (item: InspectItem) => void;
+  inspectingRef?: React.MutableRefObject<boolean>;
 }) {
   const { camera, gl, scene } = useThree();
 
@@ -1033,6 +1039,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
   // varied objectives (A2): defend hold timer + reinforcement cadence
   const holdProgress = useRef(0);       // sim-seconds held on a defend point
   const wantHeal = useRef(false);
+  const wantInspect = useRef(false);
   const fieldToast = useRef<{ text: string; until: number; color: string }>({ text: '', until: 0, color: '#e9edf2' });
   const lastFieldHtml = useRef('');
   const lastBeep = useRef(-1);
@@ -1274,6 +1281,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       keys.current.add(e.code);
       if (e.code === 'KeyR') wantReload.current = true;
       if (e.code === 'KeyH') wantHeal.current = true;      // apply a field dressing
+      if (e.code === 'KeyI' && !inspectingRef?.current) wantInspect.current = true; // inspect what you're looking at
       if (e.code === 'KeyB') cycleFireMode.current = true; // toggle semi/burst/auto
       if (e.code === 'Digit1') wantSlot.current = 0;       // primary
       if (e.code === 'Digit2') wantSlot.current = 1;       // sidearm slot
@@ -1501,6 +1509,9 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
     // freeze the sim + drop any held input so nothing carries through the menu/overlay.
     if (pausedRef.current || gateRef.current) { keys.current.clear(); mouseBtn.current.clear(); return; }
     const dt = Math.min(rawDt, 1 / 20);
+    // Inspecting: the world runs on, the player stands still with the weapon down.
+    if (inspectingRef?.current) { keys.current.clear(); mouseBtn.current.clear(); }
+    if (wantInspect.current) { wantInspect.current = false; openInspector(); }
     const k = keys.current;
     const held = (c: string) => k.has(c);
     const ct = controls.current;
@@ -2713,6 +2724,18 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
     return true;
   }
 
+  /** What I shows: the thing you're looking at, or the weapon in your hands. */
+  function openInspector() {
+    if (!onInspect) return;
+    const t = FIELD.target;
+    const ownStatus = (g: GunId) => (g === PRIMARY && hasChosenGun ? 'owned' as const : LOADOUT.includes(g) ? 'standard' as const : 'battlefield' as const);
+    if (t?.kind === 'weapon' && t.gun) onInspect({ type: 'weapon', gun: t.gun, status: t.origin === 'enemy' ? 'battlefield' : ownStatus(t.gun), mag: t.mag, reserve: t.reserve });
+    else if (t?.kind === 'ammo_crate' || t?.kind === 'pouch') onInspect({ type: 'ammo', cls: t.ammoClass ?? 'rifle', rounds: t.rounds ?? 0 });
+    else if (t?.kind === 'med_case') onInspect({ type: 'med', count: t.medkits ?? 0 });
+    else if (t?.kind === 'cargo_case' || t?.kind === 'seized_case') onInspect({ type: 'cargo', resource: (FIELD.spec.cargoLabel ?? 'cargo').toLowerCase(), units: t.units ?? 0, seized: t.kind === 'seized_case' });
+    else onInspect({ type: 'weapon', gun: sim.gun.id, status: ownStatus(sim.gun.id), mag: sim.ammo, reserve: Number.isFinite(sim.reserve) ? sim.reserve : undefined });
+  }
+
   /** Turn what the field runtime did this frame into sound, radio, and the sim. */
   function onFieldEvent(fe: FieldEvent) {
     switch (fe.kind) {
@@ -3173,7 +3196,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
         const extra = t.kind === 'ammo_crate' || t.kind === 'pouch' ? ` · ${t.rounds} RDS` : t.kind === 'med_case' ? ` · ${t.medkits} LEFT` : t.kind === 'weapon' ? ` · ${t.mag}/${t.reserve}` : '';
         const p = t.holdSecs > 0 ? Math.round(Math.min(1, FIELD.hold / t.holdSecs) * 20) * 5 : 0;
         const label = t.kind === 'weapon' ? getGun(t.gun!).name.toUpperCase() : t.label;
-        prompt = `<div style="font-size:15px;letter-spacing:2px;color:#e9edf2"><span style="display:inline-block;min-width:22px;padding:1px 6px;margin-right:8px;border:1px solid #e9edf2;border-radius:4px;font-weight:800">E</span>${verb ? verb + ' ' : ''}${label}${extra}</div>`
+        prompt = `<div style="font-size:15px;letter-spacing:2px;color:#e9edf2"><span style="display:inline-block;min-width:22px;padding:1px 6px;margin-right:8px;border:1px solid #e9edf2;border-radius:4px;font-weight:800">E</span>${verb ? verb + ' ' : ''}${label}${extra}</div><div style="margin-top:3px;font-size:11px;letter-spacing:2px;color:#8a97a3">I · INSPECT</div>`
           + `<div style="margin:6px auto 0;width:180px;height:4px;background:#ffffff22;border-radius:2px;overflow:hidden"><div style="height:100%;width:${p}%;background:#5fe0a8"></div></div>`;
       }
       const ft = fieldToast.current;
@@ -3933,6 +3956,14 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
   const [selectOpen, setSelectOpen] = useState(false);
   const [paused, setPaused] = useState(false); // C4: deliberate pause menu (Esc / ⏸)
   const menuOpenRef = useRef(false); // read by FpsWorld's frame loop to pause
+  const [inspecting, setInspecting] = useState<InspectItem | null>(null);
+  const inspectingRef = useRef(false);
+  const openInspect = useCallback((item: InspectItem) => {
+    inspectingRef.current = true;
+    try { document.exitPointerLock?.(); } catch { /* ignore */ }
+    setInspecting(item);
+  }, []);
+  const closeInspect = useCallback(() => { inspectingRef.current = false; setInspecting(null); }, []);
   const setSelect = (v: boolean) => {
     menuOpenRef.current = v; setSelectOpen(v);
     if (v) { try { document.exitPointerLock?.(); } catch { /* ignore */ } }
@@ -4454,9 +4485,10 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
         <AdaptiveDpr />
         {perfOn && <PerfHud hud={hud} />}
         <Suspense fallback={null}>
-          <FpsWorld key={`${mode}-${missionIndex}-${runNonce}`} hud={hud} controls={controls} audio={audio} lowSpec={isTouch} lightFx={lightFx} minimal={minimal} mission={mission} onComplete={handleComplete} onDeath={handleDeath} endOnDeath={mode === 'contract'} pausedRef={menuOpenRef} gateRef={gateRef} accountRank={accountRank} accountXp={accountXp} equippedGun={equippedGun} equippedAmmo={equippedAmmo} equippedMods={equippedMods} fieldKit={fieldKit} endlessOpts={mode === 'endless' ? endless : undefined} coop={mode === 'endless' ? coop : undefined} onProtocol={mode === 'contract' ? (evs) => contractRef.current?.onProtocol?.(evs) : undefined} />
+          <FpsWorld key={`${mode}-${missionIndex}-${runNonce}`} hud={hud} controls={controls} audio={audio} lowSpec={isTouch} lightFx={lightFx} minimal={minimal} mission={mission} onComplete={handleComplete} onDeath={handleDeath} endOnDeath={mode === 'contract'} pausedRef={menuOpenRef} gateRef={gateRef} accountRank={accountRank} accountXp={accountXp} equippedGun={equippedGun} equippedAmmo={equippedAmmo} equippedMods={equippedMods} fieldKit={fieldKit} endlessOpts={mode === 'endless' ? endless : undefined} coop={mode === 'endless' ? coop : undefined} onProtocol={mode === 'contract' ? (evs) => contractRef.current?.onProtocol?.(evs) : undefined} onInspect={openInspect} inspectingRef={inspectingRef} />
         </Suspense>
       </Canvas>
+      {inspecting && <div style={{ cursor: 'auto' }}><ItemInspector item={inspecting} onClose={closeInspect} inFight /></div>}
 
       {/* C3 perf meter (?perf=1 or P) — top-left, out of the way of the HUD */}
       <div ref={(r) => { hud.current.perf = r; }} style={{ position: 'absolute', left: 12, top: 8, zIndex: 60, display: perfOn ? 'block' : 'none', fontFamily: 'monospace', fontSize: 12, letterSpacing: 0.5, color: '#5fe0a8', background: 'rgba(0,0,0,.5)', padding: '3px 8px', borderRadius: 5, pointerEvents: 'none' }}>— FPS</div>

@@ -79,6 +79,25 @@ The server fixes each operation's objects at start (`mission::field_manifest`), 
 - The HUD shows cases carried, units and the speed penalty.
 - With 4 cases on site, one is left behind or needs a second trip.
 
+### Item inspection
+
+**Where you can open it:**
+- **Inspect** in Vex's armory and on the loadout.
+- **I** in a fight, on the object you're looking at, or on your own weapon.
+
+**What it shows:**
+- The item's model, which you can drag to turn and scroll to zoom.
+- What the game models for it:
+  - **Weapons:** damage, rate of fire, fire modes, magazine, reload, range, accuracy, criticals, sustained DPS, ammunition type, slot and the rounds loaded.
+  - **Supplies:** what they fit and how much you can carry.
+  - **Cargo:** movement cost, and when it counts.
+- Ownership: an owned token, standard issue, a battlefield pickup (temporary) or not owned.
+- Market value where one exists: the armory price, or Vex's bid for cargo.
+
+The figures come from the weapon catalog and the game's own rules. Values the game doesn't model (condition, weight) aren't shown.
+
+**In a fight the world doesn't stop.** While the inspector is open you stand still with your weapon down, and the panel says so.
+
 ## Operation types
 
 | Type | Objectives | What's distinct |

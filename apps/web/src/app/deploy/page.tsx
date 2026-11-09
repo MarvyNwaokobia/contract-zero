@@ -16,6 +16,7 @@ import { useSession } from '@/lib/useSession'
 import { api, RESOURCE_LABEL, type OpKind, type BoardEntry, type MissionResult, type MissionStart, type ResourceName, type WorldView } from '@/lib/api'
 import { OperationIntel } from '@/components/world/OperationIntel'
 import { WorldClockPanel } from '@/components/world/WorldClock'
+import { MissionStream } from '@/lib/missionStream'
 import { retryImport } from '@/lib/retryImport'
 
 const tactical = Rajdhani({ subsets: ['latin'], weight: ['500', '600', '700'], variable: '--font-tactical', display: 'swap' })
@@ -120,10 +121,16 @@ function Deploy() {
     }
   }
 
+  // The server checks the run from this stream; completion settles from its account.
+  const stream = useMemo(() => (phase.kind === 'fighting' ? new MissionStream(phase.start.session) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [phase.kind === 'fighting' ? phase.start.session : null])
+
   const finish = async (outcome: 'extracted' | 'killed', stats: ContractRunStats, start: MissionStart, before: WorldView) => {
     if (!player) return
     setPhase({ kind: 'reporting' })
     try {
+      await stream?.flush()
       // Object ids only: the server counts the units from its own manifest.
       const { result } = await api.completeMission(start.session, outcome, stats.kills, outcome === 'extracted' ? stats.record : undefined)
       // Give the world clock a moment so the agents' response is visible.
@@ -159,6 +166,7 @@ function Deploy() {
             mission,
             onExtracted: (s) => finish('extracted', s, start, before),
             onKilled: (s) => finish('killed', s, start, before),
+            onProtocol: (evs) => stream?.push(evs),
           }}
         />
       </div>

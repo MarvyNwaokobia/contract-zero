@@ -39,6 +39,7 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         .route("/missions/start", web::post().to(missions::start))
         .route("/missions/{session}/story", web::get().to(missions::story))
         .route("/missions/{session}/loadout", web::post().to(missions::loadout))
+        .route("/missions/{session}/events", web::post().to(missions::events))
         .route("/missions/{session}/complete", web::post().to(missions::complete))
         .route("/settlements", web::get().to(settlement::list))
         .route("/settlements/{op_id}", web::get().to(settlement::get))

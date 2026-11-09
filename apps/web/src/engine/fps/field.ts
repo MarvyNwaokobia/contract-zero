@@ -183,6 +183,14 @@ export interface Pockets {
 
 export interface ViewState { x: number; z: number; eyeY: number; yaw: number; pitch: number }
 
+/** One event of the mission protocol the server checks (apps/api/src/services/protocol.rs).
+ *  `t` is game time in ms; `seq` is added by whoever sends them. */
+export type ProtoEvent =
+  | { kind: 'pos'; t: number; pos: [number, number] }
+  | { kind: 'reach'; t: number; pos: [number, number]; milestone: 'entry' | 'push' }
+  | { kind: 'hold_start' | 'collect' | 'retrieve' | 'plant' | 'loot'; t: number; pos: [number, number]; object: string }
+  | { kind: 'down' | 'extract_call' | 'extract_complete'; t: number; pos: [number, number] };
+
 /** The record a completion reports: object ids only. */
 export interface FieldRecord { secured: string[]; charges: string[]; delivered: string | null; looted: string[] }
 
@@ -208,6 +216,19 @@ export class FieldRuntime {
   private time = 0;
   /** Set when the mission's objective flow allows extraction to be called. */
   exfilAllowed = false;
+  /** Protocol events for the server, drained by the scene each frame. */
+  log: ProtoEvent[] = [];
+  private lastPos: [number, number] = [0, 0];
+
+  /** Game time in ms, as the protocol reports it. */
+  get ms(): number { return Math.round(this.time * 1000); }
+  /** Note an event at the player's last known position (milestones, heartbeats). */
+  note(kind: 'pos'): void;
+  note(kind: 'reach', milestone: 'entry' | 'push'): void;
+  note(kind: 'pos' | 'reach', milestone?: 'entry' | 'push'): void {
+    if (kind === 'reach' && milestone) this.log.push({ kind, milestone, t: this.ms, pos: this.lastPos });
+    else this.log.push({ kind: 'pos', t: this.ms, pos: this.lastPos });
+  }
 
   constructor(spec: FieldSpec) {
     this.spec = spec;
@@ -280,6 +301,7 @@ export class FieldRuntime {
   /** One frame. `interact` is the E key (or the touch button) held. */
   update(dt: number, v: ViewState, interact: boolean, pockets: Pockets, losClear: (a: [number, number, number], b: [number, number, number]) => boolean): FieldEvent[] {
     this.time += dt;
+    this.lastPos = [+v.x.toFixed(2), +v.z.toFixed(2)];
     const out: FieldEvent[] = [];
     if (this.exfilPhase === 'locked' && this.exfilAllowed) this.exfilPhase = 'ready';
 
@@ -290,6 +312,7 @@ export class FieldRuntime {
       const pre = this.precheck(t, pockets);
       if (pre) { if (this.hold === 0) out.push(pre); this.hold = 1e-6; }
       else {
+        if (this.hold === 0 && t.kind !== 'exfil' && t.kind !== 'pouch') this.log.push({ kind: 'hold_start', object: t.id, t: Math.round((this.time - dt) * 1000), pos: this.lastPos });
         this.hold += dt;
         if (this.hold >= t.holdSecs) { this.hold = 0; out.push(...this.complete(t, pockets)); }
       }
@@ -313,6 +336,7 @@ export class FieldRuntime {
       this.wasInside = inside;
       if (this.exfilProgress >= z.secs) {
         this.exfilPhase = 'done';
+        this.log.push({ kind: 'extract_complete', t: this.ms, pos: this.lastPos });
         this.secured = this.carried.filter((id) => this.items.get(id)?.kind === 'cargo_case');
         const seized = this.carried.find((id) => this.items.get(id)?.kind === 'seized_case');
         if (seized) this.delivered = seized;
@@ -337,7 +361,7 @@ export class FieldRuntime {
         const taken = p.addReserve(cls, t.rounds ?? 0);
         if (taken <= 0) return [{ kind: 'full', id: t.id, what: 'ammo' }];
         t.rounds = (t.rounds ?? 0) - taken;
-        if (t.kind === 'ammo_crate') this.looted.add(t.id);
+        if (t.kind === 'ammo_crate') { this.looted.add(t.id); this.log.push({ kind: 'loot', object: t.id, t: this.ms, pos: this.lastPos }); }
         if ((t.rounds ?? 0) <= 0) t.state = 'empty';
         return [{ kind: 'ammo', id: t.id, cls, rounds: taken, left: t.rounds ?? 0 }];
       }
@@ -346,6 +370,7 @@ export class FieldRuntime {
         while ((t.medkits ?? 0) > 0 && p.addMedkit()) { t.medkits = (t.medkits ?? 0) - 1; taken++; }
         if (taken === 0) return [{ kind: 'full', id: t.id, what: 'med' }];
         this.looted.add(t.id);
+        this.log.push({ kind: 'loot', object: t.id, t: this.ms, pos: this.lastPos });
         if ((t.medkits ?? 0) <= 0) t.state = 'empty';
         return [{ kind: 'med', id: t.id, taken, left: t.medkits ?? 0 }];
       }
@@ -353,15 +378,18 @@ export class FieldRuntime {
       case 'seized_case':
         t.state = 'carried';
         this.carried.push(t.id);
+        this.log.push({ kind: t.kind === 'seized_case' ? 'retrieve' : 'collect', object: t.id, t: this.ms, pos: this.lastPos });
         return [{ kind: 'secured', id: t.id, carried: this.carried.length }];
       case 'charge':
         t.state = 'done';
         this.planted.push(t.id);
+        this.log.push({ kind: 'plant', object: t.id, t: this.ms, pos: this.lastPos });
         if (this.allChargesPlanted) this.fuseAt = this.time + FUSE_SECS;
         return [{ kind: 'planted', id: t.id, planted: this.planted.length, total: this.spec.charges?.length ?? 0 }];
       case 'exfil':
         this.exfilPhase = 'counting';
         this.exfilProgress = 0;
+        this.log.push({ kind: 'extract_call', t: this.ms, pos: this.lastPos });
         this.wasInside = true;
         return [{ kind: 'extractCalled' }];
     }
@@ -369,6 +397,7 @@ export class FieldRuntime {
 
   /** The player went down: drop what's carried where they fell, cancel extraction. */
   down(x: number, z: number): FieldEvent[] {
+    this.log.push({ kind: 'down', t: this.ms, pos: [+x.toFixed(2), +z.toFixed(2)] });
     const ids = this.carried.splice(0);
     ids.forEach((id, k) => {
       const i = this.items.get(id);

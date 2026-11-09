@@ -29,7 +29,7 @@ import { OperatorRig, type OperatorApi } from './OperatorRig';
 import { LEVELS } from '../fps/levels';
 import { LevelArt } from './LevelArt';
 import { FieldProps } from './FieldProps';
-import { FieldRuntime, trainingField, BLAST_RADIUS, CARRY_MAX, type FieldEvent, type FieldRecord } from '../fps/field';
+import { FieldRuntime, trainingField, BLAST_RADIUS, CARRY_MAX, type FieldEvent, type FieldRecord, type ProtoEvent } from '../fps/field';
 import { ammoClassOf } from '../fps/FpsSim';
 import { CAMPAIGN, CAMPAIGN_KEY, PROGRESS_KEY, ZONE_THEMES, themeForMission, SURVIVAL_MISSION, GAUNTLET_MISSION, ENDLESS_MISSION, SEASONAL_MISSION, survivalWaveCount, survivalWaveHp, gauntletWaveCount, gauntletWaveHp, type Mission } from '../fps/campaign';
 import {
@@ -577,7 +577,7 @@ function PerfHud({ hud }: { hud: React.MutableRefObject<Hud> }) {
   return null;
 }
 
-function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, onComplete, onDeath, endOnDeath, pausedRef, gateRef, accountRank, accountXp, equippedGun, equippedAmmo, equippedMods, fieldKit, endlessOpts, coop }: {
+function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, onComplete, onDeath, endOnDeath, pausedRef, gateRef, accountRank, accountXp, equippedGun, equippedAmmo, equippedMods, fieldKit, endlessOpts, coop, onProtocol }: {
   /** Contract mode: a final death ends the run (the page shows the result) instead of restarting the op. */
   endOnDeath?: boolean;
   hud: React.MutableRefObject<Hud>; controls: React.MutableRefObject<Controls>;
@@ -612,6 +612,8 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
   endlessOpts?: EndlessOpts;
   // Co-op Endless (party mode). See `CoopOpts`.
   coop?: CoopOpts;
+  /** Live contracts: the mission protocol events for the server, in order. */
+  onProtocol?: (events: ProtoEvent[]) => void;
 }) {
   const { camera, gl, scene } = useThree();
 
@@ -1035,6 +1037,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
   const fieldToast = useRef<{ text: string; until: number; color: string }>({ text: '', until: 0, color: '#e9edf2' });
   const lastFieldHtml = useRef('');
   const lastBeep = useRef(-1);
+  const lastHeartbeat = useRef(0);
   const extractedLabel = useRef('');
   const lastReinforceAt = useRef(0);    // sim-time of the last reinforcement drop
   const hostageRef = useRef<THREE.Group>(null);
@@ -1404,6 +1407,8 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       };
     };
     w.__czWarp = (x: number, z: number) => { pos.current.set(x, EYE_STAND, z); };
+    // A walkable route from the player to a point (the autopilot follows it at walking pace).
+    w.__czPath = (x: number, z: number) => sim.pathBetween(pos.current.x, pos.current.z, x, z);
     w.__czLook = (y: number, p = 0) => { yaw.current = y; pitch.current = p; };
     w.__czWakeAll = () => { sim.setRoomActive(1, true); sim.setRoomActive(2, true); };
     w.__czSkipBriefing = () => { briefingUntil.current = 0; };
@@ -1463,7 +1468,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       delete w.__czState; delete w.__czKillAll; delete w.__czKillRoom; delete w.__czKillPlayer; delete w.__czAim; delete w.__czAudio;
       delete w.__czMission; delete w.__czEndless; delete w.__czWarp; delete w.__czSkipBriefing;
       delete w.__czXp; delete w.__czSetXp; delete w.__czStory; delete w.__czVo; delete w.__czRig; delete w.__czPlayer; delete w.__czColliders; delete w.__czCam; delete w.__czStagger; delete w.__czHurtBoss; delete w.__czWakeRoom; delete w.__czSwitch; delete w.__czFire; delete w.__czToggle;
-      delete w.__czRevive; delete w.__czResupply; delete w.__czWaveSkip; delete w.__czPerf; delete w.__czField;
+      delete w.__czRevive; delete w.__czResupply; delete w.__czWaveSkip; delete w.__czPerf; delete w.__czField; delete w.__czPath;
     };
   }, [sim, audio]);
 
@@ -2023,6 +2028,9 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       const view = { x: pos.current.x, z: pos.current.z, eyeY: cam.position.y, yaw: yaw.current, pitch: pitch.current };
       const interact = sim.playerAlive && completeAt.current < 0 && (held('KeyE') || ct.interact);
       for (const fe of FIELD.update(dt, view, interact, sim, losClear)) onFieldEvent(fe);
+      // A position heartbeat each second of game time lets the server check movement.
+      if (FIELD.ms - lastHeartbeat.current >= 1000) { lastHeartbeat.current = FIELD.ms; FIELD.note('pos'); }
+      if (FIELD.log.length) { const evs = FIELD.log.splice(0); onProtocol?.(evs); }
       if (FIELD.exfilPhase === 'counting' && FIELD.spec.exfil) {
         const left = Math.ceil(FIELD.spec.exfil.secs - FIELD.exfilProgress);
         if (left !== lastBeep.current) { lastBeep.current = left; audio.beep(left <= 3); }
@@ -2604,6 +2612,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
         // the hold fall back, so the extract is a walk-out, not a second gunfight.
         if (obj.kind === 'defend') sim.breakAttack(obj.reinforceRoom ?? obj.room ?? 0);
         if (obj.activateRoom) sim.setRoomActive(obj.activateRoom, true); // breach wakes the room
+        if (obj.milestone) FIELD.note('reach', obj.milestone); // the server checks we were there
         // story beats keyed to the objective just completed. The "troops cleared"
         // and push-in lines are doorkicker beats — only fire them after a real room
         // clear, so a defend/rescue op doesn't announce "Four down".
@@ -3778,6 +3787,8 @@ export interface ContractRun {
   onStart?: () => Promise<boolean>;
   onExtracted: (stats: ContractRunStats) => void;
   onKilled: (stats: ContractRunStats) => void;
+  /** The mission protocol events, streamed to the server as they happen. */
+  onProtocol?: (events: ProtoEvent[]) => void;
 }
 
 export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed, startMission, resumeLevel, accountRank, accountXp, equippedGun, equippedAmmo, equippedMods, fieldKit, onExit, endless, seasonal, coop }: {
@@ -4406,7 +4417,7 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
         <AdaptiveDpr />
         {perfOn && <PerfHud hud={hud} />}
         <Suspense fallback={null}>
-          <FpsWorld key={`${mode}-${missionIndex}-${runNonce}`} hud={hud} controls={controls} audio={audio} lowSpec={isTouch} lightFx={lightFx} minimal={minimal} mission={mission} onComplete={handleComplete} onDeath={handleDeath} endOnDeath={mode === 'contract'} pausedRef={menuOpenRef} gateRef={gateRef} accountRank={accountRank} accountXp={accountXp} equippedGun={equippedGun} equippedAmmo={equippedAmmo} equippedMods={equippedMods} fieldKit={fieldKit} endlessOpts={mode === 'endless' ? endless : undefined} coop={mode === 'endless' ? coop : undefined} />
+          <FpsWorld key={`${mode}-${missionIndex}-${runNonce}`} hud={hud} controls={controls} audio={audio} lowSpec={isTouch} lightFx={lightFx} minimal={minimal} mission={mission} onComplete={handleComplete} onDeath={handleDeath} endOnDeath={mode === 'contract'} pausedRef={menuOpenRef} gateRef={gateRef} accountRank={accountRank} accountXp={accountXp} equippedGun={equippedGun} equippedAmmo={equippedAmmo} equippedMods={equippedMods} fieldKit={fieldKit} endlessOpts={mode === 'endless' ? endless : undefined} coop={mode === 'endless' ? coop : undefined} onProtocol={mode === 'contract' ? (evs) => contractRef.current?.onProtocol?.(evs) : undefined} />
         </Suspense>
       </Canvas>
 

@@ -738,6 +738,14 @@ export class FpsSim {
     return this.switchGun((this.activeSlot + 1) % this.loadout.length);
   }
 
+  /** A walkable route between two points on a level with navigation (null without). */
+  pathBetween(fx: number, fz: number, tx: number, tz: number): [number, number][] | null {
+    if (!this.nav) return null;
+    if (this.nav.segmentClear(fx, fz, tx, tz)) return [[tx, tz]];
+    const p = this.nav.findPath(fx, fz, tx, tz);
+    return p ? p.map((w) => [w[0], w[1]] as [number, number]) : null;
+  }
+
   /** Spare rounds for the active weapon. */
   get reserve(): number { return this.reserveBySlot[this.activeSlot]; }
 

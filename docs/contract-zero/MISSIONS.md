@@ -115,23 +115,55 @@ The training campaign's final "extract" walk is now a real extraction zone with 
 
 ## Economic integrity
 
-What counts, and who decides:
+### What the server owns
 
-- **Ids only.** The client reports a record of object ids: secured cases, charges set, the case delivered, containers looted. **The server owns every amount.** It counts units from the session's stored manifest, never from the client.
-- **Checked before anything settles** (`mission::assess`):
-  - an unknown id or a repeated id rejects the run;
-  - a raid with no case rejects it;
-  - a sabotage needs both charges;
-  - a recovery needs the seized case delivered.
-- **Time.** The server measures mission time itself. The minimum grows with what the record claims: traversal + extraction + 2 s per case, both charges, or the retrieve.
-- **Partial extraction** settles exactly the cases carried out (`Action::SettleSecured`, capped at the manifest and at what the depot holds). A raid bounty pays only if at least half the manifest came out.
-- **Death settles nothing.** Cargo you were carrying drops where you fell and can be picked up again by you, before the run ends.
-- **One completion per session.** A replay returns the first result.
-- **Debug shortcuts** (`window.__cz*`, the `/dev` routes) exist only in development builds. A production build compiles them out unless `NEXT_PUBLIC_CZ_DEV_HOOKS=1`.
+A contract session started now uses the **mission event protocol** (`protocol = 2`, `apps/api/src/services/protocol.rs`).
 
-**Limit:** a modified client can still claim it carried a case it didn't. What it can't do is invent a case, take one twice, move more than the manifest, finish faster than the claimed work takes, or settle twice. Server-side movement validation would be the next step.
+**How it runs:**
+- The client streams typed events as they happen: `pos` heartbeats (one per second of game time), `reach` (entry or push), `hold_start`, `collect`, `retrieve`, `plant`, `loot`, `down`, `extract_call`, `extract_complete`.
+- `POST /missions/{session}/events` folds them into a `field_state` the server keeps.
+- Every event and the server's verdict on it are stored in `mission_events`.
+- **Completion settles from the server's state alone.** A record the client writes is ignored.
 
-**On chain:** the settlement is the existing raid settlement, now with the secured units. It is queued at completion and shows as "Settled on NEAR" only once confirmed.
+**What each event is checked against:**
+
+| Check | Rule |
+|---|---|
+| Order and replay | `seq` strictly increases. A repeated `seq` is stored once and never re-applied. Milestones come in mission order: the push after the entry, charge two after the push, cargo after the push. |
+| Time | The client's clock (`t`, game ms) may not run backwards, and may never claim more time than the server has measured since the session started, plus 3 s. Holds and the extraction countdown are measured on that bounded clock. |
+| Movement | Every position must be inside the map and reachable from the previous one at the player's top speed × 1.25, plus 2.5 m. Teleports are caught. |
+| Proximity | Interactions must be within 3.4 m of the object on the server's copy of the map (`layouts.json`, generated from `levels.ts`; a test fails on drift). Dropped cargo is where it fell. |
+| Holds | Taking a case, setting a charge and freeing the seized case need a `hold_start` near it at least 85% of the hold time earlier. |
+| Capacity and consumption | At most 3 cases. An object taken once is gone. Going down drops what you carry and cancels a called extraction. |
+| Extraction | Called inside the zone with something to extract, completed in the zone after the countdown. |
+| Volume | At most 64 events a request and 4,000 a session. |
+
+**Consequences:**
+- A violation **taints** the session. It accepts nothing more and settles nothing ("the run failed validation: …").
+- Completion pays only a server-observed extraction. Amounts still come from the stored manifest (`mission::assess`), and the minimum mission time still applies.
+- **Reward limit:** at most 8 paid operations per player per hour, however they were played.
+- **Sessions:** one live operation per player, a 30-minute expiry, and single completion.
+- **Older sessions** (protocol 1, from before this change) complete under the earlier checked-record rule.
+
+### What a modified client can still do
+
+The fight runs in the browser and the server has no physics, so this is not complete anti-cheat.
+- **A scripted run is possible.** A client that knows the rules can fabricate an event stream that walks the real distances at legal speed, waits the real hold and countdown times, and extracts. It earns what a real player would on that run, no faster than playing.
+- **Walls and combat aren't checked.** The server doesn't check walls (straight-line movement through geometry is accepted). It doesn't check combat either: guards killed, damage taken, and whether the player survived beyond the `down` events the client reports.
+- **What would close this:** server-side simulation of movement against the level colliders, and of the guards, or a server-authoritative multiplayer architecture.
+
+What the remaining attack can't do:
+- create cargo that isn't on site, or carry more than three cases;
+- take an object twice, or settle twice;
+- finish faster than the run physically takes;
+- exceed the hourly reward limit;
+- move a token without the controller's on-chain checks.
+
+### Settlement
+
+- **Queueing.** A validated extraction queues the existing raid or operation settlement. The worker claims queue rows atomically with a lease, records each attempt's outcome, and confirms on chain. The UI says "Settled on NEAR" only after confirmation.
+- **Replays.** The assets contract refuses a replayed operation id (`is_used`).
+- **Dev tools.** Probe hooks (`window.__cz*`) and the `/dev` routes exist only in development builds. They can only produce events, and the server judges those like any others. A run that teleports with `__czWarp` is tainted.
 
 ## Training and practice (never scored)
 

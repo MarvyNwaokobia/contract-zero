@@ -261,9 +261,9 @@ export function buildConvoyMission(c: ConvoyContract, gun: GunId = 'assault_rifl
     brief: `raid ${c.target} at ${st.place} · secure ${c.cargo.units} ${st.label.toLowerCase()} in ${cases} case${cases === 1 ? '' : 's'} · extract`,
     story: `${c.target} has ${c.cargo.units} units of ${st.label.toLowerCase()} in ${where} at ${st.place}, packed in ${cases} case${cases === 1 ? '' : 's'}. ${st.esc.hall.length} guards on the outer zone, ${st.esc.yard.length} inside.${c.issuer ? ` ${c.issuer} is paying a bounty on it.` : ''} Carry out what you can; only what reaches the extraction counts.`,
     objectives: [
-      { text: entryObj(st), kind: 'reach', pos: p.entry, activateRoom: 1, beats: ['opBreach'] },
+      { text: entryObj(st), kind: 'reach', pos: p.entry, activateRoom: 1, milestone: 'entry', beats: ['opBreach'] },
       { text: clearObj(st), kind: 'clear', room: 1, pos: p.entry, beats: ['troopsCleared', 'rivalFirstWord'] },
-      { text: pushObj(st), kind: 'reach', pos: p.push, activateRoom: 2, beats: ['opPushIn'] },
+      { text: pushObj(st), kind: 'reach', pos: p.push, activateRoom: 2, milestone: 'push', beats: ['opPushIn'] },
       {
         text: `SECURE THE ${st.label}`, kind: 'secure', pos: p.cargo, holdSecs: loadSeconds(c.cargo.units),
         reinforceRoom: 2, reinforceEvery: st.reinforceEvery, reinforceCount: st.esc.reinforceCount,
@@ -295,9 +295,9 @@ export function buildSabotageMission(c: ConvoyContract, gun: GunId = 'assault_ri
     brief: `plant charges on the ${a} and the ${b} · knock out ${c.target}'s ${label} production · get clear`,
     story: `${c.issuer ?? 'A sponsor'} wants ${c.target}'s ${label} line at ${st.place} down. Set one charge on the ${a} and one on the ${b}. The fuse is short once the second is set. You don't have to fight them all, just get out before they work out what you did.`,
     objectives: [
-      { text: entryObj(st), kind: 'reach', pos: p.entry, activateRoom: 1, beats: ['opBreach'] },
+      { text: entryObj(st), kind: 'reach', pos: p.entry, activateRoom: 1, milestone: 'entry', beats: ['opBreach'] },
       { text: `PLANT CHARGE · ${a.toUpperCase()}`, kind: 'plant', item: 'charge-1', pos: p.charges[0], beats: ['rivalFirstWord'] },
-      { text: pushObj(st), kind: 'reach', pos: p.push, activateRoom: 2, beats: ['opPushIn'] },
+      { text: pushObj(st), kind: 'reach', pos: p.push, activateRoom: 2, milestone: 'push', beats: ['opPushIn'] },
       { text: `PLANT CHARGE · ${b.toUpperCase()}`, kind: 'plant', item: 'charge-2', pos: p.charges[1], reinforceRoom: 2, reinforceEvery: st.reinforceEvery, reinforceCount: st.esc.reinforceCount },
       { text: 'GET CLEAR · EXTRACT', kind: 'extract', pos: base.field.exfil!.pos, reinforceRoom: 2, reinforceEvery: st.reinforceEvery * 1.4, reinforceCount: st.esc.reinforceCount },
     ],
@@ -323,8 +323,8 @@ export function buildRecoveryMission(c: ConvoyContract, gun: GunId = 'assault_ri
     brief: `find ${owner}'s seized ${st.label.toLowerCase()} in the ${held} · carry it out · hand it over`,
     story: `${c.target} took ${owner}'s caravan on the road: ${c.cargo.units} units of ${st.label.toLowerCase()}, sealed in one case and held in the ${held} at ${st.place}. It's heavy. ${owner} pays when it is back in their hands at ${base.field.exfil!.label}.`,
     objectives: [
-      { text: entryObj(st), kind: 'reach', pos: p.entry, activateRoom: 1, beats: ['opBreach'] },
-      { text: pushObj(st), kind: 'reach', pos: p.push, activateRoom: 2, beats: ['rivalFirstWord', 'opPushIn'] },
+      { text: entryObj(st), kind: 'reach', pos: p.entry, activateRoom: 1, milestone: 'entry', beats: ['opBreach'] },
+      { text: pushObj(st), kind: 'reach', pos: p.push, activateRoom: 2, milestone: 'push', beats: ['rivalFirstWord', 'opPushIn'] },
       { text: `RETRIEVE THE SEIZED ${st.label}`, kind: 'retrieve', item: 'seized-case', pos: st.lv.field.seized, reinforceRoom: 2, reinforceEvery: st.reinforceEvery, reinforceCount: st.esc.reinforceCount },
       { text: `DELIVER TO ${owner.toUpperCase()}`, kind: 'extract', pos: base.field.exfil!.pos, reinforceRoom: 2, reinforceEvery: st.reinforceEvery * 1.6, reinforceCount: st.esc.reinforceCount },
     ],

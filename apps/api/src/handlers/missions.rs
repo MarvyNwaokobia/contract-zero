@@ -17,6 +17,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
+use crate::services::protocol::{self, Ctx, Event as FieldEvent, FieldState, Phase as FieldPhase, Verdict};
 use crate::services::story;
 use crate::services::world::{log_event, summarize, WorldError};
 use crate::AppState;
@@ -118,8 +119,8 @@ pub async fn start(state: web::Data<AppState>, req: HttpRequest, body: web::Json
             }
             let tale = story::authored(&facts);
             sqlx::query(
-                "INSERT INTO mission_sessions (id, player, raid_id, min_secs, expires_at, story, site, field, gun)
-                 VALUES ($1, $2, $3, $4, now() + make_interval(secs => $5), $6, $7, $8, $9)",
+                "INSERT INTO mission_sessions (id, player, raid_id, min_secs, expires_at, story, site, field, gun, protocol, layout, field_state)
+                 VALUES ($1, $2, $3, $4, now() + make_interval(secs => $5), $6, $7, $8, $9, 2, $10, $11)",
             )
             .bind(session)
             .bind(&body.player)
@@ -130,12 +131,14 @@ pub async fn start(state: web::Data<AppState>, req: HttpRequest, body: web::Json
             .bind(plan.site().id)
             .bind(json!(objects))
             .bind(&body.gun)
+            .bind(plan.site().layout.name())
+            .bind(json!(protocol::FieldState::default()))
             .execute(&mut *db)
             .await?;
             log_event(&mut *db, w.tick, &format!("player:{}", body.player), "mission", &json!({ "phase": "start", "session": session, "raid": raid, "plan": plan, "gun": body.gun, "events": summarize(&ev) })).await?;
             let mut mission = crate::handlers::world::mission_json(w, &plan, Some(raid));
             mission["field"] = json!(objects);
-            Ok(json!({ "session": session, "raid": raid, "min_secs": min_secs, "mission": mission, "story": tale }))
+            Ok(json!({ "session": session, "raid": raid, "min_secs": min_secs, "mission": mission, "story": tale, "protocol": 2 }))
         })
         .await;
     respond(res)
@@ -161,7 +164,11 @@ pub enum Outcome {
     Killed,
 }
 
-type SessionRow = (String, i64, f64, DateTime<Utc>, Option<DateTime<Utc>>, Option<Value>, Option<Value>);
+type SessionRow = (String, i64, f64, DateTime<Utc>, Option<DateTime<Utc>>, Option<Value>, Option<Value>, i32, Option<Value>);
+
+/// Most operations one player may be paid for in an hour, however they were played.
+/// A bound on what a scripted client could extract, not a game rule players meet.
+pub const MAX_PAID_PER_HOUR: i64 = 8;
 
 pub async fn complete(state: web::Data<AppState>, req: HttpRequest, path: web::Path<Uuid>, body: web::Json<CompleteRequest>) -> HttpResponse {
     let who = match crate::handlers::auth::player(&state, &req).await {
@@ -179,12 +186,12 @@ pub async fn complete(state: web::Data<AppState>, req: HttpRequest, path: web::P
         .world
         .transact(async move |w, db| {
             let row: Option<SessionRow> = sqlx::query_as(
-                "SELECT player, raid_id, min_secs, started_at, completed_at, result, field FROM mission_sessions WHERE id = $1",
+                "SELECT player, raid_id, min_secs, started_at, completed_at, result, field, protocol, field_state FROM mission_sessions WHERE id = $1 FOR UPDATE",
             )
             .bind(session)
             .fetch_optional(&mut *db)
             .await?;
-            let Some((player, raid_id, min_secs, started_at, completed_at, stored, objects)) = row else {
+            let Some((player, raid_id, min_secs, started_at, completed_at, stored, objects, proto, field_state)) = row else {
                 return Err(WorldError::Other("unknown session".into()));
             };
             if player != body.player {
@@ -202,13 +209,25 @@ pub async fn complete(state: web::Data<AppState>, req: HttpRequest, path: web::P
             // Sessions with a manifest must say what was done; amounts come from the
             // manifest. Sessions from before manifests settle the old way.
             let objects: Option<FieldManifest> = objects.and_then(|v| serde_json::from_value(v).ok());
-            let assessed: Result<(Option<i64>, f64), &'static str> = match (&objects, &body.record) {
-                (None, _) => Ok((None, min_secs)),
-                (Some(_), None) => Err("no mission record: nothing was secured"),
-                (Some(m), Some(r)) => field::assess(plan.kind, m, r).map(|u| (Some(u), field::min_secs(plan.kind, r.secured.len()).max(min_secs))),
+            // Protocol 2: the server's own field state is the record; the client's is
+            // ignored. Protocol 1 (sessions from before) keeps the checked-record rule.
+            let server_state: Option<FieldState> = if proto >= 2 { field_state.and_then(|v| serde_json::from_value(v).ok()).or(Some(FieldState::default())) } else { None };
+            let record: Option<FieldRecord> = match &server_state {
+                Some(st) => Some(st.record()),
+                None => body.record.clone(),
+            };
+            let paid_last_hour: i64 = sqlx::query_scalar("SELECT count(*) FROM mission_sessions WHERE player = $1 AND outcome = 'extracted' AND completed_at > now() - interval '1 hour'")
+                .bind(&player).fetch_one(&mut *db).await?;
+            let assessed: Result<(Option<i64>, f64), String> = match (&server_state, &objects, &record) {
+                (Some(st), _, _) if st.phase == FieldPhase::Tainted => Err(format!("the run failed validation: {}", st.taint.clone().unwrap_or_default())),
+                (Some(st), _, _) if st.phase != FieldPhase::Extracted => Err("the server saw no completed extraction".into()),
+                _ if paid_last_hour >= MAX_PAID_PER_HOUR => Err(format!("reward limit: {MAX_PAID_PER_HOUR} paid operations an hour")),
+                (_, None, _) => Ok((None, min_secs)),
+                (_, Some(_), None) => Err("no mission record: nothing was secured".into()),
+                (_, Some(m), Some(r)) => field::assess(plan.kind, m, r).map(|u| (Some(u), field::min_secs(plan.kind, r.secured.len()).max(min_secs))).map_err(str::to_string),
             };
             let (outcome, verdict, ev) = match body.outcome {
-                Outcome::Extracted => match assessed.and_then(|(units, need)| validate_extraction(elapsed, need, body.kills, max_kills).map(|_| units)) {
+                Outcome::Extracted => match assessed.and_then(|(units, need)| validate_extraction(elapsed, need, body.kills, max_kills).map(|_| units).map_err(str::to_string)) {
                     Ok(units) => {
                         let act = match (plan.kind, units) {
                             (cz_economy::OpKind::Sabotage, _) | (_, None) => Action::SettleRaid { raid, player: player.clone() },
@@ -245,7 +264,8 @@ pub async fn complete(state: web::Data<AppState>, req: HttpRequest, path: web::P
                 "resource": plan.resource.name(),
                 "extracted_units": units,
                 "manifest": plan.manifest,
-                "record": body.record,
+                "record": record,
+                "protocol": proto,
                 "site": crate::handlers::world::site_json(&plan),
                 "bounty": bounty,
                 "player_holdings": {
@@ -320,6 +340,68 @@ pub async fn loadout(state: web::Data<AppState>, req: HttpRequest, path: web::Pa
         })
         .await;
     respond(res)
+}
+
+#[derive(Deserialize)]
+pub struct EventsRequest {
+    pub events: Vec<FieldEvent>,
+}
+
+/// `POST /missions/{session}/events`: the live event stream of a protocol-2 session.
+/// Each event is checked and folded into the server's field state
+/// (services/protocol.rs); the verdict for each is stored with it.
+pub async fn events(state: web::Data<AppState>, req: HttpRequest, path: web::Path<Uuid>, body: web::Json<EventsRequest>) -> HttpResponse {
+    let who = match crate::handlers::auth::player(&state, &req).await {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
+    let session = path.into_inner();
+    let batch = body.into_inner().events;
+    if batch.len() > protocol::MAX_BATCH {
+        return HttpResponse::BadRequest().json(json!({ "error": "too many events in one request" }));
+    }
+    let db = state.world.db();
+    let res: Result<Value, String> = async {
+        let mut tx = db.begin().await.map_err(|e| e.to_string())?;
+        let row: Option<(String, i64, DateTime<Utc>, Option<DateTime<Utc>>, DateTime<Utc>, i32, Option<String>, Option<Value>, Option<Value>)> = sqlx::query_as(
+            "SELECT player, raid_id, started_at, completed_at, expires_at, protocol, layout, field, field_state FROM mission_sessions WHERE id = $1 FOR UPDATE",
+        ).bind(session).fetch_optional(&mut *tx).await.map_err(|e| e.to_string())?;
+        let Some((player, raid_id, started_at, completed_at, expires_at, proto, layout, field, fs)) = row else { return Err("unknown session".into()) };
+        if player != who.account {
+            return Err("session belongs to another player".into());
+        }
+        if completed_at.is_some() {
+            return Err("that operation is over".into());
+        }
+        if expires_at < Utc::now() {
+            return Err("session expired".into());
+        }
+        if proto < 2 {
+            return Err("this session predates the event protocol".into());
+        }
+        let kind = state.world.read(|w| w.raids.get(&(raid_id as u64)).map(|r| r.plan.kind)).await.ok_or("raid not found")?;
+        let layout = layout.as_deref().and_then(|l| protocol::LAYOUTS.get(l)).ok_or("unknown map for this session")?;
+        let manifest: FieldManifest = field.and_then(|v| serde_json::from_value(v).ok()).ok_or("session has no object list")?;
+        let mut st: FieldState = fs.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
+        let ctx = Ctx { kind, layout, manifest: &manifest, server_elapsed_ms: (Utc::now() - started_at).num_milliseconds() };
+        let mut verdicts = Vec::new();
+        for e in &batch {
+            let v = protocol::apply(&mut st, &ctx, e);
+            let label = match &v { Verdict::Applied => "applied".to_string(), Verdict::Ignored(w) => format!("ignored: {w}"), Verdict::Taint(w) => format!("taint: {w}") };
+            sqlx::query("INSERT INTO mission_events (session, seq, t, kind, payload, verdict) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (session, seq) DO NOTHING")
+                .bind(session).bind(e.seq).bind(e.t).bind(serde_json::to_value(&e.kind).ok().and_then(|k| k["kind"].as_str().map(str::to_string)).unwrap_or_default())
+                .bind(json!(e)).bind(&label).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+            verdicts.push(json!({ "seq": e.seq, "verdict": label }));
+        }
+        sqlx::query("UPDATE mission_sessions SET field_state = $2 WHERE id = $1").bind(session).bind(json!(st)).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+        tx.commit().await.map_err(|e| e.to_string())?;
+        Ok(json!({ "phase": st.phase, "taint": st.taint, "carried": st.carried, "planted": st.planted, "secured": st.secured, "milestones": st.milestones, "last_seq": st.last_seq, "verdicts": verdicts }))
+    }
+    .await;
+    match res {
+        Ok(v) => HttpResponse::Ok().json(v),
+        Err(e) => HttpResponse::BadRequest().json(json!({ "error": e })),
+    }
 }
 
 /// The mission's story. With the NEAR AI planner configured, the first request asks

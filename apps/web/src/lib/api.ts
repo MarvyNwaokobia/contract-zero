@@ -53,6 +53,12 @@ export interface BoardEntry {
   mission: ConvoyContract;
 }
 
+/** The server's account of a run, after a batch of mission events. */
+export interface FieldVerdicts {
+  phase: 'in_progress' | 'extracted' | 'tainted'; taint: string | null; carried: string[]; planted: string[]; secured: string[];
+  milestones: string[]; last_seq: number; verdicts: { seq: number; verdict: string }[];
+}
+
 /** The world clock: one game hour is `tick_secs` real seconds. */
 export interface WorldClock { tick: number; day: number; hour: number; tick_secs: number; conditions: SiteConditions }
 
@@ -280,6 +286,9 @@ export const api = {
   settlement: (opId: string) => req<SettlementView>(`/settlements/${encodeURIComponent(opId)}`),
   completeMission: (session: string, outcome: 'extracted' | 'killed', kills: number, record?: FieldRecord) =>
     req<{ replayed: boolean; result: MissionResult }>(`/missions/${session}/complete`, { method: 'POST', body: JSON.stringify({ outcome, kills, record }) }),
+  /** The live mission event stream (services/protocol.rs on the server). */
+  missionEvents: (session: string, events: unknown[]) =>
+    req<FieldVerdicts>(`/missions/${session}/events`, { method: 'POST', body: JSON.stringify({ events }) }),
   /** Choose the weapon after the briefing; ownership is checked against the ledger. */
   missionLoadout: (session: string, gun: string) =>
     req<{ session: string; gun: string }>(`/missions/${session}/loadout`, { method: 'POST', body: JSON.stringify({ gun }) }),

@@ -52,7 +52,10 @@ ok('intel', {
 });
 await page.screenshot({ path: `${OUT}/intel.png`, fullPage: true });
 
-// Training: Practice selector.
+// Training: from here on, record every economic request the page makes. Practice,
+// Endless and the Campaign must make none.
+const economic = [];
+page.on('request', (r) => { if (r.url().startsWith(API) && /\/(missions|exchange|settlements|relay)/.test(r.url())) economic.push(`${r.method()} ${r.url()}`); });
 await page.goto(`${WEB}/training`);
 await page.click('[data-testid=mode-practice]');
 await page.click('[data-testid=site-blacksite]');
@@ -70,6 +73,21 @@ await page.evaluate(() => window.__czSkipBriefing());
 await sleep(1500);
 ok('practice_run', await page.evaluate(() => ({ kind: window.__czField().kind, exfil: window.__czField().exfil?.mode, objectives: window.__czObjectives().map((o) => o.kind) })));
 await page.screenshot({ path: `${OUT}/practice-run.png` });
+// Finish it (dev hooks): retrieve the case and hand it over, and see the local result.
+await page.evaluate(() => window.__czKillAll());
+for (const step of ['reach', 'reach']) {
+  const m = await page.evaluate(() => window.__czMission()); const o = (await page.evaluate(() => window.__czObjectives()))[m.objective];
+  if (o?.kind === step) { await page.evaluate(([x, z]) => window.__czWarp(x, z), o.pos); await sleep(1200); }
+}
+const seized = await page.evaluate(() => window.__czField().items.find((i) => i.kind === 'seized_case'));
+await page.evaluate(([x, z]) => { window.__czWarp(x, z + 0.5); window.__czLook(0, -1.2); }, seized.pos);
+await page.keyboard.down('KeyE'); for (let i = 0; i < 40 && !(await page.evaluate(() => window.__czField().carried.length)); i++) await sleep(250); await page.keyboard.up('KeyE');
+const hz = await page.evaluate(() => window.__czField().exfil.pos);
+await page.evaluate(() => window.__czKillAll());
+await page.evaluate(([x, z]) => window.__czWarp(x, z), hz);
+await page.keyboard.down('KeyE'); for (let i = 0; i < 40 && (await page.evaluate(() => window.__czField().phase)) !== 'counting'; i++) await sleep(250); await page.keyboard.up('KeyE');
+await page.waitForSelector('[data-testid=practice-result]', { timeout: 60_000 }).catch(() => {});
+ok('practice_result', await page.locator('[data-testid=practice-result]').innerText().catch(() => null));
 
 // Endless.
 await page.goto(`${WEB}/training`);
@@ -94,6 +112,7 @@ await sleep(1000);
 ok('campaign', await page.evaluate(() => ({ objectives: window.__czObjectives().map((o) => o.kind), exfil: window.__czField().exfil, reserve: window.__czField().reserve })));
 await page.screenshot({ path: `${OUT}/campaign.png` });
 
+ok('training_economic_requests', economic);
 ok('page_errors', out.errors);
 fs.writeFileSync(`${OUT}/report.json`, JSON.stringify(out, null, 2));
 await browser.close();

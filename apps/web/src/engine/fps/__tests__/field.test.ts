@@ -156,3 +156,17 @@ describe('sabotage and recovery', () => {
     expect(f.record().delivered).toBe('seized-case');
   });
 });
+
+describe('protocol events for the server', () => {
+  it('a take is preceded by its hold start, at the player position, in game time', () => {
+    const f = new FieldRuntime(buildField('raid', lv.field, practiceManifest('raid', 60, 2), opts));
+    const c = f.items.get('case-1')!;
+    holdOn(f, c.pos, CASE_SECS + 0.2, pockets());
+    const kinds = f.log.map((e) => e.kind);
+    expect(kinds).toEqual(['hold_start', 'collect']);
+    const [h, col] = f.log as { t: number; pos: [number, number]; object?: string }[];
+    expect(col.t - h.t).toBeGreaterThanOrEqual(CASE_SECS * 1000);
+    expect(h.object).toBe('case-1');
+    expect(Math.hypot(h.pos[0] - c.pos[0], h.pos[1] - c.pos[1])).toBeLessThan(1);
+  });
+});

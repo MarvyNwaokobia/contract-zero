@@ -123,6 +123,8 @@ await p.click('[data-testid=accept-contract]')
 
 // 3. The briefing.
 await p.waitForSelector('[data-testid=briefing]')
+// The story may take up to 12 s (optional model voicing); wait for it, then for the lines to finish typing.
+await p.waitForFunction(() => !/decrypting channel/i.test(document.body.innerText), null, { timeout: 30000 })
 await p.waitForFunction(() => !/skip ▸/i.test(document.body.innerText), null, { timeout: 90000 })
 await step(3, 'Briefing', { codename: start?.story?.codename, location: start?.story?.location, lines: start?.story?.briefing.map((l) => `${l.speaker}: ${l.text}`), source: start?.story?.source })
 await p.keyboard.press('Enter')
@@ -145,9 +147,28 @@ const objectives = await p.evaluate(() => window.__czObjectives())
 const heard = new Set()
 const subtitle = async () => p.evaluate(() => [...document.querySelectorAll('div')].find((d) => /^(KESTREL|VANGUARD COMMAND|ASHEN COMPACT|VEX)$/.test(d.textContent ?? '') && d.nextElementSibling)?.nextElementSibling?.textContent ?? null)
 let midShot = false
+// Move the operator at walking pace (2.8 m/s): the server checks every position
+// against the player's top speed, so the autopilot walks rather than teleports.
+const walkTo = (x, z) => p.evaluate(([x, z]) => new Promise((done) => {
+  // Follow the level's own navigation route, one straight, clear leg at a time.
+  const route = window.__czPath?.(x, z) ?? [[x, z]]
+  if (!route.length || Math.hypot(route[route.length - 1][0] - x, route[route.length - 1][1] - z) > 0.01) route.push([x, z])
+  const step = () => {
+    if (!route.length) return done(true)
+    const [tx, tz] = route[0]
+    const at = window.__czPlayer()
+    const d = Math.hypot(tx - at.x, tz - at.z)
+    if (d < 0.05) { route.shift(); return step() }
+    const k = Math.min(1, 0.28 / d)
+    window.__czWarp(at.x + (tx - at.x) * k, at.z + (tz - at.z) * k)
+    setTimeout(step, 100)
+  }
+  step()
+}), [x, z])
 // Hold E on a field object until `done` says it has happened.
 const holdOn = async (pos, done, arg) => {
-  await p.evaluate(([x, z]) => { window.__czWarp(x, z + 0.5); window.__czLook(0, -1.2) }, pos)
+  await walkTo(pos[0], pos[1] + 0.5)
+  await p.evaluate(() => window.__czLook(0, -1.2))
   await wait(300)
   await p.keyboard.down('KeyE')
   for (let i = 0; i < 120 && !(await p.evaluate(done, arg)); i++) await wait(250)
@@ -173,7 +194,8 @@ for (let guard = 0; guard < 400; guard++) {
     if (need > 0) await wait(need)
     await p.evaluate(() => window.__czKillAll())
     const z = f.exfil
-    await p.evaluate(([x, zz]) => { window.__czWarp(x, zz); window.__czLook(0, -0.3) }, z.pos)
+    await walkTo(z.pos[0], z.pos[1])
+    await p.evaluate(() => window.__czLook(0, -0.3))
     await p.keyboard.down('KeyE')
     for (let i = 0; i < 60 && (await p.evaluate(() => window.__czField().phase)) !== 'counting'; i++) await wait(250)
     await p.keyboard.up('KeyE')
@@ -183,7 +205,7 @@ for (let guard = 0; guard < 400; guard++) {
     continue
   }
   if (o.kind === 'clear') await p.evaluate(() => window.__czKillAll())
-  else if (o.kind === 'reach') await p.evaluate(([x, z]) => window.__czWarp(x, z), o.pos)
+  else if (o.kind === 'reach') await walkTo(o.pos[0], o.pos[1])
   if (o.kind === 'defend') await p.evaluate(() => window.__czKillAll())
   const s = await subtitle()
   if (s) heard.add(s)

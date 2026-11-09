@@ -26,6 +26,8 @@ export interface Objective {
   kind: 'reach' | 'clear' | 'defend' | 'rescue' | 'secure' | 'plant' | 'retrieve' | 'extract';
   /** The field object this objective is about (plant / retrieve). */
   item?: string;
+  /** A point the server checks the player actually reached (contract operations). */
+  milestone?: 'entry' | 'push';
   pos: [number, number];
   room?: number;
   activateRoom?: number;

@@ -125,6 +125,31 @@ The player's ledger balance is 120 ammo: 60 migrated from v1 plus 60 from this r
 
 Recovery settles through the same `settle_operation`, with an extra faction → merchant cargo leg. That leg is covered by contract and economy tests, but hasn't run live yet: it needs Vanguard to seize a caravan, which happens only in a squeezed, raided world.
 
+## Supply orders on chain: `world2` v2.3 (2026-11-09)
+
+`world2` gained supply orders: an escrow-funded intent that merchants answer with proposals on chain. The design is in [INTENTS.md](INTENTS.md).
+- **Upgraded in place.** State is unchanged; the new collections are created on demand.
+- **New code hash:** `BgrQgAJ9pxUMaurGgUumCsa653F1CWEyAhXPD5EpWEQC`, which matches the local `cargo near build non-reproducible-wasm` built with the stable toolchain.
+
+| Step | Transaction |
+|---|---|
+| Storage for the larger code (0.7 NEAR, Vex → `world2`) | [`5Srnf5py…`](https://testnet.nearblocks.io/txns/5Srnf5pyHEct7AmC5MzaRz8XcnSaJX5AnCP7kwm1E9Ls) |
+| Deploy v2.3 | [`D8xPBJG9…`](https://testnet.nearblocks.io/txns/D8xPBJG9tWkQbH1ymYdeVYTpyF4isCx9dsc6xRXrMePp) |
+| `assets.register_actor(world2)`, so the controller can hold order escrow | [`GMbcHqC5…`](https://testnet.nearblocks.io/txns/GMbcHqC5DzgQLaH67rmdx2AHELGfZFCoDtCb4spMvgSL) |
+| Create `halcyon.contract-zero.testnet`, the second merchant | [`C5FZqPxb…`](https://testnet.nearblocks.io/txns/C5FZqPxbDRrUEWcz4mgLH499b335nDjEciQPj2tzV1hb) |
+| `world2.register_actor(halcyon, Merchant)` | [`C1e1khfy…`](https://testnet.nearblocks.io/txns/C1e1khfy2Khx9zxaMWrr7Lc998fTiwF52y9i4SkwFsHc) |
+| `assets.register_actor(halcyon)` | [`4cYEu4Wm…`](https://testnet.nearblocks.io/txns/4cYEu4WmkqF7JtAoX7wWWZXNdNcjSMkdhCzsFtuV4kjU) |
+| v3 function-call keys: Vanguard, Ashen, Vex, Halcyon | [`8HLSZHGF…`](https://testnet.nearblocks.io/txns/8HLSZHGFGWiL7RAESNY3ZneGenZUBexJWk5JMJAeu9HP), [`4VbHvbVu…`](https://testnet.nearblocks.io/txns/4VbHvbVubGx2Nau4depfAAVhozfMXMSE8hMSBDBHaJ7L), [`DWuYvZnU…`](https://testnet.nearblocks.io/txns/DWuYvZnUM7y1bdTuU82MbCVdiJaamUnP3ky1hjiu32rg), [`GFqmoAVq…`](https://testnet.nearblocks.io/txns/GFqmoAVqGShxYdPPVG4zR6XftJjykWzeicPrafSwMnpd) |
+
+**The v3 keys** live in `~/.contract-zero/keys/v3` (mode 600). Each is limited to `world2`:
+- **Factions:** `accept_offer`, `accept_bid`, `place_order`, `accept_proposal`, `cancel_order`, `expire_order` and `retry_refund`.
+- **Merchants:** `post_offer`, `post_bid`, `cancel_quote`, `propose`, `expire_order` and `retry_refund`.
+
+**Smoke test** (`node scripts/orders-smoke.mjs`), which nets to zero:
+1. Vanguard `place_order` [`BAub3jHC…`](https://testnet.nearblocks.io/txns/BAub3jHCGw6hZHVQe4J71iTvSBJYsoB1mQ1rvGRd1Vao): Vanguard's credits went from 13,573 to 13,423, and `world2`'s escrow to 150.
+2. Vex `propose` [`G2gqeypP…`](https://testnet.nearblocks.io/txns/G2gqeypP8xtbPJXmCjfRHJe9uwaFQPCN3CVso3yiai9b): 5 ammunition for 140 credits.
+3. Vanguard `cancel_order` [`9cpAJG3Z…`](https://testnet.nearblocks.io/txns/9cpAJG3Z3tVoVTn2TADJKEYXp8aFvkq6ujbsfQj9Tcvz): the order closed as `cancelled`, and both balances returned exactly (13,573 and 0).
+
 ## Repairing an out-of-order mirror
 
 A long RPC outage left 129 flow batches failed. The old worker then skipped past them, so later batches applied first and an earlier one became impossible ("insufficient balance").
@@ -155,7 +180,7 @@ v1 was one contract that held balances and game logic together. Everything below
 
 ```bash
 cd contracts-near/cz-assets   && cargo test && cargo near build non-reproducible-wasm   # 28 tests
-cd contracts-near/cz-world-v2 && cargo test && cargo near build non-reproducible-wasm   # 21 tests
+cd contracts-near/cz-world-v2 && cargo test && RUSTUP_TOOLCHAIN=stable cargo near build non-reproducible-wasm   # 57 tests
 cd contracts-near/cz-world    && cargo test                                            # v1, 51 tests
 ```
 

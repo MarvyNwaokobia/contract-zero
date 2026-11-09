@@ -140,6 +140,15 @@ A valid session could claim an extraction without playing it.
   - This is safe because every operation is replay-protected and only adds or subtracts amounts: order changes when a step can land, never the final balances.
 - **Tests:** `an_issuance_deferral_lets_only_player_payouts_pass` (extended) and `a_trade_is_compensated_only_when_no_attempt_could_have_moved_value` (balance cases).
 
+**After the reset (2026-11-09):**
+- The deferred batch confirmed in tx `6cjdDjy2vYrFxwD5mbMWQaYFs5ou6sQEFSa7cF8vsRNm`.
+- With balance deferral, the backlog of about 210 operations drained in about 45 minutes: 259 confirmations in the hour, and no new failures or compensations.
+- At 09:06 UTC, `GET /reconciliation` reported `exact: true`:
+  - 0 operations in flight;
+  - 11 ledger entries waiting for the next flow sync;
+  - zero net difference for Ashen, Vanguard and Vex on every token, including the gun tokens.
+- Snapshot: `evidence/reconciliation-2026-11-09T0906Z.json`.
+
 **Durable advice:**
 - A full realign can mint a day's worth of a token at once. Plan large realigns for just after an epoch reset, or split them across epochs.
 - The deferral keeps normal play moving either way.

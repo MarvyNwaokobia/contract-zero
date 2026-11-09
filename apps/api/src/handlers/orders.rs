@@ -159,7 +159,7 @@ pub async fn prepare(state: web::Data<AppState>, req: HttpRequest, body: web::Js
         "quantity": b.qty.to_string(), "limit_credits": b.limit_total.to_string(), "allow_partial": b.allow_partial,
         "ttl_secs": b.ttl_ticks * tick_secs(),
     });
-    HttpResponse::Ok().json(json!({ "order_id": order_id, "nonce": nonce, "call": { "receiver_id": near.contract.to_string(), "method": "place_order", "args": args, "gas": "300000000000000" } }))
+    HttpResponse::Ok().json(json!({ "order_id": order_id, "nonce": nonce, "call": { "receiver_id": near.contract.to_string(), "method": "place_order", "args": args, "gas": "80000000000000" } }))
 }
 
 #[derive(Deserialize)]

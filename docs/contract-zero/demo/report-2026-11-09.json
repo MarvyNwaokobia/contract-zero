@@ -1,0 +1,253 @@
+{
+  "player": "player.contract-zero.testnet",
+  "minutes": 7.6,
+  "page_errors": [],
+  "steps": [
+    {
+      "step": 1,
+      "title": "Sign in",
+      "secs": 15,
+      "screenshot": "01-sign-in.png",
+      "offered": [
+        "google",
+        "wallet"
+      ],
+      "used": "wallet-style signed challenge (scripted)"
+    },
+    {
+      "step": 2,
+      "title": "Operations Hub",
+      "secs": 23,
+      "screenshot": "02-operations-hub.png",
+      "callsign": "WRAITH-6"
+    },
+    {
+      "step": 3,
+      "title": "Briefing",
+      "secs": 44,
+      "screenshot": "04-briefing.png",
+      "codename": "OPERATION SALT MOTH",
+      "location": "Cinder Yard · loading bay · held by Ashen Compact",
+      "lines": [
+        "handler: WRAITH-6, Vanguard has a 2814 credit bounty on Ashen Compact's fuel. 414 units in the loading bay at Cinder Yard, and whatever you carry out is yours.",
+        "vanguard: Ashen Compact paid for 1 raid(s) on us. Returning the favour: 2814 cr to whoever raids its fuel depot.",
+        "handler: Ashen Compact has this site at defense level 2: 8 guards armed and waiting. They know your name. You've hit them 7 times."
+      ],
+      "source": "authored"
+    },
+    {
+      "step": 4,
+      "title": "Contract board",
+      "secs": 26,
+      "screenshot": "03-contract-board.png",
+      "contracts": 6,
+      "kinds": [
+        "raid",
+        "sabotage"
+      ],
+      "chosen": "raid on Ashen Compact's fuel: 414 units, 9 guards, bounty 2814 from Vanguard",
+      "intel": {
+        "site": "CINDER YARD",
+        "phase": "Night",
+        "objectives": [
+          "1 BREACH THE CHECKPOINT",
+          "2 CLEAR THE TANK FARM",
+          "3 THROUGH THE BLAST WALL",
+          "4 SECURE THE FUEL",
+          "5 EXTRACT WITH THE CARGO"
+        ]
+      }
+    },
+    {
+      "step": 5,
+      "title": "Loadout",
+      "secs": 47,
+      "screenshot": "05-loadout.png",
+      "weapon": "Marksman Rifle",
+      "owned_items": "an owned gun token, checked against the ledger"
+    },
+    {
+      "step": 6,
+      "title": "In the fight",
+      "secs": 101,
+      "screenshot": "06-in-the-fight.png",
+      "objective": "THROUGH THE BLAST WALL",
+      "carried": [
+        "case-1",
+        "case-2",
+        "case-3"
+      ],
+      "radio_beats": [
+        "opStart",
+        "opBreach",
+        "troopsCleared",
+        "rivalFirstWord",
+        "opPushIn",
+        "cargoSecured",
+        "lowHp",
+        "extractCalled",
+        "extractDone",
+        "missionCleared"
+      ],
+      "lines_heard": [
+        "You're in. They're awake now, so keep moving.",
+        "That's the yard. Get on the cargo and start loading. They'll try to take it back."
+      ]
+    },
+    {
+      "step": 7,
+      "title": "Extraction results",
+      "secs": 174,
+      "screenshot": "07-extraction-results.png",
+      "outcome": "CARGO EXTRACTED",
+      "debrief": "KESTREL 311 fuel out, plus a 2814 credit bounty. Sell it or keep it. ASHEN COMPACT WRAITH-6. That's 8 operations against Ashen Compact. We are not forgetting any of them."
+    },
+    {
+      "step": 8,
+      "title": "Genuine ownership",
+      "secs": 277,
+      "on_chain": "player.contract-zero.testnet holds 734 fuel on assets.contract-zero.testnet (was 423)"
+    },
+    {
+      "step": 9,
+      "title": "Trade with Vex",
+      "secs": 295,
+      "screenshot": "09-trade-with-vex.png",
+      "sold": "20 fuel",
+      "quote": "QUOTE Vex buys 20 fuel from you for 391 credits 19.6 cr/unit · firm price, held for you · quick trade: no confirmation needed Done · settled on-chain close Vex's quote C6LCaVRW… your trade 7HUB1KAS… MARKET"
+    },
+    {
+      "step": 10,
+      "title": "Factions respond",
+      "secs": 356,
+      "screenshot": "10-factions-respond.png",
+      "actor": "Ashen Compact",
+      "trigger": "order #2095",
+      "observed": [
+        [
+          "order",
+          2095
+        ],
+        [
+          "proposal",
+          2098
+        ],
+        [
+          "qty",
+          1
+        ],
+        [
+          "total",
+          47
+        ],
+        [
+          "competing",
+          2
+        ]
+      ],
+      "rationale": "Take Vex Exchange's 1 med for 47 cr on #2095 (routine: cheapest per unit). On the table: Vex Exchange 1×47cr, Halcyon Logistics 1×52cr.",
+      "validation": "accepted",
+      "world": [
+        "Ashen Compact bought 1 med from Vex Exchange for 47 cr",
+        "Order #2095 filled by Vex Exchange: 1 for 47 cr (0 still wanted)",
+        "Order #2095 closed (filled); 43 unused returned"
+      ]
+    },
+    {
+      "step": 11,
+      "title": "Confirmed NEAR settlement",
+      "secs": 277,
+      "screenshot": "08-confirmed-near-settlement.png",
+      "result": "Settled on NEAR testnet: EQWpaEN8C8…",
+      "raid_op": "raid:2060"
+    },
+    {
+      "step": 12,
+      "title": "War Room",
+      "secs": 358,
+      "screenshot": "11-war-room.png",
+      "chain": "trigger → observed → proposal → validation → transaction → world → gameplay"
+    },
+    {
+      "step": 13,
+      "title": "The world has changed",
+      "secs": 360,
+      "screenshot": "12-the-world-has-changed.png",
+      "before": {
+        "stock": 691,
+        "defense": 2,
+        "manifest": 414,
+        "guards": 9,
+        "bounty": 2814
+      },
+      "after": {
+        "stock": 392,
+        "defense": 1,
+        "manifest": 235,
+        "guards": 7,
+        "bounty": 1624,
+        "on_board": true
+      },
+      "board": {
+        "before": [
+          "raid:ashen:ammo",
+          "raid:ashen:fuel",
+          "raid:vanguard:ammo",
+          "raid:vanguard:med",
+          "raid:vanguard:fuel",
+          "sabotage:ashen:fuel"
+        ],
+        "after": [
+          "raid:ashen:ammo",
+          "raid:ashen:fuel",
+          "raid:vanguard:ammo",
+          "raid:vanguard:med",
+          "raid:vanguard:fuel",
+          "sabotage:ashen:fuel",
+          "recovery:ashen:ammo"
+        ]
+      }
+    },
+    {
+      "step": 14,
+      "title": "Supply order and competing merchants",
+      "secs": 363,
+      "screenshot": "13-supply-order-and-competing-merchants.png",
+      "order": "#2072: Ashen Compact buys 2 ammo, limit 72 cr",
+      "answers": [
+        "Halcyon Logistics: Offer 2 ammo for 38 cr on #2072 (19 cr/unit, 8% margin).",
+        "Vex Exchange: Offer 2 ammo for 38 cr on #2072 (19 cr/unit, 20% margin)."
+      ],
+      "choice": "Take Halcyon Logistics's 2 ammo for 38 cr on #2072 (routine: cheapest per unit). On the table: Halcyon Logistics 2×19cr, Vex Exchange 2×19cr.",
+      "settlement": [
+        "order:o2072 settled 8H62W2Z3o4CZdNx6AipKavBx8PhzTzttBgYYHtPG1KzE",
+        "propose:o2072|p2075 settled wTk7ZPZLEFxbp1wn8D23NsiYc38HCiQGdvdEyRjAQw8",
+        "propose:o2072|p2077 settled FNhT2NZ2aB1Tb2DFPM66txSxVPR11eCYti2s6Ya3Q66x",
+        "fill:o2072|p2075 settled HYt1mwZ4GMJQT5hpQHLbdAF1fNhkyD74YEDyXugYBx8p"
+      ],
+      "next_mission": {
+        "defense": 1,
+        "depot": "fuel",
+        "guards": 7,
+        "planned": 7,
+        "rifles": 7,
+        "sidearms": 0,
+        "stock_now": 67
+      }
+    },
+    {
+      "step": 15,
+      "title": "Your own supply order",
+      "secs": 452,
+      "screenshot": "14-your-own-supply-order.png",
+      "result": "Order Filled: 3 medical from Vex Exchange."
+    },
+    {
+      "step": 16,
+      "title": "NEAR Intents (official, mainnet, dry quote)",
+      "secs": 456,
+      "screenshot": "15-near-intents-official-mainnet-dry-quote-.png",
+      "quote": "0.1 wNEAR → USDCReceive ≈ 0.357916 (~$0.358)Minimum received: 354336 (base units)Fees: 20 bps · est. 12 sQuote expires 18:00:37Reference d8b6939e-4dca-4f74-bd31-ff3ee9aa9681 · dry quote: no deposit address, nothing can be sent"
+    }
+  ]
+}

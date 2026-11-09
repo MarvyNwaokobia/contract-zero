@@ -56,8 +56,8 @@ const [cookieName, cookieValue] = login.cookie.split(';')[0].split('=')
 const quickKey = KeyPair.fromRandom('ed25519')
 const wallet = new Account(PLAYER, new JsonRpcProvider({ url: RPC }), new KeyPairSigner(key.keyPair))
 const retry = async (f) => { for (let i = 0; ; i++) { try { return await f() } catch (e) { if (i >= 4) throw e; await wait(3000 * (i + 1)) } } }
-await retry(() => wallet.signAndSendTransaction({ receiverId: PLAYER, actions: [actions.addFunctionCallAccessKey(quickKey.getPublicKey(), WORLD, ['accept_offer', 'accept_bid', 'revoke_session'], 250_000_000_000_000_000_000_000n)], waitUntil: 'FINAL' }))
-await retry(() => wallet.signAndSendTransaction({ receiverId: WORLD, actions: [actions.functionCall('register_session', { public_key: quickKey.getPublicKey().toString(), credit_budget: '0', unit_budget: '500', ttl_secs: 7200 }, 30_000_000_000_000n, 1_000_000_000_000_000_000_000n)], waitUntil: 'FINAL' }))
+await retry(() => wallet.signAndSendTransaction({ receiverId: PLAYER, actions: [actions.addFunctionCallAccessKey(quickKey.getPublicKey(), WORLD, ['accept_offer', 'accept_bid', 'place_order', 'accept_proposal', 'cancel_order', 'revoke_session'], 1_000_000_000_000_000_000_000_000n)], waitUntil: 'FINAL' }))
+await retry(() => wallet.signAndSendTransaction({ receiverId: WORLD, actions: [actions.functionCall('register_session', { public_key: quickKey.getPublicKey().toString(), credit_budget: '600', unit_budget: '500', ttl_secs: 7200 }, 30_000_000_000_000n, 1_000_000_000_000_000_000_000n)], waitUntil: 'FINAL' }))
 
 const browser = await chromium.launch({ channel: 'chrome', args: ['--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] })
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 }, recordVideo: { dir: OUT, size: { width: 1280, height: 720 } } })
@@ -117,6 +117,7 @@ await wait(1500)
 report[report.length - 1].intel = { site: await p.innerText('[data-testid=intel-site]'), phase: await p.innerText('[data-testid=intel-phase]'), objectives: (await p.locator('[data-testid=intel-objectives] li').allInnerTexts()).map((t) => t.replace(/\s+/g, ' ')) }
 await p.screenshot({ path: `${OUT}/04b-intel.png`, fullPage: true })
 let start = null
+const tick0 = (await api('/world')).tick // orders placed after this answer the raid
 p.on('response', async (r) => { if (r.url().endsWith('/missions/start') && r.ok()) start = await r.json() })
 const deployedAt = Date.now()
 await p.click('[data-testid=accept-contract]')
@@ -275,6 +276,54 @@ await step(13, 'The world has changed', {
   after: { stock: targetAfter.holdings[pick.resource], defense: targetAfter.defense, manifest: same?.manifest ?? null, guards: same?.guards.planned ?? null, bounty: same?.bounty?.amount ?? 0, on_board: !!same },
   board: { before: board0.map((b) => `${b.kind}:${b.target}:${b.resource}`), after: board1.map((b) => `${b.kind}:${b.target}:${b.resource}`) },
 })
+
+// 14. The raided faction asks the market: competing merchants, a choice, NEAR.
+let chain = null
+for (let i = 0; i < 40 && !chain; i++) {
+  const chains = (await api('/warroom/procurement?limit=20')).chains
+  chain = chains.find((c) => c.requester === pick.target && c.placed_at >= tick0 && c.fills.length > 0 && c.settlement.some((s) => s.op_id.startsWith('fill:') && s.settled_on_chain)) ?? null
+  if (!chain) await wait(10000)
+}
+await p.goto(`${WEB}/war-room`, { waitUntil: 'networkidle' })
+await p.waitForSelector('[data-testid=procurement]')
+if (chain) {
+  const el = p.locator(`[data-testid=proc-${chain.order}]`)
+  await el.evaluate((d) => { d.open = true })
+  await el.scrollIntoViewIfNeeded()
+  await wait(800)
+  await el.screenshot({ path: `${OUT}/14b-supply-order-chain.png` })
+}
+await step(14, 'Supply order and competing merchants', chain ? {
+  order: `#${chain.order}: ${chain.requester_name} ${chain.side}s ${chain.qty} ${chain.resource}, limit ${chain.limit_total} cr`,
+  answers: chain.answers.map((a) => `${a.merchant_name}: ${a.rationale}`),
+  choice: chain.choices.find((c) => c.validation === 'accepted')?.rationale,
+  settlement: chain.settlement.map((s) => `${s.op_id} ${s.settled_on_chain ? 'settled' : s.status} ${s.tx_hashes[0] ?? ''}`),
+  next_mission: chain.next_mission,
+} : { note: 'no settled supply order from the raided faction within the wait' })
+
+// 15. The player in the same market: a supply order, competing offers, the best one.
+await p.goto(`${WEB}/exchange`, { waitUntil: 'networkidle' })
+await p.waitForSelector('[data-testid=new-order]')
+await p.selectOption('[data-testid=order-side]', 'buy')
+await p.selectOption('[data-testid=order-resource]', 'med')
+await p.fill('[data-testid=order-qty]', '3')
+await p.locator('[data-testid=new-order]').scrollIntoViewIfNeeded()
+await p.click('[data-testid=order-place]')
+await p.waitForSelector('[data-testid=order-msg]', { timeout: 120000 })
+const accept = p.locator('[data-testid^=accept-]').first()
+await accept.waitFor({ timeout: 240000 })
+await accept.scrollIntoViewIfNeeded()
+await wait(600)
+await p.screenshot({ path: `${OUT}/15a-competing-offers.png` })
+await accept.click()
+await p.waitForFunction(() => /Order Filled/.test(document.querySelector('[data-testid=order-msg]')?.textContent ?? ''), null, { timeout: 180000 })
+await step(15, 'Your own supply order', { result: await p.textContent('[data-testid=order-msg]') })
+
+// 16. The official NEAR Intents protocol, clearly apart: a live dry quote on mainnet.
+await p.locator('[data-testid=intents-path]').scrollIntoViewIfNeeded()
+await p.click('[data-testid=intents-quote-wNEAR]')
+await p.waitForFunction(() => /Minimum received/.test(document.querySelector('[data-testid=intents-result]')?.textContent ?? ''), null, { timeout: 60000 })
+await step(16, 'NEAR Intents (official, mainnet, dry quote)', { quote: (await p.textContent('[data-testid=intents-result]')).replace(/\s+/g, ' ') })
 
 await ctx.close()
 await browser.close()

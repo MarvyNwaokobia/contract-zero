@@ -167,7 +167,7 @@ function OrderCard({ o, m, session, onDone }: { o: MarketOrder; m: MarketView; s
   const onChain = (p: OrderProposal) => o.settlement.some((s) => s.op_id === `propose:${o.chain_id}|${p.chain_proposal_id}` && s.status === 'confirmed')
   const sign = async (method: string, args: Record<string, string>) => {
     if (!session || !m.controller) throw new Error('sign in first')
-    return acceptQuote(session, { receiver_id: m.controller, method, args, gas: method === 'accept_proposal' ? '200000000000000' : '100000000000000' })
+    return acceptQuote(session, { receiver_id: m.controller, method, args, gas: method === 'accept_proposal' ? '110000000000000' : '70000000000000' })
   }
   const retry = async (f: () => Promise<unknown>) => { let last: unknown; for (let i = 0; i < 8; i++) { try { return await f() } catch (e) { last = e; await new Promise((r) => setTimeout(r, 1500)) } } throw last }
   const accept = async (p: OrderProposal) => {

@@ -46,7 +46,7 @@ if (login.status !== 200) throw new Error('sign-in failed');
 const me = client(API, login.cookie);
 const signer = new Account(PLAYER, provider, new KeyPairSigner(key.keyPair));
 /** The player signs a world2 call with their own key (as a wallet would). */
-const sign = async (methodName, args, gas = 200_000_000_000_000n) => {
+const sign = async (methodName, args, gas = methodName === 'accept_proposal' ? 110_000_000_000_000n : 80_000_000_000_000n) => {
   try {
     const r = await signer.callFunctionRaw({ contractId: WORLD, methodName, args, gas });
     const fail = r.status?.Failure ?? r.receipts_outcome?.map((x) => x.outcome.status?.Failure).find(Boolean);

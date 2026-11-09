@@ -1,6 +1,6 @@
 # CONTRACT ZERO: the demo
 
-The brief's §17 run, in 13 steps. It plays as a game first. The fact that the economy and the agents are real is the second reveal, not the first thing you see.
+The brief's §17 run in 13 steps, plus three on the intent-driven war economy (14–16). It plays as a game first. The fact that the economy and the agents are real is the second reveal, not the first thing you see.
 
 There are two ways to run it:
 - **By hand, recorded:** the run judges should see. Use the script below.
@@ -14,7 +14,7 @@ There are two ways to run it:
 4. Optional: NEAR AI credits. With them, the War Room shows NEAR AI decisions and broadcasts, and briefings are model-voiced. Without them, everything still works on the deterministic agents and authored lines.
 5. Screen recorder at 1280×720 or larger, with system audio on so the radio static is captured.
 
-## The script (about 8 minutes)
+## The script (about 11 minutes)
 
 | § | Do | Say or show |
 |---|---|---|
@@ -31,8 +31,11 @@ There are two ways to run it:
 | 11 | War Room header and the results link. | Only "Settled on NEAR" means a confirmed transaction. |
 | 12 | **War Room**, filter **operations**, open the raid's chain. | Trigger → observed state → proposal → validation → transaction → world consequence → gameplay consequence. Then filter **NEAR AI** if the planner has credits. |
 | 13 | Back to **Contracts**. | The same depot now carries a different haul, guard count or bounty, or it's gone and something else is on the board. |
+| 14 | **War Room → Supply orders and competition**: open the raided faction's chain. | Your raid caused this. The commander didn't buy from a fixed merchant: it posted a bounded supply order. Vex and Halcyon each priced it from their own shelves (or declined, with a reason). The commander chose by its doctrine (urgent: coverage first; routine: cheapest) and said why. Every step is a NEAR transaction, and the last line is the next mission's guard plan. |
+| 15 | **Exchange → New Supply Order**: buy 3 medical, place it, compare the offers, accept the **Best Offer**. | You trade in the same market. Your credits are escrowed by the contract, both partners compete for you, and the contract holds the fill to your limit. "Order Filled" appears only after the chain shows it. |
+| 16 | **Exchange → NEAR Intents · official protocol**: click *0.1 wNEAR → USDC*, then *10 ammo (CZ) → wNEAR*. | The real NEAR Intents network on mainnet: a live quote with the minimum received, fees and expiry. Game tokens aren't supported, and the panel says so, because nothing is faked. |
 
-Close on the Observer Mode panel, clearly labelled SIMULATION: "run the economy forward a week".
+Close on Trading Partners in the War Room (two merchants, their margins and win records), then the Observer Mode panel, clearly labelled SIMULATION: "run the economy forward a week".
 
 ## What the automated run does differently
 
@@ -47,8 +50,14 @@ cd apps/web
 node demo-run.mjs http://127.0.0.1:3000 http://127.0.0.1:8080 ./demo-out
 ```
 
+**Last automated run (2026-11-09):** all 16 steps passed in 7.6 minutes with 0 page errors. The report is `demo/report-2026-11-09.json`; the video (`apps/web/demo-out/demo-run.webm`, 28 MB) stays out of git.
+- **§13:** Ashen's fuel depot dropped from 414 to 235 units, its guards from 9 to 7, and the bounty from 2,814 to 1,624.
+- **§14:** Ashen's supply order #2072. Halcyon and Vex both offered 19 cr/unit; Halcyon won the tie.
+- **§15:** "Order Filled: 3 medical from Vex Exchange", signed with quick trade.
+- **§16:** a live dry quote, 0.1 wNEAR → 0.3579 USDC.
+
 ## Known gaps in the demo
 
-- **Cinder Yard** has no map of its own yet; it plays on the depot layout and the intel says so.
 - **§1:** Google sign-in needs the NEAR Auth / Auth0 configuration in `apps/web/.env.local` (see `AUTH.md`). Wallet sign-in works without it.
-- **The NEAR AI planner** needs credits on the NEAR AI Cloud account. Without them the agents run deterministic policies, and the War Room says so.
+- **The NEAR AI planner** needs credits on the NEAR AI Cloud account (it currently returns 402, no spending limit). Without them the agents run deterministic policies, and the War Room says so.
+- **§14** needs the raided faction to fall below its restock line. A small haul may not trigger an order; take every case.

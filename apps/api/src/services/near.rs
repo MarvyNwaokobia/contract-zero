@@ -56,8 +56,10 @@ impl Role {
 pub fn gas_for(method: &str) -> u64 {
     match method {
         // A fill's callback may chain the order's refund (a settle plus its callback).
-        "accept_proposal" => 200,
+        "accept_proposal" => 120,
         "propose" | "post_offer" | "post_bid" | "cancel_quote" => 30,
+        "place_order" => 80,
+        "cancel_order" | "expire_order" | "retry_refund" => 70,
         _ => 100,
     }
 }

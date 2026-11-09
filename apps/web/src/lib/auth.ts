@@ -212,7 +212,7 @@ export async function enableQuickTrade(session: Session, limits: QuickTradeLimit
   const key = KeyPair.fromRandom('ed25519')
   const pk = key.getPublicKey()
   // Quotes, supply orders (place, accept a proposal, cancel) and signing itself out.
-  const addKey = actions.addFunctionCallAccessKey(pk, world, ['accept_offer', 'accept_bid', 'place_order', 'accept_proposal', 'cancel_order', 'revoke_session'], 250_000_000_000_000_000_000_000n)
+  const addKey = actions.addFunctionCallAccessKey(pk, world, ['accept_offer', 'accept_bid', 'place_order', 'accept_proposal', 'cancel_order', 'revoke_session'], 1_000_000_000_000_000_000_000_000n)
   const register = actions.functionCall('register_session', { public_key: pk.toString(), credit_budget: String(limits.credits), unit_budget: String(limits.units), ttl_secs: Math.round(limits.hours * 3600) }, 30_000_000_000_000n, 1_000_000_000_000_000_000_000n)
   if (session.method === 'wallet') {
     const { signTransactions } = await import('@/lib/wallet')

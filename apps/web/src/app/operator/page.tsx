@@ -131,7 +131,7 @@ export default function Operator() {
           <p className="mt-3 text-xs text-muted">What you extract and buy is held by this account, and only you can trade it.</p>
           <div className="mt-4 flex gap-4 text-sm">
             <Link href="/exchange" className="text-amber-hi hover:underline">Your stash</Link>
-            <button onClick={() => signOut().then(() => router.push('/'))} className="text-muted hover:text-fog">Sign out</button>
+            <button onClick={() => signOut().then((warn) => { if (warn) window.alert(warn); router.push('/') })} className="text-muted hover:text-fog">Sign out</button>
           </div>
         </Panel>
       </div>

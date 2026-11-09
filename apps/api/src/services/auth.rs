@@ -176,7 +176,8 @@ impl AuthService {
             // reservation of a few trades (mostly refunded).
             sponsor_yocto: std::env::var("AUTH_SPONSOR_YOCTO").ok().and_then(|v| v.parse().ok()).unwrap_or(100_000_000_000_000_000_000_000),
             dev_login: std::env::var("AUTH_DEV_LOGIN").as_deref() == Ok("1"),
-            cookie_secure: std::env::var("AUTH_COOKIE_SECURE").as_deref() == Ok("1"),
+            // Production forces Secure; the web app and the API are separate sites there.
+            cookie_secure: std::env::var("AUTH_COOKIE_SECURE").as_deref() == Ok("1") || crate::is_production(),
             jwks: Mutex::new(None),
         })
     }
@@ -363,7 +364,11 @@ impl AuthService {
     }
 
     pub fn cookie(&self, token: &str, max_age_secs: i64) -> String {
-        format!("{COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age_secs}{}", if self.cookie_secure { "; Secure" } else { "" })
+        // Cross-site deployments (web and API on different sites) need SameSite=None,
+        // which browsers only accept with Secure. The Origin check on state-changing
+        // requests (main.rs) is what stands against CSRF then.
+        let same_site = if crate::is_production() { "None" } else { "Lax" };
+        format!("{COOKIE}={token}; Path=/; HttpOnly; SameSite={same_site}; Max-Age={max_age_secs}{}", if self.cookie_secure { "; Secure" } else { "" })
     }
 
     // ── relayer ──────────────────────────────────────────────────────────────

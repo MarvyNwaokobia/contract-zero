@@ -2,7 +2,7 @@
 
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
-import { auth, type Session } from '@/lib/auth'
+import { auth, disableQuickTrade, loadSessionKey, type Session } from '@/lib/auth'
 
 /** The signed-in player (null when signed out). */
 export function useSession() {
@@ -12,9 +12,17 @@ export function useSession() {
     session: q.data ?? null,
     loading: q.isLoading,
     refresh: () => qc.invalidateQueries({ queryKey: ['session'] }),
-    signOut: async () => {
+    /** Revokes quick trade on chain first (if this browser holds a key), then ends
+     *  the session. Resolves with a warning if the revocation couldn't be confirmed. */
+    signOut: async (): Promise<string | null> => {
+      let warning: string | null = null
+      const s = q.data
+      if (s && loadSessionKey(s.account)) {
+        try { await disableQuickTrade(s) } catch (e) { warning = (e as Error).message }
+      }
       await auth.logout().catch(() => {})
       await qc.invalidateQueries()
+      return warning
     },
   }
 }

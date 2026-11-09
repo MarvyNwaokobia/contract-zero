@@ -303,7 +303,7 @@ pub async fn run(state: &AppState, planner: &Planner) {
                                 if let Some(near) = &near {
                                     for e in &ev {
                                         if let cz_economy::Event::Traded(t) = e {
-                                            super::settlement::queue_trade(w, db, near, t).await?;
+                                            super::settlement::queue_trade(w, &mut *db, near, t).await?;
                                         }
                                     }
                                 }
@@ -316,11 +316,11 @@ pub async fn run(state: &AppState, planner: &Planner) {
                         "planner": format!("llm:{model}"), "trigger": "strategic review", "context": [], "proposed": { "type": p.kind, "resource": p.resource, "side": p.side, "qty": p.qty, "target": p.target, "amount": p.amount, "level": p.level, "convoy": p.convoy, "margin_bp": p.margin_bp },
                         "action": action, "rationale": p.rationale, "validation": validation, "error": error, "events": events,
                     });
-                    log_event(db, w.tick, &actor_c, "agent_decision", &payload).await?;
+                    log_event(&mut *db, w.tick, &actor_c, "agent_decision", &payload).await?;
                     results.push(json!({ "type": p.kind, "validation": validation, "error": payload["error"] }));
                 }
                 if !proposal.broadcast.trim().is_empty() {
-                    log_event(db, w.tick, &actor_c, "faction_broadcast", &json!({ "text": proposal.broadcast.chars().take(200).collect::<String>(), "model": model })).await?;
+                    log_event(&mut *db, w.tick, &actor_c, "faction_broadcast", &json!({ "text": proposal.broadcast.chars().take(200).collect::<String>(), "model": model })).await?;
                 }
                 Ok(json!({ "assessment": proposal.assessment, "results": results }))
             })

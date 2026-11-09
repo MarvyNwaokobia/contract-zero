@@ -27,7 +27,7 @@ use std::collections::BTreeMap;
 
 use cz_economy::{Asset, BountyStatus, Reason, TradeRecord, World};
 use serde_json::{json, Value};
-use sqlx::PgPool;
+use sqlx::PgConnection;
 
 use super::near::{NearClient, Role, Verified};
 use super::world::log_event;
@@ -104,18 +104,18 @@ fn batches(near: &NearClient, mints: &Flows, burns: &Flows) -> Vec<(Vec<Value>, 
 }
 
 /// The ledger position mirrored on chain for this controller.
-async fn cursor(db: &PgPool, contract: &str) -> Result<i64, sqlx::Error> {
-    sqlx::query("INSERT INTO chain_cursor (contract) VALUES ($1) ON CONFLICT (contract) DO NOTHING").bind(contract).execute(db).await?;
-    let (c,): (i64,) = sqlx::query_as("SELECT ledger_seq FROM chain_cursor WHERE contract = $1").bind(contract).fetch_one(db).await?;
+async fn cursor<'e, E: sqlx::PgExecutor<'e>>(db: E, contract: &str) -> Result<i64, sqlx::Error> {
+    // One statement, so it can run on a pool or inside a transaction.
+    let (c,): (i64,) = sqlx::query_as("INSERT INTO chain_cursor (contract) VALUES ($1) ON CONFLICT (contract) DO UPDATE SET contract = EXCLUDED.contract RETURNING ledger_seq").bind(contract).fetch_one(db).await?;
     Ok(c)
 }
 
-async fn set_cursor(db: &PgPool, contract: &str, seq: i64) -> Result<(), sqlx::Error> {
+async fn set_cursor<'e, E: sqlx::PgExecutor<'e>>(db: E, contract: &str, seq: i64) -> Result<(), sqlx::Error> {
     sqlx::query("UPDATE chain_cursor SET ledger_seq = $2, updated_at = now() WHERE contract = $1").bind(contract).bind(seq).execute(db).await?;
     Ok(())
 }
 
-pub async fn enqueue(db: &PgPool, near: &NearClient, kind: &str, op_id: &str, tick: u64, payload: &Value) -> Result<bool, sqlx::Error> {
+pub async fn enqueue<'e, E: sqlx::PgExecutor<'e>>(db: E, near: &NearClient, kind: &str, op_id: &str, tick: u64, payload: &Value) -> Result<bool, sqlx::Error> {
     let r = sqlx::query("INSERT INTO settlements (kind, op_id, tick, payload, contract) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (contract, op_id) DO NOTHING")
         .bind(kind)
         .bind(op_id)
@@ -128,9 +128,9 @@ pub async fn enqueue(db: &PgPool, near: &NearClient, kind: &str, op_id: &str, ti
 }
 
 /// Queue the flows since the cursor and advance it. Call inside a world transaction.
-pub async fn sync_flows(w: &World, db: &PgPool, near: &NearClient) -> Result<(), sqlx::Error> {
+pub async fn sync_flows(w: &World, db: &mut PgConnection, near: &NearClient) -> Result<(), sqlx::Error> {
     let contract = near.contract.to_string();
-    let cursor = cursor(db, &contract).await?;
+    let cursor = cursor(&mut *db, &contract).await?;
     let to = w.ledger.len();
     if to as i64 <= cursor {
         return Ok(());
@@ -138,33 +138,33 @@ pub async fn sync_flows(w: &World, db: &PgPool, near: &NearClient) -> Result<(),
     let (mints, burns) = flows_between(w, cursor as usize, to);
     for (i, (m, b)) in batches(near, &mints, &burns).into_iter().enumerate() {
         let batch_id = format!("ledger-{cursor}-{to}-{i}");
-        enqueue(db, near, "flows", &format!("flows:{batch_id}"), w.tick, &json!({ "batch_id": batch_id, "mints": m, "burns": b })).await?;
+        enqueue(&mut *db, near, "flows", &format!("flows:{batch_id}"), w.tick, &json!({ "batch_id": batch_id, "mints": m, "burns": b })).await?;
     }
-    set_cursor(db, &contract, to as i64).await?;
+    set_cursor(&mut *db, &contract, to as i64).await?;
     Ok(())
 }
 
 /// Queue an agent's trade with the merchant (after the flows that fund it). A purchase
 /// settles as a merchant offer the agent accepts; a sale as a merchant bid it accepts.
-pub async fn queue_trade(w: &World, db: &PgPool, near: &NearClient, t: &TradeRecord) -> Result<(), sqlx::Error> {
+pub async fn queue_trade(w: &World, db: &mut PgConnection, near: &NearClient, t: &TradeRecord) -> Result<(), sqlx::Error> {
     let Some(party) = chain_account(near, &t.party) else { return Ok(()) };
-    sync_flows(w, db, near).await?;
+    sync_flows(w, &mut *db, near).await?;
     let (kind, base) = match t.side {
         cz_economy::Side::Buy => ("trade", format!("trade-{}", t.id)),
         cz_economy::Side::Sell => ("sell", format!("sale-{}", t.id)),
     };
     let payload = json!({ "trade": t.id, "quote_base": base, "party": party, "token_id": t.resource.name(), "amount": t.qty.to_string(), "total": t.total.to_string() });
-    enqueue(db, near, kind, &base, w.tick, &payload).await.map(|_| ())
+    enqueue(&mut *db, near, kind, &base, w.tick, &payload).await.map(|_| ())
 }
 
 /// Queue a validated raid's settlement (after the flows that put the cargo there).
-pub async fn queue_raid(w: &World, db: &PgPool, near: &NearClient, raid: u64) -> Result<Option<String>, sqlx::Error> {
+pub async fn queue_raid(w: &World, db: &mut PgConnection, near: &NearClient, raid: u64) -> Result<Option<String>, sqlx::Error> {
     let r = &w.raids[&raid];
     let cz_economy::RaidStatus::Extracted { units, bounty } = r.status else { return Ok(None) };
     if units == 0 && bounty == 0 {
         return Ok(None);
     }
-    sync_flows(w, db, near).await?;
+    sync_flows(w, &mut *db, near).await?;
     let faction = chain_account(near, &w.actors[&r.plan.target].account).unwrap_or_default();
     let sponsor = w
         .bounties
@@ -176,15 +176,15 @@ pub async fn queue_raid(w: &World, db: &PgPool, near: &NearClient, raid: u64) ->
         "raid_id": raid.to_string(), "faction": faction, "player": r.player, "token_id": r.plan.resource.name(),
         "amount": units.to_string(), "bounty": sponsor.map(|s| json!([s, bounty.to_string()])),
     });
-    enqueue(db, near, "raid", &op, w.tick, &payload).await?;
+    enqueue(&mut *db, near, "raid", &op, w.tick, &payload).await?;
     Ok(Some(op))
 }
 
 /// Queue a settled sabotage or recovery: every actor-to-actor or actor-to-player leg
 /// of the operation (a recovery's cargo going home, the fee from the sponsor's
 /// escrow) as one `settle_operation`, after the flows (e.g. a sabotage's burn).
-pub async fn queue_operation(w: &World, db: &PgPool, near: &NearClient, raid: u64) -> Result<Option<String>, sqlx::Error> {
-    sync_flows(w, db, near).await?;
+pub async fn queue_operation(w: &World, db: &mut PgConnection, near: &NearClient, raid: u64) -> Result<Option<String>, sqlx::Error> {
+    sync_flows(w, &mut *db, near).await?;
     let r = &w.raids[&raid];
     let mut legs = Vec::new();
     for e in &w.ledger {
@@ -202,7 +202,7 @@ pub async fn queue_operation(w: &World, db: &PgPool, near: &NearClient, raid: u6
         return Ok(None);
     }
     let op = format!("op:{raid}");
-    enqueue(db, near, "operation", &op, w.tick, &json!({ "op_id": raid.to_string(), "player": r.player, "legs": legs })).await?;
+    enqueue(&mut *db, near, "operation", &op, w.tick, &json!({ "op_id": raid.to_string(), "player": r.player, "legs": legs })).await?;
     Ok(Some(op))
 }
 
@@ -271,7 +271,7 @@ pub async fn align(state: &AppState, force: bool, full: bool) -> Result<Value, S
         .transact(async move |w, db| {
             if force {
                 sqlx::query("UPDATE settlements SET status = 'superseded', error = 'replaced by a realignment batch' WHERE contract = $1 AND status IN ('pending', 'submitted', 'failed') AND kind IN ('flows', 'genesis')")
-                    .bind(near.contract.to_string()).execute(db).await?;
+                    .bind(near.contract.to_string()).execute(&mut *db).await?;
             }
             let (mut mints, mut burns) = (Flows::new(), Flows::new());
             for a in w.actors.values() {
@@ -299,35 +299,149 @@ pub async fn align(state: &AppState, force: bool, full: bool) -> Result<Value, S
             let mut ops = Vec::new();
             for (i, (m, b)) in batches(&near, &mints, &burns).into_iter().enumerate() {
                 let batch_id = format!("{}-{stamp}-{i}", if force { "realign" } else { "baseline" });
-                enqueue(db, &near, "genesis", &format!("flows:{batch_id}"), w.tick, &json!({ "batch_id": batch_id, "mints": m, "burns": b, "note": if force { "realign the chain with the economy" } else { "align the chain with the economy at startup" } })).await?;
+                enqueue(&mut *db, &near, "genesis", &format!("flows:{batch_id}"), w.tick, &json!({ "batch_id": batch_id, "mints": m, "burns": b, "note": if force { "realign the chain with the economy" } else { "align the chain with the economy at startup" } })).await?;
                 ops.push(format!("flows:{batch_id}"));
             }
-            set_cursor(db, &near.contract.to_string(), w.ledger.len() as i64).await?;
+            set_cursor(&mut *db, &near.contract.to_string(), w.ledger.len() as i64).await?;
             Ok(json!({ "aligned": true, "batches": ops, "mints": mints.len(), "burns": burns.len() }))
         })
         .await
         .map_err(|e| e.to_string())
 }
 
-type Row = (i64, String, String, Value, i32);
+type Row = (i64, String, String, Value, i32, Option<Value>);
 
-/// Submit the oldest open settlement. Returns whether there was one.
+/// How long a claimed row stays ours before another worker may take it over.
+pub const LEASE_SECS: f64 = 300.0;
+/// A player's quote lives this long on chain (`ttl_secs` in `settle_quote`). After it
+/// plus a margin, an attempt whose outcome was unknown can no longer move value.
+pub const QUOTE_TTL_SECS: i64 = 900;
+const UNKNOWN_SETTLES_AFTER_SECS: i64 = QUOTE_TTL_SECS + 300;
+
+/// What one submission attempt is known to have done.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Outcome {
+    /// Never reached the network (signing, nonce or block fetch failed).
+    NotSent,
+    /// Reached the chain and definitively failed (receipt failure, refused, not success).
+    Failed,
+    /// May or may not have landed: a timeout or lost response after broadcast, or a
+    /// transaction we could not fetch at FINAL. Never compensated on its own.
+    Unknown,
+}
+
+impl Outcome {
+    pub fn name(self) -> &'static str {
+        match self {
+            Outcome::NotSent => "not_sent",
+            Outcome::Failed => "failed",
+            Outcome::Unknown => "unknown",
+        }
+    }
+}
+
+/// Classify an error from `NearClient::call` / `verify`.
+pub fn classify(err: &str) -> Outcome {
+    let pre_send = ["Meta-signing error", "Failed to fetch nonce", "Failed to fetch block", "has no signing key", "unknown settlement kind"];
+    if err.contains("send failed") && pre_send.iter().any(|p| err.contains(p)) {
+        return Outcome::NotSent;
+    }
+    if err.contains("has no signing key") || err.contains("unknown settlement kind") {
+        return Outcome::NotSent;
+    }
+    let definitive = ["the ledger refused the operation", "a receipt failed", "final status is not success", "failed: Failure", "ActionError", "FunctionCallError", "InvalidTransaction"];
+    if definitive.iter().any(|p| err.contains(p)) {
+        return Outcome::Failed;
+    }
+    Outcome::Unknown
+}
+
+/// A transaction hash quoted at the start of an error, if any.
+fn tx_hash_in(err: &str) -> Option<String> {
+    err.split(|c: char| !c.is_ascii_alphanumeric()).find(|w| w.len() >= 43 && w.len() <= 44).map(str::to_string)
+}
+
+/// Whether a trade whose settlement keeps failing may be reversed in the economy.
+/// Every attempt must be known not to have moved value: never sent, failed on chain,
+/// or unknown but older than the quote's lifetime (and `is_used` was false this round).
+pub fn may_compensate(attempts: &[Value], now_unix: i64) -> bool {
+    attempts.len() >= 3
+        && attempts.iter().all(|a| match a["outcome"].as_str() {
+            Some("not_sent") | Some("failed") => true,
+            Some("unknown") => a["at"].as_i64().is_some_and(|t| now_unix - t >= UNKNOWN_SETTLES_AFTER_SECS),
+            _ => false,
+        })
+}
+
+/// Atomically claim the next settlement for this contract.
+///
+/// The queue is strictly ordered: the head row is locked (`FOR UPDATE`), and it is
+/// only taken if nobody holds a live lease on it. A second worker blocks on the lock,
+/// then sees the lease and backs off, so it never jumps ahead to a later row.
+///
+/// One exception keeps players from waiting on agent bookkeeping: a batch the ledger
+/// refused for its epoch issuance budget is deferred until the epoch resets. While it
+/// waits, player raid and operation payouts behind it may settle (they move existing
+/// tokens, mint nothing, and the chain checks balances), but agent trades and later
+/// flows stay in order behind it.
+pub async fn claim(db: &sqlx::PgPool, contract: &str, worker: &str) -> Result<Option<Row>, sqlx::Error> {
+    sqlx::query_as(
+        "WITH blocked AS (
+             SELECT min(id) AS id FROM settlements
+             WHERE contract = $1 AND status = 'pending' AND defer_reason = 'issuance_budget' AND next_attempt_at > now()
+         ),
+         head AS (
+             SELECT s.id FROM settlements s, blocked b
+             WHERE s.contract = $1 AND s.status IN ('pending', 'submitted')
+               AND NOT coalesce(s.defer_reason = 'issuance_budget' AND s.next_attempt_at > now(), false)
+               AND (b.id IS NULL OR s.id < b.id OR s.kind IN ('raid', 'operation'))
+             ORDER BY (s.kind <> 'genesis'), s.id
+             LIMIT 1
+             FOR UPDATE OF s
+         )
+         UPDATE settlements s
+         SET status = 'submitted', attempts = s.attempts + 1, claimed_by = $2,
+             lease_until = now() + make_interval(secs => $3), defer_reason = NULL, next_attempt_at = NULL
+         FROM head
+         WHERE s.id = head.id
+           AND (s.lease_until IS NULL OR s.lease_until < now() OR s.claimed_by = $2)
+         RETURNING s.id, s.kind, s.op_id, s.payload, s.attempts - 1, s.evidence",
+    )
+    .bind(contract)
+    .bind(worker)
+    .bind(LEASE_SECS)
+    .fetch_optional(db)
+    .await
+}
+
+/// When the token epoch budgets a batch needs will have room again.
+async fn budget_reset(near: &NearClient, payload: &Value) -> Option<chrono::DateTime<chrono::Utc>> {
+    let mut tokens: Vec<String> = payload["mints"].as_array()?.iter().filter_map(|m| m["token_id"].as_str().map(str::to_string)).collect();
+    tokens.sort();
+    tokens.dedup();
+    let mut latest: Option<i64> = None;
+    for t in tokens {
+        let info = near.view_assets("token_info", json!({ "token_id": t })).await.ok()?;
+        let started = info["epoch_started_ns"].as_u64()? as i64;
+        let reset_ns = started + 86_400 * 1_000_000_000;
+        latest = Some(latest.map_or(reset_ns, |l| l.max(reset_ns)));
+    }
+    latest.map(|ns| chrono::DateTime::from_timestamp_nanos(ns) + chrono::Duration::seconds(30))
+}
+
+/// Submit the next settlement. Returns whether there was one.
 pub async fn process_next(state: &AppState) -> Result<bool, String> {
     let Some(near) = state.near.clone() else { return Ok(false) };
     let db = state.world.db();
-    // Only this controller's rows: rows for another contract (e.g. the frozen v1) are
-    // never submitted here.
-    let row: Option<Row> = sqlx::query_as("SELECT id, kind, op_id, payload, attempts FROM settlements WHERE status IN ('pending', 'submitted') AND contract = $1 ORDER BY (kind <> 'genesis'), id LIMIT 1")
-        .bind(near.contract.to_string())
-        .fetch_optional(db)
-        .await
-        .map_err(|e| e.to_string())?;
-    let Some((id, kind, op_id, payload, attempts)) = row else { return Ok(false) };
-    sqlx::query("UPDATE settlements SET status = 'submitted', attempts = attempts + 1 WHERE id = $1").bind(id).execute(db).await.map_err(|e| e.to_string())?;
+    let Some((id, kind, op_id, payload, attempts, evidence)) = claim(db, &near.contract.to_string(), &state.worker_id).await.map_err(|e| e.to_string())? else {
+        return Ok(false);
+    };
+    let mut history: Vec<Value> = evidence.as_ref().and_then(|e| e["attempts"].as_array().cloned()).unwrap_or_default();
 
-    // Already applied on chain (e.g. a crash after submit)? Ask cz-assets, which marks
-    // a controller operation used ONLY when value actually moved. (A cancelled or
-    // expired quote is used in the controller but never in cz-assets.)
+    // Already applied on chain (e.g. a crash after submit, or an earlier attempt whose
+    // outcome was unknown)? Ask cz-assets, which marks a controller operation used ONLY
+    // when value actually moved. (A cancelled or expired quote is used in the
+    // controller but never in cz-assets.)
     let attempt = attempts + 1;
     let ledger_ops: Vec<String> = match kind.as_str() {
         "trade" => (1..=attempt).map(|k| format!("ctl:offer:{}-a{k}", payload["quote_base"].as_str().unwrap_or_default())).collect(),
@@ -335,13 +449,19 @@ pub async fn process_next(state: &AppState) -> Result<bool, String> {
         _ => vec![format!("ctl:{op_id}")],
     };
     let mut already = false;
+    let mut checked = true;
     for op in &ledger_ops {
-        if near.view_assets("is_used", json!({ "op_id": op })).await.ok().and_then(|v| v.as_bool()).unwrap_or(false) {
-            already = true;
+        match near.view_assets("is_used", json!({ "op_id": op })).await.map(|v| v.as_bool()) {
+            Ok(Some(true)) => already = true,
+            Ok(_) => {}
+            Err(_) => checked = false,
         }
     }
     let result: Result<Vec<Verified>, String> = if already {
         Ok(vec![])
+    } else if !checked {
+        // Can't tell whether an earlier attempt landed: don't submit blind.
+        Err("send failed: Failed to fetch nonce (is_used check unavailable; not submitted)".into())
     } else {
         match kind.as_str() {
             "genesis" | "flows" => near
@@ -365,33 +485,49 @@ pub async fn process_next(state: &AppState) -> Result<bool, String> {
         }
     };
 
+    let now = chrono::Utc::now();
     match result {
         Ok(verified) => {
             let hashes: Vec<String> = verified.iter().map(|v| v.tx_hash.clone()).collect();
-            let evidence = json!({ "already_applied": already, "transactions": verified });
-            sqlx::query("UPDATE settlements SET status = 'confirmed', tx_hashes = $2, evidence = $3, error = NULL, confirmed_at = now() WHERE id = $1")
-                .bind(id).bind(&hashes).bind(&evidence).execute(db).await.map_err(|e| e.to_string())?;
+            history.push(json!({ "n": attempt, "at": now.timestamp(), "outcome": if already { "already_applied" } else { "confirmed" }, "tx": hashes }));
+            let evidence = json!({ "already_applied": already, "transactions": verified, "attempts": history });
+            sqlx::query("UPDATE settlements SET status = 'confirmed', tx_hashes = $2, evidence = $3, error = NULL, confirmed_at = now(), lease_until = NULL WHERE id = $1 AND claimed_by = $4")
+                .bind(id).bind(&hashes).bind(&evidence).bind(&state.worker_id).execute(db).await.map_err(|e| e.to_string())?;
             let tick = state.world.read(|w| w.tick).await;
             let _ = log_event(db, tick, "near", "settlement", &json!({ "op_id": op_id, "kind": kind, "status": "confirmed", "tx_hashes": hashes, "explorer": verified.iter().map(|v| v.explorer.clone()).collect::<Vec<_>>(), "payload": payload })).await;
             tracing::info!("settlement {op_id} confirmed: {hashes:?}");
         }
         Err(e) => {
-            tracing::warn!("settlement {op_id} attempt {} failed: {e}", attempts + 1);
-            // Only a trade gives up (it is then compensated in the economy). Flows,
-            // raids and operations mirror state the economy already committed and are
-            // replay-protected on chain, so they retry until they land: a transient
-            // RPC outage must delay them, never leave a permanent gap.
-            let give_up = (kind == "trade" || kind == "sell") && attempts + 1 >= 3;
+            let outcome = classify(&e);
+            history.push(json!({ "n": attempt, "at": now.timestamp(), "outcome": outcome.name(), "tx": tx_hash_in(&e), "error": e }));
+            tracing::warn!("settlement {op_id} attempt {attempt} {}: {e}", outcome.name());
+            // Only an agent trade may give up, and only when every attempt is known not
+            // to have moved value. Flows, raids and operations mirror state the economy
+            // already committed and are replay-protected on chain, so they retry until
+            // they land: a transient outage delays them, never leaves a gap.
+            let give_up = (kind == "trade" || kind == "sell") && may_compensate(&history, now.timestamp());
+            // The ledger's epoch issuance budget is a known wait, not a fault: defer to
+            // the reset instead of retrying every minute.
+            let (defer, until) = if e.contains("epoch issuance budget exceeded") {
+                (Some("issuance_budget"), budget_reset(&near, &payload).await.or(Some(now + chrono::Duration::minutes(10))))
+            } else {
+                (None, None)
+            };
             let status = if give_up { "failed" } else { "pending" };
-            sqlx::query("UPDATE settlements SET status = $2, error = $3 WHERE id = $1 AND status <> 'superseded'").bind(id).bind(status).bind(&e).execute(db).await.map_err(|e| e.to_string())?;
-            if give_up && (kind == "trade" || kind == "sell") {
+            sqlx::query("UPDATE settlements SET status = $2, error = $3, evidence = $4, defer_reason = $5, next_attempt_at = $6, lease_until = NULL
+                         WHERE id = $1 AND claimed_by = $7 AND status <> 'superseded'")
+                .bind(id).bind(status).bind(&e).bind(json!({ "attempts": history })).bind(defer).bind(until).bind(&state.worker_id)
+                .execute(db).await.map_err(|e| e.to_string())?;
+            if give_up {
                 compensate_trade(state, id, &payload).await;
             }
             let tick = state.world.read(|w| w.tick).await;
-            let _ = log_event(db, tick, "near", "settlement", &json!({ "op_id": op_id, "kind": kind, "status": status, "error": e })).await;
-            // Back off before the next attempt (2, 4, 8 … 60 s), so an RPC outage is
-            // waited out instead of hammered.
-            tokio::time::sleep(std::time::Duration::from_secs(2u64.pow((attempts + 1).clamp(1, 6) as u32).min(60))).await;
+            let _ = log_event(db, tick, "near", "settlement", &json!({ "op_id": op_id, "kind": kind, "status": status, "outcome": outcome.name(), "deferred_until": until, "error": e })).await;
+            if defer.is_none() {
+                // Back off before the next attempt (2, 4, 8 … 60 s), so an RPC outage is
+                // waited out instead of hammered.
+                tokio::time::sleep(std::time::Duration::from_secs(2u64.pow((attempts + 1).clamp(1, 6) as u32).min(60))).await;
+            }
         }
     }
     Ok(true)
@@ -429,7 +565,7 @@ async fn compensate_trade(state: &AppState, id: i64, p: &Value) {
     let db = state.world.db();
     match res {
         Ok(_) => {
-            let _ = sqlx::query("UPDATE settlements SET status = 'compensated' WHERE id = $1").bind(id).execute(db).await;
+            let _ = sqlx::query("UPDATE settlements SET status = 'compensated' WHERE id = $1 AND status = 'failed'").bind(id).execute(db).await;
             tracing::warn!("trade {trade} reversed in the economy after its settlement failed");
         }
         Err(e) => tracing::error!("trade {trade} failed on chain AND could not be reversed: {e}"),
@@ -508,4 +644,95 @@ pub fn spawn_worker(state: AppState) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn errors_are_classified_by_what_they_prove() {
+        assert_eq!(classify("post_bid: send failed: Meta-signing error: Failed to fetch nonce: QueryError"), Outcome::NotSent);
+        assert_eq!(classify("HaSPBjXeLAsX8f5A4nQHJ8Vsa8EPC7DNig3mntRj8Wc9: the ledger refused the operation (callback returned false)"), Outcome::Failed);
+        assert_eq!(classify("apply_flows: transaction 5Gj failed: Failure(ActionError(..))"), Outcome::Failed);
+        assert_eq!(classify("apply_flows: send failed: TimeoutError"), Outcome::Unknown);
+        assert_eq!(classify("apply_flows: transaction still pending"), Outcome::Unknown);
+        assert_eq!(classify("{\"code\":-32000}"), Outcome::Unknown);
+        assert_eq!(tx_hash_in("HaSPBjXeLAsX8f5A4nQHJ8Vsa8EPC7DNig3mntRj8Wc9: the ledger refused").as_deref(), Some("HaSPBjXeLAsX8f5A4nQHJ8Vsa8EPC7DNig3mntRj8Wc9"));
+    }
+
+    #[test]
+    fn a_trade_is_compensated_only_when_no_attempt_could_have_moved_value() {
+        let a = |o: &str, at: i64| json!({ "outcome": o, "at": at });
+        let now = 10_000;
+        // Three definitive failures: safe.
+        assert!(may_compensate(&[a("not_sent", 1), a("failed", 2), a("failed", 3)], now));
+        // Fewer than three attempts: keep trying.
+        assert!(!may_compensate(&[a("failed", 1), a("failed", 2)], now));
+        // An unknown outcome inside the quote's lifetime: never compensate.
+        assert!(!may_compensate(&[a("failed", 1), a("unknown", now - 60), a("failed", 3)], now));
+        // An unknown outcome older than the quote's lifetime (+ margin) can no longer land.
+        assert!(may_compensate(&[a("failed", 1), a("unknown", now - UNKNOWN_SETTLES_AFTER_SECS), a("failed", 3)], now));
+        // An unrecorded outcome counts as unknown.
+        assert!(!may_compensate(&[a("failed", 1), json!({}), a("failed", 3)], now));
+    }
+
+    /// Database tests run against the dev database with their own contract id.
+    /// Enable with CZ_DB_TESTS=1 (and DATABASE_URL).
+    async fn test_db() -> Option<sqlx::PgPool> {
+        if std::env::var("CZ_DB_TESTS").as_deref() != Ok("1") {
+            return None;
+        }
+        dotenvy::dotenv().ok();
+        let pool = sqlx::PgPool::connect(&std::env::var("DATABASE_URL").ok()?).await.ok()?;
+        crate::migrate::run(&pool).await.ok()?;
+        Some(pool)
+    }
+
+    async fn seed(db: &sqlx::PgPool, contract: &str, rows: &[(&str, &str)]) -> Vec<i64> {
+        let mut ids = vec![];
+        for (kind, op) in rows {
+            let (id,): (i64,) = sqlx::query_as("INSERT INTO settlements (kind, op_id, tick, payload, contract) VALUES ($1, $2, 0, '{}', $3) RETURNING id")
+                .bind(kind).bind(op).bind(contract).fetch_one(db).await.unwrap();
+            ids.push(id);
+        }
+        ids
+    }
+
+    #[tokio::test]
+    async fn two_workers_never_claim_the_same_row_or_jump_the_queue() {
+        let Some(db) = test_db().await else { return };
+        let contract = format!("test-claim-{}", uuid::Uuid::new_v4());
+        let ids = seed(&db, &contract, &[("flows", "f1"), ("trade", "t2"), ("raid", "r3")]).await;
+        let (a, b) = tokio::join!(claim(&db, &contract, "worker-a"), claim(&db, &contract, "worker-b"));
+        let got: Vec<i64> = [a.unwrap(), b.unwrap()].into_iter().flatten().map(|r| r.0).collect();
+        // Exactly one worker holds the head; the other gets nothing (it doesn't skip ahead).
+        assert_eq!(got, vec![ids[0]]);
+        // While the lease is live, a second claim gets nothing.
+        assert!(claim(&db, &contract, "worker-b").await.unwrap().is_none());
+        // A crashed worker's lease expires and the row is reclaimable.
+        sqlx::query("UPDATE settlements SET lease_until = now() - interval '1 second' WHERE id = $1").bind(ids[0]).execute(&db).await.unwrap();
+        let r = claim(&db, &contract, "worker-b").await.unwrap().unwrap();
+        assert_eq!((r.0, r.4), (ids[0], 1)); // attempts counts the earlier claim
+        sqlx::query("DELETE FROM settlements WHERE contract = $1").bind(&contract).execute(&db).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_issuance_deferral_lets_only_player_payouts_pass() {
+        let Some(db) = test_db().await else { return };
+        let contract = format!("test-defer-{}", uuid::Uuid::new_v4());
+        let ids = seed(&db, &contract, &[("flows", "f1"), ("trade", "t2"), ("flows", "f3"), ("raid", "r4"), ("operation", "o5")]).await;
+        sqlx::query("UPDATE settlements SET defer_reason = 'issuance_budget', next_attempt_at = now() + interval '1 hour' WHERE id = $1").bind(ids[0]).execute(&db).await.unwrap();
+        let first = claim(&db, &contract, "w").await.unwrap().unwrap();
+        assert_eq!(first.0, ids[3], "the raid payout settles past the deferred batch");
+        sqlx::query("UPDATE settlements SET status = 'confirmed' WHERE id = $1").bind(first.0).execute(&db).await.unwrap();
+        assert_eq!(claim(&db, &contract, "w").await.unwrap().unwrap().0, ids[4]);
+        sqlx::query("UPDATE settlements SET status = 'confirmed' WHERE id = $1").bind(ids[4]).execute(&db).await.unwrap();
+        // The agent trade and later flows wait behind the deferred batch.
+        assert!(claim(&db, &contract, "w").await.unwrap().is_none());
+        // Once the epoch resets, the batch goes first again.
+        sqlx::query("UPDATE settlements SET next_attempt_at = now() - interval '1 second' WHERE id = $1").bind(ids[0]).execute(&db).await.unwrap();
+        assert_eq!(claim(&db, &contract, "w").await.unwrap().unwrap().0, ids[0]);
+        sqlx::query("DELETE FROM settlements WHERE contract = $1").bind(&contract).execute(&db).await.unwrap();
+    }
 }

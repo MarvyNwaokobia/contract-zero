@@ -158,7 +158,15 @@ export async function signInWallet(): Promise<Session> {
 //
 // The key lives only in this browser. On chain it can call nothing but accept_offer,
 // accept_bid and revoke_session on the game controller, and the controller holds it
-// to the budgets and expiry the player approved. Sign-out revokes it.
+// to the budgets and expiry the player approved. Turning it off or signing out revokes
+// it on chain, and the revocation is checked (`get_session`), not assumed.
+//
+// Trust limits (see docs/contract-zero/AUTH.md): the secret is in localStorage, so a
+// script running on this origin (XSS, a malicious extension) could read it. What it
+// could do with it is bounded by the contract: accept quotes Vex already addressed to
+// this player, within the remaining budget, until expiry. Revoking leaves the access
+// key on the account as a powerless tombstone; deleting it needs the account's own
+// full-access approval.
 
 const SK = 'cz_session_key'
 type Stored = { account: string; secret: string; expires: number }
@@ -173,6 +181,24 @@ export function loadSessionKey(account: string): KeyPair | null {
 
 function clearSessionKey() {
   try { localStorage.removeItem(SK) } catch { /* ignore */ }
+}
+
+export interface ChainSession { credit_budget: string; unit_budget: string; expires_at_ns: number; revoked: boolean }
+
+/** The controller's record of a quick-trade key (null if it was never registered). */
+export async function chainSession(account: string, publicKey: string): Promise<ChainSession | null> {
+  cfg = cfg ?? await auth.config()
+  if (!cfg.controller) return null
+  const args = btoa(JSON.stringify({ account_id: account, public_key: publicKey }))
+  const r = await fetch(RPC, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 'cz', method: 'query', params: { request_type: 'call_function', finality: 'optimistic', account_id: cfg.controller, method_name: 'get_session', args_base64: args } }) })
+  const j = await r.json()
+  if (j.error || !j.result?.result) throw new Error('could not read the quick-trade session from the chain')
+  return JSON.parse(new TextDecoder().decode(new Uint8Array(j.result.result))) as ChainSession | null
+}
+
+/** True when the chain no longer lets this key trade. */
+export function sessionDead(s: ChainSession | null): boolean {
+  return !s || s.revoked || s.expires_at_ns <= Date.now() * 1e6 || (s.credit_budget === '0' && s.unit_budget === '0')
 }
 
 export interface QuickTradeLimits { credits: number; units: number; hours: number }
@@ -200,16 +226,35 @@ export async function enableQuickTrade(session: Session, limits: QuickTradeLimit
   try { localStorage.setItem(SK, JSON.stringify({ account: session.account, secret: key.toString(), expires: Date.now() + limits.hours * 3_600_000 } satisfies Stored)) } catch { /* private mode */ }
 }
 
+/** Revoke quick trade on chain, then forget the key. Resolves only once the chain
+ *  confirms the key can no longer trade. If revocation can't be confirmed the local
+ *  key is still wiped (this browser stops holding it) and the error says when the
+ *  on-chain session expires anyway. */
 export async function disableQuickTrade(session: Session): Promise<void> {
   const key = loadSessionKey(session.account)
   cfg = cfg ?? await auth.config()
-  if (key && cfg.controller) {
+  if (!key || !cfg.controller) { clearSessionKey(); return }
+  const pk = key.getPublicKey().toString()
+  let relayError: string | null = null
+  try {
     // The session key signs itself out; the relayer pays.
     const acct = new Account(session.account, provider(), new KeyPairSigner(key))
-    const { signedDelegate } = await acct.createSignedMetaTransaction({ receiverId: cfg.controller, actions: [actions.functionCall('revoke_session', { public_key: key.getPublicKey().toString() }, 30_000_000_000_000n, 0n)], blockHeightTtl: 120 })
-    await call('/relay/delegate', { method: 'POST', body: JSON.stringify({ signed_delegate: btoa(String.fromCharCode(...encodeSignedDelegate(signedDelegate))) }) }).catch(() => {})
+    const { signedDelegate } = await acct.createSignedMetaTransaction({ receiverId: cfg.controller, actions: [actions.functionCall('revoke_session', { public_key: pk }, 30_000_000_000_000n, 0n)], blockHeightTtl: 120 })
+    await call('/relay/delegate', { method: 'POST', body: JSON.stringify({ signed_delegate: btoa(String.fromCharCode(...encodeSignedDelegate(signedDelegate))) }) })
+  } catch (e) {
+    relayError = (e as Error).message
+  }
+  let state: ChainSession | null = null
+  for (let i = 0; i < 6; i++) {
+    try { state = await chainSession(session.account, pk) } catch { state = null }
+    if (sessionDead(state)) break
+    await new Promise((r) => setTimeout(r, 1500))
   }
   clearSessionKey()
+  if (!sessionDead(state)) {
+    const until = state ? new Date(state.expires_at_ns / 1e6).toLocaleString() : 'its expiry'
+    throw new Error(`Quick trade was removed from this browser, but the chain hasn't confirmed the revocation${relayError ? ` (${relayError})` : ''}. It stops working at ${until} regardless.`)
+  }
 }
 
 /** Accept a quote: with the quick-trade key if one is open (no prompt), otherwise

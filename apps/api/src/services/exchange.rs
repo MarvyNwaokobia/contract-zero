@@ -126,7 +126,7 @@ pub async fn create(state: &AppState, player: String, item: Item, side: Side, qt
                 Item::Res(r) => w.reserve_quote(&p, r, side, qty, limit_total)?,
                 Item::Gear(g) => w.reserve_gear_quote(&p, g, limit_total)?,
             };
-            log_event(db, w.tick, &format!("player:{p}"), "exchange", &json!({ "phase": "quote", "quote": quote_json(&q), "synced": synced })).await?;
+            log_event(&mut *db, w.tick, &format!("player:{p}"), "exchange", &json!({ "phase": "quote", "quote": quote_json(&q), "synced": synced })).await?;
             Ok(q)
         })
         .await?;
@@ -261,7 +261,7 @@ async fn resolve_locked(state: &AppState, quote_id: u64, tx_hash: Option<String>
                     }
                 }
                 ev.extend(w.settle_quote(quote_id)?);
-                log_event(db, w.tick, &format!("player:{p}"), "exchange", &json!({ "phase": "settled", "quote": quote_id, "events": super::world::summarize(&ev) })).await?;
+                log_event(&mut *db, w.tick, &format!("player:{p}"), "exchange", &json!({ "phase": "settled", "quote": quote_id, "events": super::world::summarize(&ev) })).await?;
                 Ok(ev)
             })
             .await?;
@@ -300,7 +300,7 @@ async fn resolve_locked(state: &AppState, quote_id: u64, tx_hash: Option<String>
         .world
         .transact(async move |w, db| {
             let ev = w.release_quote(quote_id)?;
-            log_event(db, w.tick, "system", "exchange", &json!({ "phase": "released", "quote": quote_id })).await?;
+            log_event(&mut *db, w.tick, "system", "exchange", &json!({ "phase": "released", "quote": quote_id })).await?;
             Ok(ev)
         })
         .await?;
@@ -326,7 +326,7 @@ pub async fn accept_offchain(state: &AppState, quote_id: u64) -> Result<Value, E
         .world
         .transact(async move |w, db| {
             let ev = w.settle_quote(quote_id)?;
-            log_event(db, w.tick, &format!("player:{player}"), "exchange", &json!({ "phase": "settled", "quote": quote_id, "off_chain": true })).await?;
+            log_event(&mut *db, w.tick, &format!("player:{player}"), "exchange", &json!({ "phase": "settled", "quote": quote_id, "off_chain": true })).await?;
             Ok(ev)
         })
         .await?;

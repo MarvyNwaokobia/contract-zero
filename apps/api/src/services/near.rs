@@ -194,7 +194,12 @@ impl NearClient {
             // ledger refused the operation; that is a failure even though the
             // transaction itself completed.
             if base64_decode(value).as_deref() == Some(b"false".as_slice()) {
-                return Err(format!("{tx_hash}: the ledger refused the operation (callback returned false)"));
+                // Say WHY: the refusing receipt's panic (e.g. "epoch issuance budget
+                // exceeded") decides how the worker treats it.
+                let why: Vec<String> = r["receipts_outcome"].as_array().into_iter().flatten()
+                    .filter_map(|rc| rc["outcome"]["status"].get("Failure").map(|f| f.to_string()))
+                    .collect();
+                return Err(format!("{tx_hash}: the ledger refused the operation (callback returned false){}", if why.is_empty() { String::new() } else { format!(": {}", why.join("; ")) }));
             }
             let receipts = r["receipts_outcome"].as_array().cloned().unwrap_or_default();
             for rc in &receipts {

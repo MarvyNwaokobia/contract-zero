@@ -105,7 +105,7 @@ pub async fn start(state: web::Data<AppState>, req: HttpRequest, body: web::Json
             let objects = field::field_manifest(w, &plan);
             let min_secs = field::min_secs(plan.kind, 1).max(MIN_TRAVERSAL_SECS);
             let mut facts = story::facts(w, &plan, &body.player);
-            facts.callsign = sqlx::query_scalar("SELECT callsign FROM player_profiles WHERE account = $1").bind(&body.player).fetch_optional(db).await?;
+            facts.callsign = sqlx::query_scalar("SELECT callsign FROM player_profiles WHERE account = $1").bind(&body.player).fetch_optional(&mut *db).await?;
             if let Some(sponsor) = &facts.sponsor {
                 // The sponsor's own logged reason for posting this contract.
                 facts.sponsor_reason = sqlx::query_scalar(
@@ -114,7 +114,7 @@ pub async fn start(state: web::Data<AppState>, req: HttpRequest, body: web::Json
                        AND payload->'action'->>'target' = $2 AND payload->'action'->>'resource' = $3
                        AND payload->'action'->>'action' IN ('post_bounty', 'post_contract')
                      ORDER BY seq DESC LIMIT 1",
-                ).bind(sponsor).bind(&plan.target).bind(plan.resource.name()).fetch_optional(db).await?.flatten();
+                ).bind(sponsor).bind(&plan.target).bind(plan.resource.name()).fetch_optional(&mut *db).await?.flatten();
             }
             let tale = story::authored(&facts);
             sqlx::query(
@@ -130,9 +130,9 @@ pub async fn start(state: web::Data<AppState>, req: HttpRequest, body: web::Json
             .bind(plan.site().id)
             .bind(json!(objects))
             .bind(&body.gun)
-            .execute(db)
+            .execute(&mut *db)
             .await?;
-            log_event(db, w.tick, &format!("player:{}", body.player), "mission", &json!({ "phase": "start", "session": session, "raid": raid, "plan": plan, "gun": body.gun, "events": summarize(&ev) })).await?;
+            log_event(&mut *db, w.tick, &format!("player:{}", body.player), "mission", &json!({ "phase": "start", "session": session, "raid": raid, "plan": plan, "gun": body.gun, "events": summarize(&ev) })).await?;
             let mut mission = crate::handlers::world::mission_json(w, &plan, Some(raid));
             mission["field"] = json!(objects);
             Ok(json!({ "session": session, "raid": raid, "min_secs": min_secs, "mission": mission, "story": tale }))
@@ -182,7 +182,7 @@ pub async fn complete(state: web::Data<AppState>, req: HttpRequest, path: web::P
                 "SELECT player, raid_id, min_secs, started_at, completed_at, result, field FROM mission_sessions WHERE id = $1",
             )
             .bind(session)
-            .fetch_optional(db)
+            .fetch_optional(&mut *db)
             .await?;
             let Some((player, raid_id, min_secs, started_at, completed_at, stored, objects)) = row else {
                 return Err(WorldError::Other("unknown session".into()));
@@ -228,8 +228,8 @@ pub async fn complete(state: web::Data<AppState>, req: HttpRequest, path: web::P
             // response says "queued", never "settled".
             let settlement = match (&near, outcome) {
                 (Some(n), "extracted") => match plan.kind {
-                    cz_economy::OpKind::Raid => crate::services::settlement::queue_raid(w, db, n, raid).await?,
-                    _ => crate::services::settlement::queue_operation(w, db, n, raid).await?,
+                    cz_economy::OpKind::Raid => crate::services::settlement::queue_raid(w, &mut *db, n, raid).await?,
+                    _ => crate::services::settlement::queue_operation(w, &mut *db, n, raid).await?,
                 }
                 .map(|op| json!({ "op_id": op, "status": "queued" })),
                 _ => None,
@@ -256,7 +256,7 @@ pub async fn complete(state: web::Data<AppState>, req: HttpRequest, path: web::P
                 "settlement": settlement,
             });
             let mut result = result;
-            let stored_story: Option<Value> = sqlx::query_scalar("SELECT story FROM mission_sessions WHERE id = $1").bind(session).fetch_one(db).await?;
+            let stored_story: Option<Value> = sqlx::query_scalar("SELECT story FROM mission_sessions WHERE id = $1").bind(session).fetch_one(&mut *db).await?;
             if let Some(f) = stored_story.as_ref().and_then(|s| serde_json::from_value::<story::Facts>(s["facts"].clone()).ok()) {
                 let after = w.memory.get(&plan.target).and_then(|m| m.players.get(&player));
                 result["debrief"] = json!(story::debrief(&f, &result, after));
@@ -267,9 +267,9 @@ pub async fn complete(state: web::Data<AppState>, req: HttpRequest, path: web::P
                 .bind(outcome)
                 .bind(&result)
                 .bind(body.record.as_ref().map(|r| json!(r)))
-                .execute(db)
+                .execute(&mut *db)
                 .await?;
-            log_event(db, w.tick, &format!("player:{player}"), "mission", &json!({ "phase": "complete", "session": session, "result": result })).await?;
+            log_event(&mut *db, w.tick, &format!("player:{player}"), "mission", &json!({ "phase": "complete", "session": session, "result": result })).await?;
             Ok(json!({ "replayed": false, "result": result }))
         })
         .await;
@@ -305,7 +305,7 @@ pub async fn loadout(state: web::Data<AppState>, req: HttpRequest, path: web::Pa
     let res = state
         .world
         .transact(async move |w, db| {
-            let row: Option<(String, Option<DateTime<Utc>>)> = sqlx::query_as("SELECT player, completed_at FROM mission_sessions WHERE id = $1").bind(session).fetch_optional(db).await?;
+            let row: Option<(String, Option<DateTime<Utc>>)> = sqlx::query_as("SELECT player, completed_at FROM mission_sessions WHERE id = $1").bind(session).fetch_optional(&mut *db).await?;
             let Some((player, done)) = row else { return Err(WorldError::Other("unknown session".into())) };
             if player != who.account {
                 return Err(WorldError::Other("session belongs to another player".into()));
@@ -314,8 +314,8 @@ pub async fn loadout(state: web::Data<AppState>, req: HttpRequest, path: web::Pa
                 return Err(WorldError::Other("that operation is over".into()));
             }
             check_gun(w, &player, &gun)?;
-            sqlx::query("UPDATE mission_sessions SET gun = $2 WHERE id = $1").bind(session).bind(&gun).execute(db).await?;
-            log_event(db, w.tick, &format!("player:{player}"), "mission", &json!({ "phase": "loadout", "session": session, "gun": gun })).await?;
+            sqlx::query("UPDATE mission_sessions SET gun = $2 WHERE id = $1").bind(session).bind(&gun).execute(&mut *db).await?;
+            log_event(&mut *db, w.tick, &format!("player:{player}"), "mission", &json!({ "phase": "loadout", "session": session, "gun": gun })).await?;
             Ok(json!({ "session": session, "gun": gun }))
         })
         .await;
@@ -366,11 +366,11 @@ pub async fn expire_stale_sessions(state: &AppState) -> Result<usize, WorldError
             let stale: Vec<(Uuid, String, i64)> = sqlx::query_as(
                 "SELECT id, player, raid_id FROM mission_sessions WHERE completed_at IS NULL AND expires_at < now()",
             )
-            .fetch_all(db)
+            .fetch_all(&mut *db)
             .await?;
             for (id, player, raid) in &stale {
                 let _ = w.execute(&Caller::System, &Action::FailRaid { raid: *raid as u64, player: player.clone() });
-                sqlx::query("UPDATE mission_sessions SET completed_at = now(), outcome = 'expired' WHERE id = $1").bind(id).execute(db).await?;
+                sqlx::query("UPDATE mission_sessions SET completed_at = now(), outcome = 'expired' WHERE id = $1").bind(id).execute(&mut *db).await?;
             }
             Ok(stale.len())
         })

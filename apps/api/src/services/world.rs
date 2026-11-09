@@ -10,7 +10,7 @@ use std::sync::Arc;
 use cz_economy::{policy, Action, Caller, EconError, Event, World};
 use cz_economy::policy::Decision;
 use serde_json::{json, Value};
-use sqlx::PgPool;
+use sqlx::{PgConnection, PgPool};
 use tokio::sync::Mutex;
 
 #[derive(Debug, thiserror::Error)]
@@ -53,7 +53,7 @@ impl WorldService {
                 } else {
                     cz_economy::genesis(std::env::var("WORLD_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(2026))
                 };
-                persist(&db, &w).await?;
+                persist(&mut *db.acquire().await?, &w).await?;
                 tracing::info!("world: created {} world (seed {})", if scenario == "acceptance" { "acceptance" } else { "genesis" }, w.seed);
                 w
             }
@@ -64,7 +64,7 @@ impl WorldService {
         let mut world: World = world;
         let can_sign = near.as_ref().is_none_or(|n| n.actor_account("ashen").is_some());
         if world.market.living && can_sign && cz_economy::add_rival(&mut world) {
-            persist(&db, &world).await?;
+            persist(&mut *db.acquire().await?, &world).await?;
             tracing::info!("world: the Ashen Compact joined at tick {}", world.tick);
         }
         tracing::info!("world: loaded at tick {} (version {})", world.tick, world.version);
@@ -86,26 +86,43 @@ impl WorldService {
 
     /// Run `f` against the world under the lock, then persist. On any error the world
     /// is restored to its state before `f`.
+    /// Run `f` against the world and the database as ONE unit. Every row `f` writes
+    /// (events, sessions, settlements) and the new world snapshot go into a single
+    /// PostgreSQL transaction, committed only if `f` and the snapshot both succeed.
+    /// On any error the transaction rolls back AND the in-memory world is restored,
+    /// so neither side ever keeps half of an action.
+    ///
+    /// `f` must not call the chain: a NEAR transaction can't be rolled back. Chain
+    /// calls happen outside (the settlement worker, the exchange's quote flow).
     pub async fn transact<T, F>(&self, f: F) -> Result<T, WorldError>
     where
-        F: AsyncFnOnce(&mut World, &PgPool) -> Result<T, WorldError>,
+        F: AsyncFnOnce(&mut World, &mut PgConnection) -> Result<T, WorldError>,
     {
         let mut w = self.world.lock().await;
         let before = w.clone();
-        let out = match f(&mut w, &self.db).await {
-            Ok(v) => v,
+        let mut tx = self.db.begin().await?;
+        let result = async {
+            let out = f(&mut w, &mut tx).await?;
+            if w.version != before.version {
+                persist(&mut tx, &w).await?;
+            }
+            Ok::<T, WorldError>(out)
+        }
+        .await;
+        match result {
+            Ok(out) => match tx.commit().await {
+                Ok(()) => Ok(out),
+                Err(e) => {
+                    *w = before;
+                    Err(e.into())
+                }
+            },
             Err(e) => {
                 *w = before;
-                return Err(e);
-            }
-        };
-        if w.version != before.version {
-            if let Err(e) = persist(&self.db, &w).await {
-                *w = before;
-                return Err(e.into());
+                let _ = tx.rollback().await;
+                Err(e)
             }
         }
-        Ok(out)
     }
 
     /// Execute one command as `caller` and log it.
@@ -113,7 +130,7 @@ impl WorldService {
         let source = source.to_string();
         self.transact(async move |w, db| {
             let ev = w.execute(&caller, &action)?;
-            log_event(db, w.tick, &source, "economy", &json!({ "action": action, "events": summarize(&ev) })).await?;
+            log_event(&mut *db, w.tick, &source, "economy", &json!({ "action": action, "events": summarize(&ev) })).await?;
             Ok(ev)
         })
         .await
@@ -128,7 +145,7 @@ impl WorldService {
             let mut decisions = 0usize;
             let mut notable = Vec::new();
             for _ in 0..ticks {
-                record_history(w, db).await?;
+                record_history(w, &mut *db).await?;
                 for e in w.tick() {
                     match e {
                         Event::Shortage { .. } => shortages += 1,
@@ -139,13 +156,13 @@ impl WorldService {
                 if agents_every > 0 && w.tick % agents_every == 0 {
                     for (decision, result) in policy::run_fallback_agents(w) {
                         decisions += 1;
-                        log_decision(db, w.tick, "fallback", &decision, result.as_ref()).await?;
+                        log_decision(&mut *db, w.tick, "fallback", &decision, result.as_ref()).await?;
                         // An accepted trade with the merchant (a purchase or a sale)
                         // settles on NEAR.
                         if let (Some(near), Some(Ok(events))) = (&near, &result) {
                             for e in events {
                                 if let Event::Traded(t) = e {
-                                    super::settlement::queue_trade(w, db, near, t).await?;
+                                    super::settlement::queue_trade(w, &mut *db, near, t).await?;
                                 }
                             }
                         }
@@ -154,11 +171,11 @@ impl WorldService {
             }
             if let Some(near) = &near {
                 if w.tick % FLOW_SYNC_TICKS == 0 {
-                    super::settlement::sync_flows(w, db, near).await?;
+                    super::settlement::sync_flows(w, &mut *db, near).await?;
                 }
             }
             for e in &notable {
-                log_event(db, w.tick, "system", "economy", &json!({ "event": e })).await?;
+                log_event(&mut *db, w.tick, "system", "economy", &json!({ "event": e })).await?;
             }
             Ok(json!({ "ticks": ticks, "tick": w.tick, "decisions": decisions, "shortages": shortages, "events": notable.len() }))
         })
@@ -166,22 +183,22 @@ impl WorldService {
     }
 }
 
-async fn persist(db: &PgPool, w: &World) -> Result<(), sqlx::Error> {
+async fn persist(db: &mut PgConnection, w: &World) -> Result<(), sqlx::Error> {
     let state = serde_json::to_value(w).expect("world serializes");
     sqlx::query("INSERT INTO world_snapshots (tick, version, state) VALUES ($1, $2, $3)")
         .bind(w.tick as i64)
         .bind(w.version as i64)
         .bind(state)
-        .execute(db)
+        .execute(&mut *db)
         .await?;
     sqlx::query("DELETE FROM world_snapshots WHERE id <= (SELECT max(id) FROM world_snapshots) - $1")
         .bind(KEEP_SNAPSHOTS)
-        .execute(db)
+        .execute(&mut *db)
         .await?;
     Ok(())
 }
 
-pub async fn log_event(db: &PgPool, tick: u64, source: &str, kind: &str, payload: &Value) -> Result<(), sqlx::Error> {
+pub async fn log_event<'e, E: sqlx::PgExecutor<'e>>(db: E, tick: u64, source: &str, kind: &str, payload: &Value) -> Result<(), sqlx::Error> {
     sqlx::query("INSERT INTO world_events (tick, source, kind, payload) VALUES ($1, $2, $3, $4)")
         .bind(tick as i64)
         .bind(source)
@@ -194,8 +211,8 @@ pub async fn log_event(db: &PgPool, tick: u64, source: &str, kind: &str, payload
 
 /// Record an agent decision with its validation and execution result: the War Room's
 /// causal record. `planner` is "llm" or "fallback".
-pub async fn log_decision(
-    db: &PgPool,
+pub async fn log_decision<'e, E: sqlx::PgExecutor<'e>>(
+    db: E,
     tick: u64,
     planner: &str,
     d: &Decision,
@@ -225,7 +242,7 @@ pub fn summarize(ev: &[Event]) -> Vec<&Event> {
 }
 
 /// Prices and holdings at this tick, for the War Room's history.
-async fn record_history(w: &World, db: &PgPool) -> Result<(), sqlx::Error> {
+async fn record_history(w: &World, db: &mut PgConnection) -> Result<(), sqlx::Error> {
     let prices: serde_json::Map<String, Value> = cz_economy::Resource::ALL.iter().map(|&r| { let p = w.price(r); (r.name().to_string(), json!({ "ask": p.ask, "bid": p.bid, "stock": w.merchant_stock(r) })) }).collect();
     let holdings: serde_json::Map<String, Value> = w.actors.values().map(|a| (a.id.clone(), json!({
         "credits": w.balance(&a.account, cz_economy::Asset::Credits),
@@ -235,6 +252,44 @@ async fn record_history(w: &World, db: &PgPool) -> Result<(), sqlx::Error> {
         "defense": a.defense,
     }))).collect();
     sqlx::query("INSERT INTO market_history (tick, prices, holdings) VALUES ($1, $2, $3) ON CONFLICT (tick) DO NOTHING")
-        .bind(w.tick as i64).bind(Value::Object(prices)).bind(Value::Object(holdings)).execute(db).await?;
+        .bind(w.tick as i64).bind(Value::Object(prices)).bind(Value::Object(holdings)).execute(&mut *db).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A failed action leaves nothing behind: not the rows it wrote, not the world change.
+    /// Needs CZ_DB_TESTS=1 and DATABASE_URL (it reads the dev world but writes nothing
+    /// that survives).
+    #[tokio::test]
+    async fn a_failed_transaction_rolls_back_the_database_and_the_world() {
+        if std::env::var("CZ_DB_TESTS").as_deref() != Ok("1") {
+            return;
+        }
+        dotenvy::dotenv().ok();
+        let db = PgPool::connect(&std::env::var("DATABASE_URL").unwrap()).await.unwrap();
+        let svc = WorldService { world: Arc::new(Mutex::new(cz_economy::acceptance())), db: db.clone(), near: None };
+        let tag = format!("test-atomic-{}", uuid::Uuid::new_v4());
+        let before = svc.read(|w| w.version).await;
+        let t = tag.clone();
+        let r: Result<(), WorldError> = svc
+            .transact(async move |w, db| {
+                log_event(&mut *db, w.tick, &t, "test", &json!({ "step": 1 })).await?;
+                w.version += 1; // a change in memory
+                Err(WorldError::Other("fails after writing".into()))
+            })
+            .await;
+        assert!(r.is_err());
+        let (n,): (i64,) = sqlx::query_as("SELECT count(*) FROM world_events WHERE source = $1").bind(&tag).fetch_one(&db).await.unwrap();
+        assert_eq!(n, 0, "the event written before the failure was rolled back");
+        assert_eq!(svc.read(|w| w.version).await, before, "the world was restored");
+        // And a successful one commits.
+        let t = tag.clone();
+        svc.transact(async move |w, db| { log_event(&mut *db, w.tick, &t, "test", &json!({})).await?; Ok(()) }).await.unwrap();
+        let (n,): (i64,) = sqlx::query_as("SELECT count(*) FROM world_events WHERE source = $1").bind(&tag).fetch_one(&db).await.unwrap();
+        assert_eq!(n, 1);
+        sqlx::query("DELETE FROM world_events WHERE source = $1").bind(&tag).execute(&db).await.unwrap();
+    }
 }

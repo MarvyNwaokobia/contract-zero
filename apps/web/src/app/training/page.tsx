@@ -15,6 +15,8 @@ import { useMemo, useState } from 'react';
 import { Rajdhani } from 'next/font/google';
 import { retryImport } from '@/lib/retryImport';
 import { Shell } from '@/components/ui/Shell';
+import { useSettings } from '@/lib/settings';
+import { bindLabel, type Action } from '@/lib/keybinds';
 import { OperationIntel } from '@/components/world/OperationIntel';
 import { buildOperationMission, conditionsFor, PRACTICE_SITES, type ConvoyContract, type OpKind, type Phase, type Resource } from '@/engine/fps/convoy';
 import type { ContractRunStats } from '@/engine/scene/ContractZeroScene';
@@ -93,6 +95,8 @@ function Practice({ onPlay }: { onPlay: (c: ConvoyContract) => void }) {
 }
 
 export default function TrainingPage() {
+  const settings = useSettings();
+  const k = (a: Action) => bindLabel(settings.controls.binds, a);
   const [mode, setMode] = useState<Mode>('menu');
   const [practice, setPractice] = useState<ConvoyContract | null>(null);
   const [result, setResult] = useState<{ outcome: 'extracted' | 'killed'; stats: ContractRunStats } | null>(null);
@@ -160,7 +164,7 @@ export default function TrainingPage() {
       </div>
       {mode === 'practice' && <Practice onPlay={(c) => { setResult(null); setPractice(c); setRunKey((k) => k + 1); }} />}
       {mode === 'menu' && <p className="text-sm text-muted">Choose a mode. Nothing in Training is scored, and nothing here touches the economy or NEAR.</p>}
-      <p className="mt-6 text-xs text-dim">Controls: WASD move · mouse aim · click or Space fire · R reload · E interact (hold) · H field dressing · C crouch · Q / G lean · X swap · N night vision · F light · Esc pause.</p>
+      <p className="mt-6 text-xs text-dim">Controls: {k('moveForward')}{k('moveLeft')}{k('moveBack')}{k('moveRight')} move · mouse aim · click or {k('fire')} fire · {k('reload')} reload · {k('interact')} interact ({settings.access.toggleInteract ? 'press' : 'hold'}) · {k('heal')} field dressing · {k('crouch')} crouch · {k('leanLeft')} / {k('leanRight')} lean · {k('swap')} swap · {k('nvg')} night vision · {k('light')} light · Esc pause. <Link href="/settings#keys" className="underline hover:text-fog">Change keys</Link></p>
     </Shell>
   );
 }

@@ -272,6 +272,9 @@ export interface SimulationView {
   simulated_raids: { id: number; resource: ResourceName; manifest: number; extracted: boolean }[]
 }
 
+/** Account-level preferences (the portable part of Settings). */
+export interface StoredPreferences { version: number | null; prefs: Record<string, unknown> | null; updated_at: string | null }
+
 export const api = {
   world: () => req<WorldView>('/world'),
   board: () => req<{ board: BoardEntry[] }>('/board').then((b) => b.board),
@@ -282,6 +285,8 @@ export const api = {
     req<MissionStart>('/missions/start', { method: 'POST', body: JSON.stringify({ target, resource, kind, gun }) }),
   quoteGear: (gear: string) => req<QuoteCreated>('/exchange/quotes', { method: 'POST', body: JSON.stringify({ gear, side: 'buy', qty: 1 }) }),
   career: () => req<Career>('/me/career'),
+  preferences: () => req<StoredPreferences>('/me/preferences'),
+  savePreferences: (version: number, prefs: Record<string, unknown>) => req<StoredPreferences>('/me/preferences', { method: 'PUT', body: JSON.stringify({ version, prefs }) }),
   missionStory: (session: string) => req<{ story: MissionStory }>(`/missions/${session}/story`).then((r) => r.story),
   settlement: (opId: string) => req<SettlementView>(`/settlements/${encodeURIComponent(opId)}`),
   completeMission: (session: string, outcome: 'extracted' | 'killed', kills: number, record?: FieldRecord) =>

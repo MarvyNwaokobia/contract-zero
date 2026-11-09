@@ -14,20 +14,25 @@ const page = await ctx.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 
-await page.goto(`${WEB}/settings`);
+await page.goto(`${WEB}/settings#display`);
 await page.waitForSelector('[data-testid=fov]');
-// Keyboard: the FOV slider from 55 to 70 with the arrow key.
+// Keyboard: the FOV slider from 55 to 70 with the arrow key (applies at once).
 await page.focus('[data-testid=fov]');
 for (let i = 0; i < 15; i++) await page.keyboard.press('ArrowRight');
+// Graphics are staged: choose Low, then Apply.
+await page.check('[data-testid=quality-low]', { force: true });
+await page.click('[data-testid=display-apply]');
 // Keyboard: effects volume to 0 with Home.
+await page.click('[data-testid=cat-audio]');
 await page.focus('[data-testid=vol-effects]');
 await page.keyboard.press('Home');
-// Keyboard: tick a checkbox with Space.
-await page.focus('[data-testid=toggle-interact]');
+await page.click('[data-testid=cat-controls]');
+await page.check('[data-testid=interact-mode-toggle]', { force: true });
+// Keyboard: a switch with Space.
+await page.click('[data-testid=cat-access]');
+await page.focus('[data-testid=reduce-motion]');
 await page.keyboard.press('Space');
-await page.check('[data-testid=reduce-motion]');
 await page.check('[data-testid=subsize-l]', { force: true });
-await page.check('[data-testid=quality-low]', { force: true });
 await sleep(300);
 out.saved = await page.evaluate(() => JSON.parse(localStorage.getItem('cz_settings')));
 await page.screenshot({ path: `${OUT}/settings.png`, fullPage: true });

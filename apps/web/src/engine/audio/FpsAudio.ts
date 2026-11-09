@@ -1,6 +1,7 @@
 import type { Speaker } from '../story/presence';
 import { spatialize } from './spatial';
 import type { GunShotAudio } from '../combat/GunFeel';
+import { MusicLayers } from './MusicLayers';
 
 /**
  * @module audio/FpsAudio
@@ -72,6 +73,9 @@ export interface FpsAudioStats {
   zone: string;    // the ambience bed currently loaded
 }
 
+/** The player's volume mix, 0…1 per channel. */
+export interface Mix { master: number; music: number; effects: number; voice: number; ambience: number; ui: number }
+
 export class FpsAudio {
   private ctx: Ctx | null = null;
   private master!: GainNode;
@@ -82,7 +86,11 @@ export class FpsAudio {
   private ambBus!: GainNode;
   private ambBaseVol = 0.05;
   /** The player's mix (Settings → Audio) and whether the tab is in the background. */
-  private mix = { master: 0.9, effects: 1, voice: 1, ambience: 0.8, ui: 0.8 };
+  private mix: Mix = { master: 0.9, music: 0.5, effects: 1, voice: 1, ambience: 0.8, ui: 0.8 };
+  /** The adaptive score (MusicLayers) on its own bus, under the music slider. */
+  private musicBus!: GainNode;
+  private music: MusicLayers | null = null;
+  private musicLevel: 0 | 1 | 2 | 3 = 0;
   private backgroundMuted = false;
   private voiceBus!: GainNode;
   /** The ambience level after the player's ambience slider. */
@@ -147,8 +155,12 @@ export class FpsAudio {
       this.uiBus.gain.value = 0.8;
       this.ambBus.gain.value = this.ambTarget;
       this.voiceBus = ctx.createGain();
-      for (const b of [this.gunBus, this.impactBus, this.uiBus, this.ambBus, this.voiceBus]) b.connect(this.master);
+      this.musicBus = ctx.createGain();
+      this.musicBus.gain.value = 0;
+      for (const b of [this.gunBus, this.impactBus, this.uiBus, this.ambBus, this.voiceBus, this.musicBus]) b.connect(this.master);
       this.applyMix();
+      // The score only runs while it can be heard: a muted music slider costs nothing.
+      this.syncMusic();
 
       this.startAmbience();
       void this.loadSamples();
@@ -183,11 +195,40 @@ export class FpsAudio {
     this.lyaw = yaw;
   }
 
-  stats(): FpsAudioStats & { mix: { master: number; effects: number; voice: number; ambience: number; ui: number }; backgroundMuted: boolean; masterGain: number | null } {
-    return { ...this.stats_, mix: { ...this.mix }, backgroundMuted: this.backgroundMuted, masterGain: this.master ? this.master.gain.value : null };
+  stats(): FpsAudioStats & { mix: Mix; backgroundMuted: boolean; masterGain: number | null; music: { playing: boolean; level: number; gain: number | null } } {
+    return {
+      ...this.stats_, mix: { ...this.mix }, backgroundMuted: this.backgroundMuted, masterGain: this.master ? this.master.gain.value : null,
+      music: { playing: !!this.music, level: this.musicLevel, gain: this.musicBus ? this.musicBus.gain.value : null },
+    };
+  }
+
+  /** Combat intensity for the score: 0 calm, 1 alert, 2 engaged, 3 boss. */
+  setMusicIntensity(level: 0 | 1 | 2 | 3): void {
+    this.musicLevel = level;
+    this.music?.setIntensity(level);
+  }
+
+  /** A beat of silence in the score, for a kill or a catch to land in. */
+  musicGap(ms: number): void {
+    this.music?.gap(ms);
+  }
+
+  private syncMusic(): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.musicBus) return;
+    if (this.mix.music > 0 && !this.music) {
+      this.music = new MusicLayers(ctx, this.musicBus);
+      this.music.start();
+      this.music.setIntensity(this.musicLevel);
+    } else if (this.mix.music <= 0 && this.music) {
+      this.music.dispose();
+      this.music = null;
+    }
   }
 
   dispose(): void {
+    this.music?.dispose();
+    this.music = null;
     try { this.ctx?.close(); } catch { /* already closed */ }
     this.ctx = null;
   }
@@ -695,9 +736,10 @@ export class FpsAudio {
 
   // ── internals ─────────────────────────────────────────────────────────────
   /** The player's volume mix, applied immediately (0…1 each). */
-  setMix(m: { master: number; effects: number; voice: number; ambience: number; ui: number }): void {
-    this.mix = { ...m };
+  setMix(m: Partial<Mix> & Omit<Mix, 'music'>): void {
+    this.mix = { ...this.mix, ...m };
     this.applyMix();
+    this.syncMusic();
   }
 
   /** Silence everything while the tab is hidden (if the player wants that). */
@@ -717,6 +759,8 @@ export class FpsAudio {
     set(this.uiBus, this.mix.ui);
     set(this.voiceBus, this.mix.voice);
     set(this.ambBus, this.ambTarget);
+    // MusicLayers is mixed hot (it was written to sit alone); 0.6 seats it under the fight.
+    set(this.musicBus, 0.6 * this.mix.music);
   }
 
   /** Turn the refinery machinery bed on or off (Cinder Yard). */

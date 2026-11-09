@@ -18,6 +18,16 @@
 
 **The previous auto-quality never triggered.** It used drei's `PerformanceMonitor`, which declines only when more than 75% of samples fall under 40 fps, and then jumped straight from full quality to minimal. A machine at 30–38 fps never reached it: measured on Blacksite at 2×, it stayed at full quality for 15 s+ at about 30 fps. Now, on the same scene, Auto stepped to Medium after about 6 s, recovered to 60 fps, remembered it, and a reload started at Medium.
 
+## Player overrides
+
+Settings → Display can override any part of a tier (see `SETTINGS.md`):
+- **Shadows, set dressing and particles:** each follows the preset, or is forced on or off.
+- **Post-processing:** follows the preset, or is set to Full, Light or Off.
+- **Resolution scale:** multiplies the tier's pixel-ratio cap.
+- **Frame-rate cap (30, 60 or 120):** drives the render loop at that rate. Measured at 30 fps under the 30 cap.
+
+The overrides combine with the tier in `renderPlan` (`lib/settings.ts`). Auto still moves the tier, and the overrides apply on top of whatever tier it's on.
+
 ## Measurements
 
 `node apps/web/probe-perf.mjs <web> gpu|throttle <out.json> [sites]` runs a night raid with every guard awake, from the breach point. It records:

@@ -109,6 +109,7 @@ export class MusicLayers {
     for (const n of this.droneNodes) { try { n.stop(); } catch {} }
     this.droneNodes = [];
     this.running = false;
+    try { this.out.disconnect(); } catch { /* already gone */ }
   }
 
   // ── Internals ──────────────────────────────────────────────────────────────

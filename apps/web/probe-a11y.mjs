@@ -17,7 +17,7 @@ const b = await chromium.launch({ channel: 'chrome', headless: true });
 const ctx = await b.newContext({ viewport: { width: 1280, height: 900 } });
 await ctx.addCookies([{ name, value, domain: new URL(API).hostname, path: '/' }]);
 const report = {};
-for (const path of ['/', '/contracts', '/exchange', '/war-room', '/training', '/settings', '/operator', '/signin', '/deploy?target=vanguard&resource=ammo&kind=raid']) {
+for (const path of ['/', '/contracts', '/exchange', '/war-room', '/training', ...['display', 'audio', 'controls', 'keys', 'interface', 'access', 'account'].map((c) => `/settings#${c}`), '/operator', '/signin', '/deploy?target=vanguard&resource=ammo&kind=raid']) {
   const p = await ctx.newPage();
   await p.goto(WEB + path, { waitUntil: 'networkidle', timeout: 120_000 }).catch(() => {});
   await new Promise((r) => setTimeout(r, 2500));

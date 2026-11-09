@@ -1,4 +1,6 @@
-# Settings and accessibility (Milestone 8)
+# Settings and accessibility (Milestone 8, extended by the Configuration Center)
+
+> The full settings reference, including everything added after Milestone 8 (key remapping, colour palettes, high-contrast prompts, aim assistance, HUD scale and crosshair, account-level sync), is `SETTINGS.md`. This file keeps the Milestone 8 accessibility record.
 
 Every setting lives in one place, **Settings** (`/settings`), and is stored per browser (`lib/settings.ts`). Changes apply immediately, including inside a running fight. The pause menu's graphics and sensitivity controls write to the same settings.
 
@@ -44,6 +46,10 @@ Older stored settings (`cz_settings` v1, `cz_quality`, `cz_look_sens`) are migra
 ## Known gaps
 
 - **The 3D fight isn't usable with a screen reader.** The menus, Hub, board, Exchange and Settings are.
-- **Colour plus text.** Objectives, the extraction zone and the HUD use colour together with text labels, but there is no dedicated colour-blind palette.
-- **No remapping.** Keys can't be remapped; a toggle replaces the one hold-only action.
 - **No recorded dialogue.** Subtitles are the only channel for radio content besides the static.
+- **Closed since Milestone 8:**
+  - keys can now be remapped;
+  - there are two colour-blind palettes;
+  - prompts have a high-contrast mode.
+
+  See `SETTINGS.md`.

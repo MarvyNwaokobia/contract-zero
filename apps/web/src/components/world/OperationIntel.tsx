@@ -9,6 +9,8 @@ import { useMemo } from 'react'
 import { buildOperationMission, conditionsFor, RESOURCE_LABEL as CARGO, type ConvoyContract, type OpKind } from '@/engine/fps/convoy'
 import { CARRY_MAX, EXTRACT_SECS } from '@/engine/fps/field'
 import { SiteMap } from './SiteMap'
+import { useSettings } from '@/lib/settings'
+import { bindLabel } from '@/lib/keybinds'
 
 const PHASE_LABEL = { day: 'Day', dusk: 'Dusk', night: 'Night' } as const
 
@@ -19,6 +21,10 @@ export function OperationIntel({ contract, kind, reward, practice = false }: {
   reward?: { fee: number; sponsor?: string | null; cargoValue?: number }
   practice?: boolean
 }) {
+  // The player's own interact key, and whether they hold it or press it once.
+  const settings = useSettings()
+  const use = bindLabel(settings.controls.binds, 'interact')
+  const hold = settings.access.toggleInteract ? 'Press' : 'Hold'
   const mission = useMemo(() => buildOperationMission({ ...contract, kind }), [contract, kind])
   const cond = contract.conditions ?? conditionsFor('day')
   const site = contract.site
@@ -59,10 +65,10 @@ export function OperationIntel({ contract, kind, reward, practice = false }: {
             ))}
           </ol>
           <p className="mt-3 text-xs text-muted">
-            {kind === 'raid' && `${contract.cargo.units} units packed in ${cases} case${cases === 1 ? '' : 's'}. Hold E on a case to take it; you can carry ${CARRY_MAX}, and each one slows you. Only cases you carry through a completed extraction count.`}
-            {kind === 'sabotage' && 'Hold E for five seconds on each target to set a charge. The fuse is short once both are set. Extraction opens after the second charge.'}
-            {kind === 'recovery' && 'One sealed case, heavy enough to slow you. Hold E to free it, then carry it to the handover.'}
-            {` At the zone, press E to call it in, then stay inside for ${EXTRACT_SECS} seconds. Leaving pauses the countdown; going down drops what you carry.`}
+            {kind === 'raid' && `${contract.cargo.units} units packed in ${cases} case${cases === 1 ? '' : 's'}. ${hold} ${use} on a case to take it; you can carry ${CARRY_MAX}, and each one slows you. Only cases you carry through a completed extraction count.`}
+            {kind === 'sabotage' && `${hold} ${use} for five seconds on each target to set a charge. The fuse is short once both are set. Extraction opens after the second charge.`}
+            {kind === 'recovery' && `One sealed case, heavy enough to slow you. ${hold} ${use} to free it, then carry it to the handover.`}
+            {` At the zone, press ${use} to call it in, then stay inside for ${EXTRACT_SECS} seconds. Leaving pauses the countdown; going down drops what you carry.`}
           </p>
         </section>
 

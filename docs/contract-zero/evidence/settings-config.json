@@ -1,0 +1,248 @@
+[
+ {
+  "name": "desktop: every category renders without sideways scroll",
+  "ok": true,
+  "detail": []
+ },
+ {
+  "name": "phone: every category renders without sideways scroll",
+  "ok": true,
+  "detail": []
+ },
+ {
+  "name": "a #hash deep-links a category",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "arrow keys move between categories",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "Home jumps to the first category",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "rebinding saves the new key",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "a reserved key is refused with the reason",
+  "ok": true,
+  "detail": "F5 can’t be bound. Function keys belong to the browser (reload, full screen, developer tools). Press another key, or Esc to cancel."
+ },
+ {
+  "name": "Esc cancels capture",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "a key in use moves and the loser is named",
+  "ok": true,
+  "detail": "E moved to Reload. Use / interact lost it and now has no key.Undo"
+ },
+ {
+  "name": "a required action with no key is flagged",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "undo restores both actions",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "reset keys restores the defaults",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "graphics changes are staged, not saved",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "discard drops the staged changes",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "apply saves them",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "revert goes back to what was applied before",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "the performance panels render",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "full screen enters, or reports why the browser refused",
+  "ok": true,
+  "detail": {
+   "on": true,
+   "label": "On",
+   "err": null
+  }
+ },
+ {
+  "name": "without full-screen support the control is disabled and explained",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "signed out: settings are local only",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "signed in: the method is shown",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "quick-trade budget is read from the chain record",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "no secret key on the page",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "an unconfirmed revocation is reported as unconfirmed, with the expiry",
+  "ok": true,
+  "detail": "Quick trade was removed from this browser, but the chain hasn't confirmed the revocation (Access key ed25519:4RfgRGz16gEcZs1KrdhpaGaD8kQJUnGKJeEEeWDKCrpB does not exist at block height 276909115). It stops working at 09/11/2026, 12:39:29 regardless."
+ },
+ {
+  "name": "the local key is wiped either way",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "signed in: preferences sync to the account",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "a portable change is pushed, graphics is not",
+  "ok": true,
+  "detail": "true,false"
+ },
+ {
+  "name": "a newer account copy is pulled in",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "shadows forced off at High",
+  "ok": true,
+  "detail": {
+   "pixelRatio": 1,
+   "shadowCasters": 0,
+   "minimal": false,
+   "lightFx": false,
+   "plan": {
+    "shadows": false,
+    "post": "full",
+    "dressing": true,
+    "particles": true,
+    "dprMax": 1.5,
+    "dprMin": 0.75
+   }
+  }
+ },
+ {
+  "name": "resolution scale lowers the pixel ratio",
+  "ok": true,
+  "detail": 1
+ },
+ {
+  "name": "the frame-rate cap holds",
+  "ok": true,
+  "detail": {
+   "fps": 30,
+   "worstMs": 34,
+   "tier": "high",
+   "pixelRatio": 1,
+   "shadows": false,
+   "post": "full",
+   "cap": 30,
+   "at": 1794220787434
+  }
+ },
+ {
+  "name": "music plays on its own channel",
+  "ok": true,
+  "detail": {
+   "playing": true,
+   "level": 0,
+   "gain": 0.47999998927116394
+  }
+ },
+ {
+  "name": "a rebound key moves the operator; the old key does not",
+  "ok": true,
+  "detail": {
+   "wMoved": 0,
+   "uMoved": 2.6000000000000014
+  }
+ },
+ {
+  "name": "invert Y: look-up lowers the view",
+  "ok": true,
+  "detail": {
+   "pitch0": 0,
+   "pitch1": -0.45
+  }
+ },
+ {
+  "name": "the rebound reload key reloads; the old one does not",
+  "ok": true,
+  "detail": {
+   "fired": "20 / 72",
+   "afterR": "20 / 72",
+   "afterK": "24 / 68"
+  }
+ },
+ {
+  "name": "crosshair style and colour apply",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "HUD scale applies",
+  "ok": true,
+  "detail": "translateX(-50%) scale(1.3)"
+ },
+ {
+  "name": "the red–green palette colours the arrows",
+  "ok": true,
+  "detail": [
+   "rgb(230, 159, 0)",
+   "rgb(230, 159, 0)",
+   "rgb(230, 159, 0)",
+   "rgb(230, 159, 0)",
+   "rgb(86, 180, 233)"
+  ]
+ },
+ {
+  "name": "high-contrast prompt shows the bound key",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "no page errors",
+  "ok": true,
+  "detail": []
+ }
+]

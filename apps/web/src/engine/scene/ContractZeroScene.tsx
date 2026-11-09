@@ -32,7 +32,8 @@ import { LevelArt } from './LevelArt';
 import { FieldProps } from './FieldProps';
 import { ItemInspector } from '@/components/inspect/ItemInspector';
 import type { InspectItem } from '@/components/inspect/itemInfo';
-import { useSettings, updateSettings, type Settings } from '@/lib/settings';
+import { useSettings, updateSettings, renderPlan, PALETTES, type RenderPlan, type Settings } from '@/lib/settings';
+import { DEFAULT_BINDS, actionsByCode, bindLabel, type Action, type Binds } from '@/lib/keybinds';
 import { FieldRuntime, trainingField, BLAST_RADIUS, CARRY_MAX, type FieldEvent, type FieldRecord, type ProtoEvent } from '../fps/field';
 import { CAMPAIGN, CAMPAIGN_KEY, PROGRESS_KEY, ZONE_THEMES, themeForMission, SURVIVAL_MISSION, GAUNTLET_MISSION, ENDLESS_MISSION, SEASONAL_MISSION, survivalWaveCount, survivalWaveHp, gauntletWaveCount, gauntletWaveHp, type Mission } from '../fps/campaign';
 import {
@@ -498,6 +499,8 @@ interface Hud {
   reloadHint: HTMLDivElement | null;
   hit: HTMLDivElement | null;
   ch: { t: HTMLDivElement | null; b: HTMLDivElement | null; l: HTMLDivElement | null; r: HTMLDivElement | null };
+  chDot: HTMLDivElement | null;
+  chRing: HTMLDivElement | null;
   lock: HTMLDivElement | null;
   kills: HTMLDivElement | null;
   healthFill: HTMLDivElement | null;
@@ -595,7 +598,47 @@ function PerfHud({ hud }: { hud: React.MutableRefObject<Hud> }) {
   return null;
 }
 
-function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, onComplete, onDeath, endOnDeath, pausedRef, gateRef, accountRank, accountXp, equippedGun, equippedAmmo, equippedMods, fieldKit, endlessOpts, coop, onProtocol, onInspect, inspectingRef, settingsRef }: {
+/** Settings → Graphics → frame-rate cap: drive the loop by hand at the chosen rate
+ *  (the Canvas runs with frameloop "never" while a cap is set). */
+function FrameCap({ fps }: { fps: number }) {
+  const advance = useThree((st) => st.advance);
+  useEffect(() => {
+    const step = 1000 / fps;
+    const start = performance.now();
+    let raf = 0, next = start;
+    const tick = (t: number) => {
+      raf = requestAnimationFrame(tick);
+      if (t + 1 < next) return;
+      next = Math.max(next + step, t - step); // keep cadence, never spiral after a stall
+      advance((t - start) / 1000);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [fps, advance]);
+  return null;
+}
+
+/** The last fight's measured frame rate, for the Settings page's readout. */
+function PerfRecorder({ tier, plan, cap }: { tier: string; plan: RenderPlan; cap: number }) {
+  const acc = useRef({ frames: 0, t: 0, worst: 0 });
+  const gl = useThree((st) => st.gl);
+  useFrame((_, dt) => {
+    const a = acc.current;
+    a.frames += 1; a.t += dt; a.worst = Math.max(a.worst, dt);
+    if (a.t >= 3) {
+      try {
+        window.localStorage.setItem('cz_perf_last', JSON.stringify({
+          fps: Math.round(a.frames / a.t), worstMs: Math.round(a.worst * 1000), tier, pixelRatio: +gl.getPixelRatio().toFixed(2),
+          shadows: plan.shadows, post: plan.post, cap, at: Date.now(),
+        }));
+      } catch { /* private mode */ }
+      a.frames = 0; a.t = 0; a.worst = 0;
+    }
+  });
+  return null;
+}
+
+function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, onComplete, onDeath, endOnDeath, pausedRef, gateRef, accountRank, accountXp, equippedGun, equippedAmmo, equippedMods, fieldKit, endlessOpts, coop, onProtocol, onInspect, inspectingRef, settingsRef, plan }: {
   /** Contract mode: a final death ends the run (the page shows the result) instead of restarting the op. */
   endOnDeath?: boolean;
   hud: React.MutableRefObject<Hud>; controls: React.MutableRefObject<Controls>;
@@ -638,6 +681,8 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
   inspectingRef?: React.MutableRefObject<boolean>;
   /** Live player settings (FOV, reduced motion and flashes, subtitles, interaction). */
   settingsRef?: React.MutableRefObject<Settings>;
+  /** What to render: the quality tier plus the player's graphics overrides. */
+  plan: RenderPlan;
 }) {
   const { camera, gl, scene } = useThree();
 
@@ -1004,8 +1049,8 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
   const impactFx = useMemo(
     // Same tier that drops the postprocessing stack and the set dressing: half the
     // particles, shorter-lived and fewer decals.
-    () => new ImpactFX(impactMaps, { quality: minimal || lowSpec ? 'lean' : 'full' }),
-    [impactMaps, minimal, lowSpec],
+    () => new ImpactFX(impactMaps, { quality: !plan.particles || lowSpec ? 'lean' : 'full' }),
+    [impactMaps, plan.particles, lowSpec],
   );
   useEffect(() => () => impactFx.dispose(), [impactFx]);
   const caOffset = useMemo(() => new THREE.Vector2(lowSpec ? 0.0003 : 0.0007, lowSpec ? 0.0004 : 0.0009), [lowSpec]);
@@ -1060,10 +1105,25 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
   const wantHeal = useRef(false);
   const wantInspect = useRef(false);
   /** The quality tier in force, for the dev readout (props change without a remount). */
-  const tierRef = useRef({ minimal, lightFx });
-  tierRef.current = { minimal, lightFx };
+  const tierRef = useRef({ minimal, lightFx, plan });
+  tierRef.current = { minimal, lightFx, plan };
   /** Toggle-to-interact: E starts a hold that runs until it completes, E again, or the target changes. */
   const interactLatch = useRef(false);
+  /** Toggle-mode aim and crouch (Settings → Controls), latched by their keys. */
+  const aimLatch = useRef(false);
+  const crouchLatch = useRef(false);
+  /** The player's key bindings, as code → actions; rebuilt when the binds change. */
+  const bindCache = useRef<{ binds: Binds; byCode: Map<string, Action[]> }>({ binds: DEFAULT_BINDS, byCode: actionsByCode(DEFAULT_BINDS) });
+  const bindsNow = () => {
+    const b = settingsRef?.current.controls.binds ?? DEFAULT_BINDS;
+    if (bindCache.current.binds !== b) bindCache.current = { binds: b, byCode: actionsByCode(b) };
+    return bindCache.current;
+  };
+  /** Whether any key bound to an action is held. */
+  const actHeld = (a: Action) => {
+    const [x, y] = bindsNow().binds[a];
+    return (!!x && keys.current.has(x)) || (!!y && keys.current.has(y));
+  };
   const latchTarget = useRef<string | null>(null);
   const fieldToast = useRef<{ text: string; until: number; color: string }>({ text: '', until: 0, color: '#e9edf2' });
   const lastFieldHtml = useRef('');
@@ -1301,29 +1361,43 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
         t.tagName === 'INPUT' || t.tagName === 'BUTTON' ||
         t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable
       );
-      if (!onControl && ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.code)) e.preventDefault();
+      const acts = bindsNow().byCode.get(e.code) ?? [];
+      // Bound keys never reach the page (a bound ' or / would open Firefox's quick find).
+      if (!onControl && (acts.length || ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.code))) e.preventDefault();
       if (e.repeat) return;
       keys.current.add(e.code);
-      if (e.code === 'KeyR') wantReload.current = true;
-      if (e.code === 'KeyH') wantHeal.current = true;      // apply a field dressing
-      if (e.code === 'KeyE' && settingsRef?.current.access.toggleInteract) interactLatch.current = !interactLatch.current; // toggle mode
-      if (e.code === 'KeyI' && !inspectingRef?.current) wantInspect.current = true; // inspect what you're looking at
-      if (e.code === 'KeyB') cycleFireMode.current = true; // toggle semi/burst/auto
-      if (e.code === 'Digit1') wantSlot.current = 0;       // primary
-      if (e.code === 'Digit2') wantSlot.current = 1;       // sidearm slot
-      if (e.code === 'KeyX') wantSwap.current = true;      // swap to the other weapon
-      if (e.code === 'KeyN') wantToggle.current = 'nvg';   // night vision
-      if (e.code === 'KeyF') wantToggle.current = 'light'; // flashlight
-      if (e.code === 'KeyL') wantToggle.current = 'laser'; // laser sight
-      if (e.code === 'KeyO') wantToggle.current = 'optic'; // optic / scope
-      if (e.code === 'KeyT') controls.current.lockCycle = true; // snap-lock the nearest enemy (cycle)
+      const cs = settingsRef?.current;
+      for (const a of acts) {
+        switch (a) {
+          case 'reload': wantReload.current = true; break;
+          case 'heal': wantHeal.current = true; break;          // apply a field dressing
+          case 'interact': if (cs?.access.toggleInteract) interactLatch.current = !interactLatch.current; break; // toggle mode
+          case 'inspect': if (!inspectingRef?.current) wantInspect.current = true; break; // inspect what you're looking at
+          case 'fireMode': cycleFireMode.current = true; break; // semi/burst/auto
+          case 'primary': wantSlot.current = 0; break;
+          case 'secondary': wantSlot.current = 1; break;
+          case 'swap': wantSwap.current = true; break;
+          case 'nvg': wantToggle.current = 'nvg'; break;
+          case 'light': wantToggle.current = 'light'; break;
+          case 'laser': wantToggle.current = 'laser'; break;
+          case 'optic': wantToggle.current = 'optic'; break;
+          case 'target': if (cs?.access.targetLock !== false) controls.current.lockCycle = true; break; // snap-lock the nearest enemy (cycle)
+          case 'aim': if (cs?.controls.aim === 'toggle') aimLatch.current = !aimLatch.current; break;
+          case 'crouch': if (cs?.controls.crouch === 'toggle') crouchLatch.current = !crouchLatch.current; break;
+          default: break;
+        }
+      }
       audio.unlock();
       // Capture the mouse on the first keypress so MOVING the mouse aims (up/down
       // included) without needing a click. Guarded, so headless never throws.
       wantLock();
     };
     const up = (e: KeyboardEvent) => keys.current.delete(e.code);
-    const mdown = (e: MouseEvent) => { mouseBtn.current.add(e.button); audio.unlock(); wantLock(); };
+    const mdown = (e: MouseEvent) => {
+      mouseBtn.current.add(e.button);
+      if (e.button === 2 && settingsRef?.current.controls.aim === 'toggle') aimLatch.current = !aimLatch.current;
+      audio.unlock(); wantLock();
+    };
     const mup = (e: MouseEvent) => mouseBtn.current.delete(e.button);
     const move = (e: MouseEvent) => {
       if (document.pointerLockElement === canvas) {
@@ -1458,7 +1532,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       pitch: +staggerP.current.toFixed(4), yaw: +staggerY.current.toFixed(4), shake: +shake.current.toFixed(4),
     });
     w.__czColliders = () => COLLIDERS;
-    w.__czCam = () => ({ x: +camera.position.x.toFixed(3), z: +camera.position.z.toFixed(3), fov: +(camera as THREE.PerspectiveCamera).fov.toFixed(1), roll: +camera.rotation.z.toFixed(4) });
+    w.__czCam = () => ({ x: +camera.position.x.toFixed(3), z: +camera.position.z.toFixed(3), fov: +(camera as THREE.PerspectiveCamera).fov.toFixed(1), roll: +camera.rotation.z.toFixed(4), pitch: +pitch.current.toFixed(4), yaw: +yaw.current.toFixed(4) });
     // Draw calls and triangles per frame, counted across every pass (post-processing
     // resets the renderer's counters each pass, so the default reading is the last quad).
     w.__czDrawStats = (frames = 30) => new Promise((res) => {
@@ -1560,21 +1634,24 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
     // Inspecting: the world runs on, the player stands still with the weapon down.
     if (inspectingRef?.current) { keys.current.clear(); mouseBtn.current.clear(); }
     if (wantInspect.current) { wantInspect.current = false; openInspector(); }
-    const k = keys.current;
-    const held = (c: string) => k.has(c);
     const ct = controls.current;
 
     // ── Stances FIRST (look sensitivity is reduced while aiming down sights) ──
-    const adsWant = held('ShiftLeft') || held('ShiftRight') || mouseBtn.current.has(2) || ct.ads ? 1 : 0;
-    const crouchWant = held('KeyC') || ct.crouch ? 1 : 0;
-    // E is interact; lean right moved to G.
-    const leanWant = (held('KeyG') ? 1 : 0) - (held('KeyQ') ? 1 : 0);
+    const cs = settingsRef?.current;
+    // Hold or toggle (Settings → Controls). Touch keeps its own buttons either way.
+    const adsKey = cs?.controls.aim === 'toggle' ? aimLatch.current : actHeld('aim') || mouseBtn.current.has(2);
+    const adsWant = adsKey || ct.ads ? 1 : 0;
+    const crouchKey = cs?.controls.crouch === 'toggle' ? crouchLatch.current : actHeld('crouch');
+    const crouchWant = crouchKey || ct.crouch ? 1 : 0;
+    const leanWant = (actHeld('leanRight') ? 1 : 0) - (actHeld('leanLeft') ? 1 : 0);
     adsCur.current += (adsWant - adsCur.current) * Math.min(1, dt * 12);
     crouchCur.current += (crouchWant - crouchCur.current) * Math.min(1, dt * 10);
     leanCur.current += (leanWant - leanCur.current) * Math.min(1, dt * 12);
 
     // ── Look: mouse (pointer-lock) + touch drag + arrow keys, slowed by ADS ──
-    const adsMult = THREE.MathUtils.lerp(1, ADS_SENS, adsCur.current);
+    // The aiming multiplier (Settings → Controls) scales the tuned ADS slow-down.
+    const adsMult = THREE.MathUtils.lerp(1, ADS_SENS * (cs?.controls.adsSens ?? 1), adsCur.current);
+    const invY = cs?.controls.invertY ? -1 : 1;
     // Touch drag feeds a buffer we EASE out of, so aiming glides instead of
     // jittering frame-to-frame (mouse stays raw — desktop wants 1:1).
     const rawTouchX = ct.lookX, rawTouchY = ct.lookY; // this frame's actual finger travel
@@ -1606,13 +1683,13 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
     // the one they are tuning, and a device is effectively one or the other.
     const sens = adsMult * (ct.lookSens > 0 ? ct.lookSens : 1);
     yaw.current -= (mouseDX.current * LOOK_SENS + tx * TOUCH_LOOK_SENS) * sens;
-    pitch.current -= (mouseDY.current * LOOK_SENS + ty * TOUCH_LOOK_SENS) * sens;
+    pitch.current -= (mouseDY.current * LOOK_SENS + ty * TOUCH_LOOK_SENS) * sens * invY;
     mouseDX.current = 0; mouseDY.current = 0;
     const keyStep = KEY_LOOK * adsMult * dt;
-    if (held('ArrowLeft')) yaw.current += keyStep;
-    if (held('ArrowRight')) yaw.current -= keyStep;
-    if (held('ArrowUp')) pitch.current += keyStep;
-    if (held('ArrowDown')) pitch.current -= keyStep;
+    if (actHeld('lookLeft')) yaw.current += keyStep;
+    if (actHeld('lookRight')) yaw.current -= keyStep;
+    if (actHeld('lookUp')) pitch.current += keyStep * invY;
+    if (actHeld('lookDown')) pitch.current -= keyStep * invY;
 
     // ── Assisted targeting: hard lock-on + tap-to-target ──
     // Point-and-tap for people who can't flick-aim. A Target button locks the nearest
@@ -1647,6 +1724,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       if (manualLook) lockTarget.current = null;
 
       // Tap-to-target: lock the enemy nearest the tapped point (generous radius).
+      if (cs?.access.targetLock === false) { ct.lockCycle = false; ct.tapAimX = null; ct.tapAimY = null; lockTarget.current = null; }
       if (ct.tapAimX != null && ct.tapAimY != null) {
         let best: number | null = null, bestD2 = 90 * 90; // ~90px acquisition radius
         for (const c of lockable()) {
@@ -1703,7 +1781,10 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
     // You still choose who by pointing roughly at them; the assist does the fine
     // targeting. Desktop keeps raw mouse aim (skill decides the hit). Skipped while a
     // hard lock is active — the lock already owns the aim.
-    if (lowSpec && lockTarget.current == null && (ct.fire || adsCur.current > 0.35)) {
+    // Settings → Accessibility: on touch only (default), everywhere, or off.
+    const assist = cs?.access.aimAssist ?? 'touch';
+    const assistOn = assist === 'always' || (assist === 'touch' && lowSpec);
+    if (assistOn && lockTarget.current == null && (ct.fire || actHeld('fire') || mouseBtn.current.has(0) || adsCur.current > 0.35)) {
       const eyeApprox = THREE.MathUtils.lerp(EYE_STAND, EYE_CROUCH, crouchCur.current);
       const px = pos.current.x, pz = pos.current.z;
       let bestDiff = 0.3; // ~17° acquisition cone
@@ -1737,8 +1818,8 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
     pitch.current = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, pitch.current));
 
     // ── Movement (camera-relative on the ground plane; keyboard + touch stick) ──
-    const mf = Math.max(-1, Math.min(1, (held('KeyW') ? 1 : 0) - (held('KeyS') ? 1 : 0) + ct.moveY));
-    const ms = Math.max(-1, Math.min(1, (held('KeyD') ? 1 : 0) - (held('KeyA') ? 1 : 0) + ct.moveX));
+    const mf = Math.max(-1, Math.min(1, (actHeld('moveForward') ? 1 : 0) - (actHeld('moveBack') ? 1 : 0) + ct.moveY));
+    const ms = Math.max(-1, Math.min(1, (actHeld('moveRight') ? 1 : 0) - (actHeld('moveLeft') ? 1 : 0) + ct.moveX));
     const moving = Math.abs(mf) > 0.02 || Math.abs(ms) > 0.02;
     let speed = WALK * (1 - 0.45 * adsCur.current) * (1 - (1 - CROUCH_MOVE) * crouchCur.current);
     if (adsCur.current > 0.5) speed = Math.min(speed, WALK * ADS_MOVE);
@@ -1924,7 +2005,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
     if (wantToggle.current || ct.toggle) { sim.toggleAttachment(wantToggle.current ?? ct.toggle!); wantToggle.current = null; ct.toggle = null; }
     cam.getWorldDirection(fwd);
     const input: FpsInput = {
-      firing: held('Space') || mouseBtn.current.has(0) || ct.fire,
+      firing: actHeld('fire') || mouseBtn.current.has(0) || ct.fire,
       wantReload: wantReload.current,
       origin: [cam.position.x, cam.position.y, cam.position.z] as Vec3,
       dir: [fwd.x, fwd.y, fwd.z] as Vec3,
@@ -2093,7 +2174,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       const toggle = !!settingsRef?.current.access.toggleInteract;
       if (toggle && interactLatch.current && latchTarget.current !== null && FIELD.target?.id !== latchTarget.current) interactLatch.current = false;
       latchTarget.current = interactLatch.current ? (FIELD.target?.id ?? null) : null;
-      const pressing = toggle ? interactLatch.current || ct.interact : held('KeyE') || ct.interact;
+      const pressing = toggle ? interactLatch.current || ct.interact : actHeld('interact') || ct.interact;
       const interact = sim.playerAlive && completeAt.current < 0 && pressing;
       const fevs = FIELD.update(dt, view, interact, sim, losClear);
       if (toggle && fevs.length) interactLatch.current = false; // done (or refused): release the latch
@@ -2139,7 +2220,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
     // Ash in the air, spawned around the player so it follows them through an
     // endless run without needing a world-sized pool. Dropped on `minimal` with
     // the rest of the atmosphere — it is the definition of a nice-to-have.
-    if (!minimal) impactFx.ambient(dt, [pos.current.x, pos.current.y, pos.current.z]);
+    if (plan.particles) impactFx.ambient(dt, [pos.current.x, pos.current.y, pos.current.z]);
     impactFx.update(dt);
     stepDroppedWeapon(dt);
     stepEnemyDrops(dt);
@@ -2357,7 +2438,8 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
 
     // ── off-screen threat arrows for enemies telegraphing / firing at you ──
     let ai = 0;
-    for (const e of snap.enemies) {
+    const uiNow = settingsRef?.current.interface;
+    for (const e of uiNow?.threatArrows === false ? [] : snap.enemies) {
       if (ai >= hud.current.arrows.length) break;
       if (!e.alive || (e.ai !== 'aim' && e.ai !== 'fire')) continue;
       arrowWp.set(e.x, 1.4, e.z);
@@ -2380,7 +2462,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       const oc = OBJECTIVES[objective.current];
       const el = hud.current.objArrow;
       if (el) {
-        if (oc && completeAt.current < 0) {
+        if (oc && completeAt.current < 0 && uiNow?.objectiveArrow !== false) {
           arrowWp.set(oc.pos[0], 1.4, oc.pos[1]);
           arrowCs.copy(arrowWp).applyMatrix4(cam.matrixWorldInverse);
           arrowWp.project(cam);
@@ -3112,17 +3194,22 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
 
   function flashHitmarker(killed: boolean, crit = false) {
     const el = hud.current.hit;
-    if (!el) return;
+    if (!el || settingsRef?.current.interface.hitMarkers === false) return;
     el.style.opacity = '1';
     // A kill always reads red; a non-lethal crit pops gold + a touch bigger so the
     // random burst of damage is legible in the moment.
-    el.style.color = killed ? '#ff4d3d' : crit ? '#ffc72a' : '#ffffff';
+    el.style.color = killed ? palette().hostile : crit ? '#ffc72a' : '#ffffff';
     el.style.transform = `translate(-50%,-50%) scale(${killed ? 1.5 : crit ? 1.3 : 1})`;
     window.setTimeout(() => { if (el) el.style.opacity = '0'; }, killed ? 220 : crit ? 180 : 130);
   }
 
+  /** The colour set in force (Settings → Accessibility → colour palette). */
+  function palette() { return PALETTES[settingsRef?.current.access.palette ?? 'standard']; }
+
   function updateHud(snap: ReturnType<FpsSim['snapshot']>) {
     const h = hud.current;
+    const ui = settingsRef?.current.interface;
+    const binds = bindsNow().binds;
     if (h.ammo) {
       h.ammo.textContent = Number.isFinite(snap.reserve) ? `${snap.ammo} / ${snap.reserve}` : `${snap.ammo} / ${snap.magazine}`;
       h.ammo.style.color = snap.ammo === 0 ? '#ff4d3d' : snap.ammo <= 5 ? '#ffb454' : '#e9edf2';
@@ -3156,7 +3243,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       const on = new Set(snap.attachments);
       h.attachments.innerHTML = ATTACH_CHIPS.map((c) => {
         const active = on.has(c.id);
-        return `<span style="font-size:10px;letter-spacing:1px;padding:3px 7px;border-radius:4px;border:1px solid ${active ? c.color : '#2a3440'};background:${active ? c.color + '22' : 'transparent'};color:${active ? c.color : '#7d8a96'}">${c.label}<span style="opacity:.55"> ${c.key}</span></span>`;
+        return `<span style="font-size:10px;letter-spacing:1px;padding:3px 7px;border-radius:4px;border:1px solid ${active ? c.color : '#2a3440'};background:${active ? c.color + '22' : 'transparent'};color:${active ? c.color : '#7d8a96'}">${c.label}<span style="opacity:.55"> ${bindLabel(binds, c.id as Action)}</span></span>`;
       }).join('');
     }
     // Mobile kit chips carry no on/off state in their static style, so light them
@@ -3179,20 +3266,36 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
     }
     if (h.lock) h.lock.style.opacity = locked.current ? '0' : '1';
     // crosshair gap grows with spread + recoil
+    // (Settings → Interface: size scales gap and tick, a static crosshair ignores spread)
     const spread = sim.spreadFor(adsCur.current, false, crouchCur.current > 0.5);
-    const gap = 5 + spread * 620 + Math.abs(recoilP.current) * 340;
+    const chSize = ui?.crosshair.size ?? 1;
+    const gap = ((ui?.crosshair.dynamic ?? true) ? 5 + spread * 620 + Math.abs(recoilP.current) * 340 : 5) * chSize;
+    const len = 8 * chSize;
     const { t, b, l, r } = h.ch;
-    if (t) t.style.transform = `translate(-50%, ${-gap - 8}px)`;
+    if (t) t.style.transform = `translate(-50%, ${-gap - len}px)`;
     if (b) b.style.transform = `translate(-50%, ${gap}px)`;
-    if (l) l.style.transform = `translate(${-gap - 8}px, -50%)`;
+    if (l) l.style.transform = `translate(${-gap - len}px, -50%)`;
     if (r) r.style.transform = `translate(${gap}px, -50%)`;
+    if (h.chRing) { const d = Math.round((gap + len * 0.5) * 2); h.chRing.style.width = `${d}px`; h.chRing.style.height = `${d}px`; }
 
     paintRefills();   // no-ops unless the count moved
+    // The score follows the fight: calm, alerted, under fire, boss.
+    {
+      let lvl: 0 | 1 | 2 | 3 = 0;
+      for (const e of snap.enemies) {
+        if (!e.alive || !e.active) continue;
+        if (e.boss && e.ai !== 'hidden') { lvl = 3; break; }
+        if (e.ai === 'aim' || e.ai === 'fire') lvl = 2;
+        else if (e.ai !== 'hidden' && lvl < 1) lvl = 1;
+      }
+      audio.setMusicIntensity(lvl);
+    }
     // health bar + damage vignette (red flash on hit, and a base tint when low)
     if (h.healthFill) {
       const frac = Math.max(0, snap.playerHp / snap.maxPlayerHp);
       h.healthFill.style.width = `${frac * 100}%`;
-      h.healthFill.style.background = frac > 0.5 ? '#5fd08a' : frac > 0.25 ? '#ffb454' : '#ff4d3d';
+      const pal = palette();
+      h.healthFill.style.background = frac > 0.5 ? pal.healthHi : frac > 0.25 ? '#ffb454' : pal.healthLo;
     }
     if (h.vignette) {
       const lowHp = 1 - Math.min(1, snap.playerHp / 35);
@@ -3229,7 +3332,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
             const inside = Math.hypot(pos.current.x - z.pos[0], pos.current.z - z.pos[1]) <= z.radius;
             h.objText.textContent = `${z.mode === 'handover' ? 'HANDOVER' : 'EXTRACTION'}  ·  ${Math.ceil(z.secs - FIELD.exfilProgress)}s  ·  ${inside ? 'HOLD THE ZONE' : 'GET BACK IN THE ZONE'}`;
           } else {
-            h.objText.textContent = `OBJECTIVE  ·  ${objN.text}  ·  ${dm}m${dm <= (z?.radius ?? 3) ? '  ·  E TO CALL IT' : ''}`;
+            h.objText.textContent = `OBJECTIVE  ·  ${objN.text}  ·  ${dm}m${dm <= (z?.radius ?? 3) ? `  ·  ${bindLabel(binds, 'interact')} TO CALL IT` : ''}`;
           }
         } else if (objN.kind === 'defend') {
           // a hold objective counts down the seconds you still owe on the point
@@ -3258,14 +3361,21 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
         const extra = t.kind === 'ammo_crate' || t.kind === 'pouch' ? ` · ${t.rounds} RDS` : t.kind === 'med_case' ? ` · ${t.medkits} LEFT` : t.kind === 'weapon' ? ` · ${t.mag}/${t.reserve}` : '';
         const p = t.holdSecs > 0 ? Math.round(Math.min(1, FIELD.hold / t.holdSecs) * 20) * 5 : 0;
         const label = t.kind === 'weapon' ? getGun(t.gun!).name.toUpperCase() : t.label;
-        prompt = `<div style="font-size:15px;letter-spacing:2px;color:#e9edf2"><span style="display:inline-block;min-width:22px;padding:1px 6px;margin-right:8px;border:1px solid #e9edf2;border-radius:4px;font-weight:800">E</span>${verb ? verb + ' ' : ''}${label}${extra}</div><div style="margin-top:3px;font-size:11px;letter-spacing:2px;color:#8a97a3">I · INSPECT</div>`
-          + `<div style="margin:6px auto 0;width:180px;height:4px;background:#ffffff22;border-radius:2px;overflow:hidden"><div style="height:100%;width:${p}%;background:#5fe0a8"></div></div>`;
+        // Settings: the bound key, optional secondary hints, and a high-contrast panel.
+        const hc = !!settingsRef?.current.access.highContrastPrompts;
+        const cap = hc
+          ? `<span style="display:inline-block;min-width:26px;padding:2px 8px;margin-right:10px;background:#fff;color:#000;border-radius:4px;font-weight:900">${bindLabel(binds, 'interact')}</span>`
+          : `<span style="display:inline-block;min-width:22px;padding:1px 6px;margin-right:8px;border:1px solid #e9edf2;border-radius:4px;font-weight:800">${bindLabel(binds, 'interact')}</span>`;
+        const hint = ui?.promptHints === false ? '' : `<div style="margin-top:3px;font-size:${hc ? 13 : 11}px;letter-spacing:2px;color:${hc ? '#fff' : '#8a97a3'}">${bindLabel(binds, 'inspect')} · INSPECT</div>`;
+        const body = `<div style="font-size:${hc ? 17 : 15}px;letter-spacing:2px;color:#fff;font-weight:${hc ? 800 : 400}">${cap}${verb ? verb + ' ' : ''}${label}${extra}</div>${hint}`
+          + `<div style="margin:6px auto 0;width:180px;height:${hc ? 6 : 4}px;background:${hc ? '#555' : '#ffffff22'};border-radius:2px;overflow:hidden"><div style="height:100%;width:${p}%;background:${palette().success}"></div></div>`;
+        prompt = hc ? `<div data-hc="1" style="display:inline-block;background:#000;border:2px solid #fff;border-radius:8px;padding:8px 14px;text-shadow:none">${body}</div>` : body;
       }
       const ft = fieldToast.current;
       if (performance.now() < ft.until) prompt += `<div style="margin-top:8px;font-size:13px;letter-spacing:2px;color:${ft.color}">${ft.text}</div>`;
       if (snap.healing) prompt += `<div style="margin-top:6px;font-size:12px;letter-spacing:2px;color:#5fe0a8">DRESSING THE WOUND</div>`;
       const inv: string[] = [];
-      if (Number.isFinite(snap.reserve)) inv.push(`<span style="color:#9fb4c8">DRESSINGS</span> ${snap.medkits} <span style="opacity:.55">[H]</span>`);
+      if (Number.isFinite(snap.reserve)) inv.push(`<span style="color:#9fb4c8">DRESSINGS</span> ${snap.medkits} <span style="opacity:.55">[${bindLabel(binds, 'heal')}]</span>`);
       if (FIELD.cases.length) {
         const c = FIELD.carried.length;
         inv.push(`<span style="color:#9fb4c8">CARGO</span> ${c}/${CARRY_MAX}${c ? ` · ${FIELD.carriedUnits} ${FIELD.spec.cargoLabel ?? ''}` : ''}${c ? ` · <span style="color:#ffb454">-${Math.round((1 - FIELD.speedMult) * 100)}% SPEED</span>` : ''}`);
@@ -3282,7 +3392,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
         if (z && FIELD.exfilPhase === 'counting') {
           h.fieldExfil.style.opacity = '1';
           const inside = Math.hypot(pos.current.x - z.pos[0], pos.current.z - z.pos[1]) <= z.radius;
-          h.fieldExfil.style.color = inside ? '#5fe0a8' : '#ff6a5a';
+          h.fieldExfil.style.color = inside ? palette().success : palette().hostile;
           h.fieldExfil.textContent = `${Math.max(0, Math.ceil(z.secs - FIELD.exfilProgress))}`;
         } else h.fieldExfil.style.opacity = '0';
       }
@@ -3439,7 +3549,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
   // Rotate the red damage indicator to point at where the shot came from.
   function showHitDir(fromDir: Vec3) {
     const el = hud.current.hitDir;
-    if (!el) return;
+    if (!el || settingsRef?.current.interface.damageDirection === false) return;
     const cy = Math.cos(yaw.current), sy = Math.sin(yaw.current);
     const f = fromDir[0] * -sy + fromDir[2] * -cy; // forward component
     const rr = fromDir[0] * cy + fromDir[2] * -sy; // right component
@@ -3460,7 +3570,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       <hemisphereLight args={theme.hemi} />
       <directionalLight
         ref={sunRef}
-        position={LEVEL ? [levelCx + 22, 34, levelCz + 26] : [9, 16, 10]} intensity={theme.sun.intensity} color={theme.sun.color} castShadow={!minimal}
+        position={LEVEL ? [levelCx + 22, 34, levelCz + 26] : [9, 16, 10]} intensity={theme.sun.intensity} color={theme.sun.color} castShadow={plan.shadows}
         shadow-mapSize={[lightFx ? 1024 : 2048, lightFx ? 1024 : 2048]}
         shadow-camera-left={-(LEVEL?.shadowHalf ?? 22)} shadow-camera-right={LEVEL?.shadowHalf ?? 22}
         shadow-camera-top={LEVEL?.shadowHalf ?? 22} shadow-camera-bottom={-(LEVEL?.shadowHalf ?? 22)}
@@ -3547,7 +3657,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
           now — the footprints went into COLLIDERS above. Dropped on `minimal`
           (struggling desktop/laptop) to cut draw calls; the colliders stay, so on
           that tier alone the clutter is felt rather than seen. */}
-      {!minimal && <SetDressing props={DRESSING} mats={propMaterials} />}
+      {plan.dressing && <SetDressing props={DRESSING} mats={propMaterials} />}
 
       {/* the op's physical objects: supplies, cargo, charges, the extraction zone */}
       <FieldProps field={FIELD} lowSpec={lowSpec || minimal} guns={gunProtos} calm={settingsRef?.current.access.reduceFlashes} />
@@ -3675,7 +3785,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
           top of the one it needed. That is pure fill cost, and fill is precisely what
           a struggling phone has least of. The chromatic edge and vignette are lens
           flavour; a playable frame rate is not. */}
-      {minimal ? null : (lightFx || endless) ? (
+      {plan.post === 'off' ? null : (plan.post === 'light' || endless) ? (
         <EffectComposer multisampling={0}>
           <ChromaticAberration offset={caOffset} radialModulation modulationOffset={0.35} blendFunction={BlendFunction.NORMAL} />
           <Vignette darkness={0.5} offset={0.3} blendFunction={BlendFunction.NORMAL} />
@@ -3979,7 +4089,7 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
     ? Math.min(resumeLevel, CAMPAIGN.length - 1) : -1;
   const hud = useRef<Hud>({
     root: null, ammo: null, fireMode: null, weapon: null, loadout: null, attachments: null, nvgTint: null, scope: null, reload: null, reloadBar: null, reloadHint: null, hit: null,
-    ch: { t: null, b: null, l: null, r: null }, lock: null, kills: null,
+    ch: { t: null, b: null, l: null, r: null }, chDot: null, chRing: null, lock: null, kills: null,
     healthFill: null, refills: null, vignette: null, hitDir: null, down: null, arrows: [],
     field: null, fieldPrompt: null, fieldExfil: null, objText: null, survEnd: null, survEndText: null, waveHud: null, waveLabel: null, waveRooms: null, waveDone: null, waveDoneText: null, waveDoneSub: null, objArrow: null, briefing: null, complete: null, perf: null,
     lockReticle: null,
@@ -4204,7 +4314,8 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
   // unlocked. Depends on the overlay states so it always sees the current one.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.code === 'KeyM' && !contractRef.current) { e.preventDefault(); setSelect(!menuOpenRef.current); }
+      const ops = settingsRef.current.controls.binds.opsMenu;
+      if ((e.code === ops[0] || e.code === ops[1]) && !contractRef.current) { e.preventDefault(); setSelect(!menuOpenRef.current); }
       else if (e.code === 'Escape') {
         e.preventDefault();
         if (selectOpen) setSelect(false);
@@ -4248,6 +4359,24 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
     document.addEventListener('visibilitychange', apply);
     return () => document.removeEventListener('visibilitychange', apply);
   }, [audio, settings.muteInBackground]);
+  // Crosshair (Settings → Interface): style, colour, size and opacity. The frame loop
+  // still moves the ticks for spread; this sets everything else.
+  useEffect(() => {
+    const h = hud.current, c = settings.interface.crosshair;
+    const showTicks = c.style === 'cross' || c.style === 'cross-dot';
+    const L = Math.round(8 * c.size), W = Math.max(2, Math.round(2 * c.size));
+    [h.ch.t, h.ch.b, h.ch.l, h.ch.r].forEach((el, i) => {
+      if (!el) return;
+      const vertical = i < 2;
+      Object.assign(el.style, { display: showTicks ? 'block' : 'none', background: c.color, opacity: String(c.opacity), width: `${vertical ? W : L}px`, height: `${vertical ? L : W}px` });
+    });
+    if (h.chDot) {
+      const d = c.style === 'cross' ? 2 : Math.max(3, Math.round(4 * c.size));
+      Object.assign(h.chDot.style, { width: `${d}px`, height: `${d}px`, borderRadius: c.style === 'cross' ? '0' : '50%', background: c.color, opacity: String(c.opacity) });
+    }
+    if (h.chRing) Object.assign(h.chRing.style, { display: c.style === 'circle' ? 'block' : 'none', borderColor: c.color, opacity: String(c.opacity) });
+  }, [settings.interface.crosshair]);
+
   // Subtitles: size, backing and speaker colours (on/off is read as each line plays).
   useEffect(() => {
     const h = hud.current;
@@ -4307,6 +4436,9 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
   const minimal = autoMinimal;
   // MEDIUM keeps shadows and set dressing but drops the heavy postprocessing passes.
   const lightFx = isTouch || autoMinimal || tier === 'medium';
+  // What actually renders: the tier's defaults with the player's overrides on top.
+  const plan = useMemo(() => renderPlan(tier, settings.graphics, isTouch), [tier, settings.graphics, isTouch]);
+  const fpsCap = settings.graphics.fpsCap;
 
   // Lock the PAGE to the game while the scene is mounted (restored on unmount so
   // other pages still scroll). Without this, iOS Safari lets a stray double-tap /
@@ -4334,7 +4466,10 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
   const [perfOn, setPerfOn] = useState(() =>
     typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('perf'));
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'p' || e.key === 'P') setPerfOn((v) => !v); };
+    const onKey = (e: KeyboardEvent) => {
+      const b = settingsRef.current.controls.binds.perf;
+      if (e.code === b[0] || e.code === b[1]) setPerfOn((v) => !v);
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
@@ -4536,6 +4671,10 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
   };
 
   const tick = 'position:absolute;left:50%;top:50%;background:#e9edf2;box-shadow:0 0 2px #000;';
+  // Settings → Interface → HUD scale, applied to each corner cluster from its corner.
+  const hudK = settings.interface.hudScale;
+  const hz = (origin: string): React.CSSProperties => (hudK === 1 ? {} : { transform: `scale(${hudK})`, transformOrigin: origin });
+  const pal = PALETTES[settings.access.palette];
   return (
     <div ref={(r) => { hud.current.root = r; }} style={{ position: 'fixed', inset: 0, background: '#000', cursor: 'none', touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none', overflow: 'hidden' }}>
       {/* The RENDERER owns the filmic curve (R3F's ACES default). The composer
@@ -4553,21 +4692,24 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
         // AdaptiveDpr already trimming, so leaving it capped at 1.5 was leaving the
         // largest single lever untouched on exactly the devices that needed it.
         // Healthy phones keep 1.5 and capable desktops keep 2, unchanged.
-        dpr={minimal ? [1, 1] : (isTouch || tier === 'medium' ? [1, 1.5] : [1, 2])}
+        dpr={[plan.dprMin, plan.dprMax]}
+        frameloop={fpsCap > 0 ? 'never' : 'always'}
         camera={{ position: [mission.start[0], 1.6, mission.start[1]], fov: 55, near: 0.01, far: 320 }}
       >
         {/* Auto quality: measured frame rate steps the tier down one level at a time. */}
         {quality === 'auto' && autoLevel < 2 && <AutoQualityProbe level={autoLevel} onStep={stepDown} />}
         <AdaptiveDpr />
-        {perfOn && <PerfHud hud={hud} />}
+        {(perfOn || settings.interface.perfOverlay) && <PerfHud hud={hud} />}
+        {fpsCap > 0 && <FrameCap fps={fpsCap} />}
+        <PerfRecorder tier={tier} plan={plan} cap={fpsCap} />
         <Suspense fallback={null}>
-          <FpsWorld key={`${mode}-${missionIndex}-${runNonce}`} hud={hud} controls={controls} audio={audio} lowSpec={isTouch} lightFx={lightFx} minimal={minimal} mission={mission} onComplete={handleComplete} onDeath={handleDeath} endOnDeath={mode === 'contract'} pausedRef={menuOpenRef} gateRef={gateRef} accountRank={accountRank} accountXp={accountXp} equippedGun={equippedGun} equippedAmmo={equippedAmmo} equippedMods={equippedMods} fieldKit={fieldKit} endlessOpts={mode === 'endless' ? endless : undefined} coop={mode === 'endless' ? coop : undefined} onProtocol={mode === 'contract' ? (evs) => contractRef.current?.onProtocol?.(evs) : undefined} onInspect={openInspect} inspectingRef={inspectingRef} settingsRef={settingsRef} />
+          <FpsWorld key={`${mode}-${missionIndex}-${runNonce}`} hud={hud} controls={controls} audio={audio} lowSpec={isTouch} lightFx={lightFx} minimal={minimal} mission={mission} onComplete={handleComplete} onDeath={handleDeath} endOnDeath={mode === 'contract'} pausedRef={menuOpenRef} gateRef={gateRef} accountRank={accountRank} accountXp={accountXp} equippedGun={equippedGun} equippedAmmo={equippedAmmo} equippedMods={equippedMods} fieldKit={fieldKit} endlessOpts={mode === 'endless' ? endless : undefined} coop={mode === 'endless' ? coop : undefined} onProtocol={mode === 'contract' ? (evs) => contractRef.current?.onProtocol?.(evs) : undefined} onInspect={openInspect} inspectingRef={inspectingRef} settingsRef={settingsRef} plan={plan} />
         </Suspense>
       </Canvas>
       {inspecting && <div style={{ cursor: 'auto' }}><ItemInspector item={inspecting} onClose={closeInspect} inFight /></div>}
 
       {/* C3 perf meter (?perf=1 or P) — top-left, out of the way of the HUD */}
-      <div ref={(r) => { hud.current.perf = r; }} style={{ position: 'absolute', left: 12, top: 8, zIndex: 60, display: perfOn ? 'block' : 'none', fontFamily: 'monospace', fontSize: 12, letterSpacing: 0.5, color: '#5fe0a8', background: 'rgba(0,0,0,.5)', padding: '3px 8px', borderRadius: 5, pointerEvents: 'none' }}>— FPS</div>
+      <div ref={(r) => { hud.current.perf = r; }} style={{ position: 'absolute', left: 12, top: 8, zIndex: 60, display: perfOn || settings.interface.perfOverlay ? 'block' : 'none', fontFamily: 'monospace', fontSize: 12, letterSpacing: 0.5, color: '#5fe0a8', background: 'rgba(0,0,0,.5)', padding: '3px 8px', borderRadius: 5, pointerEvents: 'none' }}>— FPS</div>
 
       {/* Lock-on reticle — a gold bracket the frame loop parks over the locked enemy */}
       <div ref={(r) => { hud.current.lockReticle = r; }}
@@ -4585,7 +4727,8 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
         <div ref={(r) => { hud.current.ch.b = r; }} style={{ ...s(tick), width: 2, height: 8, transform: 'translate(-50%,8px)' }} />
         <div ref={(r) => { hud.current.ch.l = r; }} style={{ ...s(tick), width: 8, height: 2, transform: 'translate(-16px,-50%)' }} />
         <div ref={(r) => { hud.current.ch.r = r; }} style={{ ...s(tick), width: 8, height: 2, transform: 'translate(8px,-50%)' }} />
-        <div style={{ ...s(tick), width: 2, height: 2, transform: 'translate(-50%,-50%)' }} />
+        <div ref={(r) => { hud.current.chDot = r; }} style={{ ...s(tick), width: 2, height: 2, transform: 'translate(-50%,-50%)' }} />
+        <div ref={(r) => { hud.current.chRing = r; }} style={{ position: 'absolute', left: '50%', top: '50%', width: 26, height: 26, transform: 'translate(-50%,-50%)', border: '2px solid #e9edf2', borderRadius: '50%', boxShadow: '0 0 2px #000', display: 'none' }} />
 
         {/* hitmarker */}
         <div ref={(r) => { hud.current.hit = r; }} style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', fontSize: 26, fontWeight: 700, opacity: 0, transition: 'opacity .08s', textShadow: '0 0 3px #000' }}>✕</div>
@@ -4593,7 +4736,7 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
         {/* ammo + weapon + reload — on touch it sits top-right and, crucially, is
             offset LEFT of the right action-button column (≤64px from the edge) so the
             two can never overlap regardless of screen height. */}
-        <div style={{ position: 'absolute', right: isTouch ? 84 : 26, textAlign: 'right', ...(isTouch ? { top: 10 } : { bottom: 22 }) }}>
+        <div style={{ position: 'absolute', right: isTouch ? 84 : 26, textAlign: 'right', ...(isTouch ? { top: 10 } : { bottom: 22 * hudK }), ...hz(isTouch ? 'top right' : 'bottom right') }}>
           <div ref={(r) => { hud.current.weapon = r; }} style={{ fontSize: 13, letterSpacing: 2, fontWeight: 700, color: '#e9edf2', marginBottom: 1 }}>ASSAULT RIFLE</div>
           <div ref={(r) => { hud.current.loadout = r; }} style={{ fontSize: 10, letterSpacing: 2, color: '#6f7d8c', marginBottom: 3 }}>1 · 2</div>
           <div ref={(r) => { hud.current.fireMode = r; }} style={{ fontSize: 12, letterSpacing: 3, fontWeight: 700, color: '#8fb8d0', marginBottom: 2 }}>AUTO</div>
@@ -4604,18 +4747,18 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
               <div ref={(r) => { hud.current.reloadBar = r; }} style={{ width: '0%', height: '100%', background: '#ffb454' }} />
             </div>
           </div>
-          <div ref={(r) => { hud.current.reloadHint = r; }} style={{ marginTop: 4, fontSize: 11, letterSpacing: 1, color: '#6f7d8c' }}>{isTouch ? 'TAP TO RELOAD' : 'PRESS [R] TO RELOAD'}</div>
+          <div ref={(r) => { hud.current.reloadHint = r; }} style={{ marginTop: 4, fontSize: 11, letterSpacing: 1, color: '#6f7d8c' }}>{isTouch ? 'TAP TO RELOAD' : `PRESS [${bindLabel(settings.controls.binds, 'reload')}] TO RELOAD`}</div>
         </div>
 
         {/* attachment strip (toggleable kit) */}
-        <div ref={(r) => { hud.current.attachments = r; }} style={{ position: 'absolute', right: 26, bottom: 150, display: isTouch ? 'none' : 'flex', gap: 6, justifyContent: 'flex-end' }} />
+        <div ref={(r) => { hud.current.attachments = r; }} style={{ position: 'absolute', right: 26, bottom: 150 * hudK, display: isTouch ? 'none' : 'flex', gap: 6, justifyContent: 'flex-end', ...hz('bottom right') }} />
 
         {/* kills — hidden on touch (the bottom-left is the movement thumb there) */}
-        <div ref={(r) => { hud.current.kills = r; }} style={{ position: 'absolute', left: 26, bottom: 22, fontSize: 13, color: '#9fb4c8', display: isTouch ? 'none' : 'block' }}>KILLS 0   ·   HS 0</div>
+        <div ref={(r) => { hud.current.kills = r; }} style={{ position: 'absolute', left: 26, bottom: 22 * hudK, fontSize: 13, color: '#9fb4c8', display: isTouch ? 'none' : 'block', ...hz('bottom left') }}>KILLS 0   ·   HS 0</div>
 
         {/* rank + XP toward the next 1000 (the earn loop). On touch it lives TOP-left,
             clear of the movement thumb (it used to sit under the joystick). */}
-        <div style={{ position: 'absolute', left: isTouch ? 14 : 26, width: isTouch ? 150 : 210, ...(isTouch ? { top: 58 } : { bottom: 48 }) }}>
+        <div style={{ position: 'absolute', left: isTouch ? 14 : 26, width: isTouch ? 150 : 210, ...(isTouch ? { top: 58 * hudK } : { bottom: 48 * hudK }), ...hz(isTouch ? 'top left' : 'bottom left') }}>
           <div ref={(r) => { hud.current.rankText = r; }} style={{ fontSize: 12, letterSpacing: 1.5, fontWeight: 700, color: '#cd7f32' }}>BRONZE · 0 / 1000 XP</div>
           <div style={{ width: '100%', height: 4, background: '#2b3138', marginTop: 4, borderRadius: 2 }}>
             <div ref={(r) => { hud.current.xpBar = r; }} style={{ width: '0%', height: '100%', background: '#cd7f32', borderRadius: 2 }} />
@@ -4643,14 +4786,14 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
 
         {/* health bar — the vital stat. On touch it takes the prime top-left slot
             (it used to sit over the movement thumb); desktop keeps it bottom-left. */}
-        <div style={{ position: 'absolute', left: isTouch ? 14 : 26, width: isTouch ? 150 : 220, height: 9, background: 'rgba(0,0,0,.55)', border: '1px solid rgba(255,255,255,.15)', ...(isTouch ? { top: 40 } : { bottom: 46 }) }}>
+        <div style={{ position: 'absolute', left: isTouch ? 14 : 26, width: isTouch ? 150 : 220, height: 9, background: 'rgba(0,0,0,.55)', border: '1px solid rgba(255,255,255,.15)', ...(isTouch ? { top: 40 * hudK } : { bottom: 46 * hudK }), ...hz(isTouch ? 'top left' : 'bottom left') }}>
           <div ref={(r) => { hud.current.healthFill = r; }} style={{ width: '100%', height: '100%', background: '#5fd08a', transition: 'width .12s, background .2s' }} />
         </div>
         {/* second winds left in this attempt — a lit pip each. Sits just under the
             health bar, because it IS a health stat: it is how many more times this
             bar can come back. */}
         <div ref={(r) => { hud.current.refills = r; }}
-          style={{ position: 'absolute', left: isTouch ? 14 : 26, fontSize: 11, letterSpacing: 3, lineHeight: 1, ...(isTouch ? { top: 54 } : { bottom: 30 }) }} />
+          style={{ position: 'absolute', left: isTouch ? 14 : 26, fontSize: 11, letterSpacing: 3, lineHeight: 1, ...(isTouch ? { top: 54 * hudK } : { bottom: 30 * hudK }), ...hz(isTouch ? 'top left' : 'bottom left') }} />
 
         {/* damage vignette (red edges on hit / when low) */}
         <div ref={(r) => { hud.current.vignette = r; }} style={{ position: 'absolute', inset: 0, opacity: 0, pointerEvents: 'none', boxShadow: 'inset 0 0 150px 44px rgba(200,20,10,.85)', transition: 'opacity .09s' }} />
@@ -4662,25 +4805,25 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
         <div ref={(r) => { hud.current.scope = r; }} style={{ position: 'absolute', inset: 0, opacity: 0, pointerEvents: 'none', boxShadow: 'inset 0 0 0 2000px rgba(0,0,0,0)', background: 'radial-gradient(circle at center, transparent 30%, rgba(0,0,0,.55) 33%, #000 40%)' }} />
 
         {/* directional damage indicator */}
-        <div ref={(r) => { hud.current.hitDir = r; }} style={{ position: 'absolute', left: '50%', top: '50%', width: 64, height: 300, marginLeft: -32, marginTop: -150, opacity: 0, pointerEvents: 'none', transformOrigin: '50% 50%', background: 'linear-gradient(to top, transparent 62%, rgba(255,64,44,.9) 100%)', transition: 'opacity .1s' }} />
+        <div ref={(r) => { hud.current.hitDir = r; }} style={{ position: 'absolute', left: '50%', top: '50%', width: 64, height: 300, marginLeft: -32, marginTop: -150, opacity: 0, pointerEvents: 'none', transformOrigin: '50% 50%', background: `linear-gradient(to top, transparent 62%, ${pal.hostile} 100%)`, transition: 'opacity .1s' }} />
 
         {/* off-screen threat arrows */}
         {[0, 1, 2, 3].map((i) => (
-          <div key={i} ref={(r) => { hud.current.arrows[i] = r; }} style={{ position: 'absolute', opacity: 0, color: '#ff5a3a', fontSize: 24, pointerEvents: 'none', textShadow: '0 0 5px #000', transition: 'opacity .12s' }}>▲</div>
+          <div key={i} ref={(r) => { hud.current.arrows[i] = r; }} style={{ position: 'absolute', opacity: 0, color: pal.hostile, fontSize: 24, pointerEvents: 'none', textShadow: '0 0 5px #000', transition: 'opacity .12s' }}>▲</div>
         ))}
 
         {/* DOWN */}
         <div ref={(r) => { hud.current.down = r; }} style={{ position: 'absolute', inset: 0, opacity: 0, pointerEvents: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(24,0,0,.5)', color: '#ff5a47', fontSize: 46, fontWeight: 800, letterSpacing: 8 }}>DOWN</div>
 
         {/* objective banner (top-centre) */}
-        <div ref={(r) => { hud.current.objText = r; }} style={{ position: 'absolute', left: '50%', top: 66, transform: 'translateX(-50%)', fontSize: 14, letterSpacing: 2, color: '#37d0e0', textShadow: '0 0 6px #000', opacity: 0, whiteSpace: 'nowrap' }}>OBJECTIVE</div>
+        <div ref={(r) => { hud.current.objText = r; }} style={{ position: 'absolute', left: '50%', top: 66, transform: `translateX(-50%) scale(${hudK})`, transformOrigin: 'top center', fontSize: 14, letterSpacing: 2, color: pal.objective, textShadow: '0 0 6px #000', opacity: 0, whiteSpace: 'nowrap' }}>OBJECTIVE</div>
         {/* field: the E prompt with its hold bar, what you picked up, what you carry */}
-        <div ref={(r) => { hud.current.fieldPrompt = r; }} data-testid="field-prompt" style={{ position: 'absolute', left: '50%', top: '58%', transform: 'translateX(-50%)', textAlign: 'center', pointerEvents: 'none', textShadow: '0 0 6px #000' }} />
-        <div ref={(r) => { hud.current.field = r; }} data-testid="field-inventory" style={{ position: 'absolute', left: 18, bottom: 128, fontSize: 12, letterSpacing: 1.5, color: '#cfd8df', textShadow: '0 0 6px #000', pointerEvents: 'none', lineHeight: 1.7 }} />
-        <div ref={(r) => { hud.current.fieldExfil = r; }} data-testid="field-exfil" style={{ position: 'absolute', left: '50%', top: 96, transform: 'translateX(-50%)', fontSize: 34, fontWeight: 800, letterSpacing: 4, color: '#5fe0a8', textShadow: '0 0 10px #000', opacity: 0, pointerEvents: 'none' }} />
+        <div ref={(r) => { hud.current.fieldPrompt = r; }} data-testid="field-prompt" style={{ position: 'absolute', left: '50%', top: '58%', transform: `translateX(-50%) scale(${hudK})`, transformOrigin: 'top center', textAlign: 'center', pointerEvents: 'none', textShadow: '0 0 6px #000' }} />
+        <div ref={(r) => { hud.current.field = r; }} data-testid="field-inventory" style={{ position: 'absolute', left: 18, bottom: 128 * hudK, ...hz('bottom left'), fontSize: 12, letterSpacing: 1.5, color: '#cfd8df', textShadow: '0 0 6px #000', pointerEvents: 'none', lineHeight: 1.7 }} />
+        <div ref={(r) => { hud.current.fieldExfil = r; }} data-testid="field-exfil" style={{ position: 'absolute', left: '50%', top: 96, transform: `translateX(-50%) scale(${hudK})`, transformOrigin: 'top center', fontSize: 34, fontWeight: 800, letterSpacing: 4, color: '#5fe0a8', textShadow: '0 0 10px #000', opacity: 0, pointerEvents: 'none' }} />
 
         {/* boss health bar */}
-        <div ref={(r) => { hud.current.bossWrap = r; }} style={{ position: 'absolute', left: '50%', top: 96, transform: 'translateX(-50%)', width: 360, opacity: 0, transition: 'opacity .3s', textAlign: 'center' }}>
+        <div ref={(r) => { hud.current.bossWrap = r; }} style={{ position: 'absolute', left: '50%', top: 96, transform: `translateX(-50%) scale(${hudK})`, transformOrigin: 'top center', width: 360, opacity: 0, transition: 'opacity .3s', textAlign: 'center' }}>
           <div ref={(r) => { hud.current.bossName = r; }} style={{ fontSize: 13, letterSpacing: 4, fontWeight: 700, color: '#e0455a', textShadow: '0 0 6px #000', marginBottom: 4 }}>TARGET</div>
           <div style={{ width: 360, height: 6, background: '#2a1114', border: '1px solid rgba(224,69,90,.4)' }}>
             <div ref={(r) => { hud.current.bossFill = r; }} style={{ width: '100%', height: '100%', background: 'linear-gradient(90deg,#ff4d3d,#e0455a)' }} />
@@ -4688,7 +4831,7 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
         </div>
 
         {/* objective off-screen arrow (cyan) */}
-        <div ref={(r) => { hud.current.objArrow = r; }} style={{ position: 'absolute', opacity: 0, color: '#37d0e0', fontSize: 24, pointerEvents: 'none', textShadow: '0 0 6px #000', transition: 'opacity .12s' }}>▲</div>
+        <div ref={(r) => { hud.current.objArrow = r; }} style={{ position: 'absolute', opacity: 0, color: pal.objective, fontSize: 24, pointerEvents: 'none', textShadow: '0 0 6px #000', transition: 'opacity .12s' }}>▲</div>
 
         {/* briefing */}
         <div ref={(r) => { hud.current.briefing = r; }} style={{ position: 'absolute', inset: 0, opacity: 0, pointerEvents: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'rgba(6,10,14,.72)', color: '#e9edf2', textAlign: 'center' }}>
@@ -4807,7 +4950,14 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
         </div>
         {!isTouch && (
           <div style={{ position: 'absolute', right: 26, top: 20, fontSize: 11, lineHeight: 1.7, textAlign: 'right', color: '#6f7d8c' }}>
-            WASD move · MOUSE / ARROWS look<br />SPACE fire · SHIFT ads · T target · E use (hold) · H dressing · Q/G lean · C crouch · R reload · B fire-mode<br />1 / 2 or X swap weapon · N nvg · F light · L laser · O optic · M ops · ESC release mouse
+            {(() => {
+              const b = settings.controls.binds, k = (a: Action) => bindLabel(b, a);
+              return (<>
+                {k('moveForward')}{k('moveLeft')}{k('moveBack')}{k('moveRight')} move · MOUSE / {k('lookUp')}{k('lookDown')}{k('lookLeft')}{k('lookRight')} look<br />
+                {k('fire').toUpperCase()} fire · {k('aim').toUpperCase()} ads · {k('target')} target · {k('interact')} use ({settings.access.toggleInteract ? 'press' : 'hold'}) · {k('heal')} dressing · {k('leanLeft')}/{k('leanRight')} lean · {k('crouch')} crouch · {k('reload')} reload · {k('fireMode')} fire-mode<br />
+                {k('primary')} / {k('secondary')} or {k('swap')} swap weapon · {k('nvg')} nvg · {k('light')} light · {k('laser')} laser · {k('optic')} optic · {k('opsMenu')} ops · ESC release mouse
+              </>);
+            })()}
           </div>
         )}
 

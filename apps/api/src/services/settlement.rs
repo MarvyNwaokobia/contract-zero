@@ -210,6 +210,14 @@ pub async fn queue_operation(w: &World, db: &mut PgConnection, near: &NearClient
 /// nothing about (a fresh economy against an existing contract): mint or burn the
 /// difference per actor, then start the cursor at the current ledger.
 pub async fn bootstrap(state: &AppState) -> Result<(), String> {
+    // This process holds the single-writer lock (main.rs), so no other worker exists:
+    // leases left by an earlier process (a restart or a crash) are released now
+    // rather than holding the head of the queue until they expire. The row is
+    // re-checked against `is_used` before it is submitted again.
+    if let Some(near) = &state.near {
+        sqlx::query("UPDATE settlements SET lease_until = NULL WHERE contract = $1 AND status = 'submitted' AND claimed_by IS DISTINCT FROM $2")
+            .bind(near.contract.to_string()).bind(&state.worker_id).execute(state.world.db()).await.map_err(|e| e.to_string())?;
+    }
     align(state, false, false).await.map(|_| ())
 }
 
@@ -317,6 +325,12 @@ pub const LEASE_SECS: f64 = 300.0;
 /// plus a margin, an attempt whose outcome was unknown can no longer move value.
 pub const QUOTE_TTL_SECS: i64 = 900;
 const UNKNOWN_SETTLES_AFTER_SECS: i64 = QUOTE_TTL_SECS + 300;
+/// A refusal for "insufficient balance" usually means an earlier operation that would
+/// fund the account hasn't landed yet (the queue reorders around deferred rows). It
+/// becomes a real failure only if it persists this long.
+pub const BALANCE_SETTLES_AFTER_SECS: i64 = 1_800;
+/// How long a row refused for balance waits before its next try.
+const BALANCE_RETRY_SECS: i64 = 45;
 
 /// What one submission attempt is known to have done.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -365,6 +379,11 @@ fn tx_hash_in(err: &str) -> Option<String> {
 /// Every attempt must be known not to have moved value: never sent, failed on chain,
 /// or unknown but older than the quote's lifetime (and `is_used` was false this round).
 pub fn may_compensate(attempts: &[Value], now_unix: i64) -> bool {
+    // Balance refusals are waits for funding, not verdicts, until they have persisted.
+    let first_balance = attempts.iter().filter(|a| a["reason"] == "balance").filter_map(|a| a["at"].as_i64()).min();
+    if first_balance.is_some_and(|t| now_unix - t < BALANCE_SETTLES_AFTER_SECS) {
+        return false;
+    }
     attempts.len() >= 3
         && attempts.iter().all(|a| match a["outcome"].as_str() {
             Some("not_sent") | Some("failed") => true,
@@ -393,7 +412,7 @@ pub async fn claim(db: &sqlx::PgPool, contract: &str, worker: &str) -> Result<Op
          head AS (
              SELECT s.id FROM settlements s, blocked b
              WHERE s.contract = $1 AND s.status IN ('pending', 'submitted')
-               AND NOT coalesce(s.defer_reason = 'issuance_budget' AND s.next_attempt_at > now(), false)
+               AND NOT coalesce(s.defer_reason IN ('issuance_budget', 'balance') AND s.next_attempt_at > now(), false)
                AND (b.id IS NULL OR s.id < b.id OR s.kind IN ('raid', 'operation'))
              ORDER BY (s.kind <> 'genesis'), s.id
              LIMIT 1
@@ -499,7 +518,8 @@ pub async fn process_next(state: &AppState) -> Result<bool, String> {
         }
         Err(e) => {
             let outcome = classify(&e);
-            history.push(json!({ "n": attempt, "at": now.timestamp(), "outcome": outcome.name(), "tx": tx_hash_in(&e), "error": e }));
+            let balance = e.contains("insufficient balance");
+            history.push(json!({ "n": attempt, "at": now.timestamp(), "outcome": outcome.name(), "tx": tx_hash_in(&e), "error": e, "reason": if balance { "balance" } else { "" } }));
             tracing::warn!("settlement {op_id} attempt {attempt} {}: {e}", outcome.name());
             // Only an agent trade may give up, and only when every attempt is known not
             // to have moved value. Flows, raids and operations mirror state the economy
@@ -508,8 +528,14 @@ pub async fn process_next(state: &AppState) -> Result<bool, String> {
             let give_up = (kind == "trade" || kind == "sell") && may_compensate(&history, now.timestamp());
             // The ledger's epoch issuance budget is a known wait, not a fault: defer to
             // the reset instead of retrying every minute.
+            // A refusal for insufficient balance waits briefly and lets later rows
+            // through: they may be what funds this one. Every operation is replay-
+            // protected and additive, so order changes when a step can land, never
+            // the final balances.
             let (defer, until) = if e.contains("epoch issuance budget exceeded") {
                 (Some("issuance_budget"), budget_reset(&near, &payload).await.or(Some(now + chrono::Duration::minutes(10))))
+            } else if balance && !give_up {
+                (Some("balance"), Some(now + chrono::Duration::seconds(BALANCE_RETRY_SECS)))
             } else {
                 (None, None)
             };
@@ -581,9 +607,14 @@ pub async fn reconcile(state: &AppState) -> Result<Value, String> {
         .await
         .map_err(|e| e.to_string())?;
     let cursor = cursor(state.world.db(), &near.contract.to_string()).await.map_err(|e| e.to_string())?;
-    let (engine, ledger_len) = state
+    let (engine, ledger_len, unsynced) = state
         .world
         .read(|w| {
+            // What the ledger has done since the last flow sync, not yet on chain.
+            let (mints, burns) = flows_between(w, cursor as usize, w.ledger.len());
+            let mut unsynced: BTreeMap<String, BTreeMap<String, i64>> = BTreeMap::new();
+            for ((acct, asset), q) in mints { *unsynced.entry(acct).or_default().entry(asset.name().to_string()).or_default() += q; }
+            for ((acct, asset), q) in burns { *unsynced.entry(acct).or_default().entry(asset.name().to_string()).or_default() -= q; }
             let mut m = BTreeMap::new();
             for a in w.actors.values() {
                 let mut h = BTreeMap::new();
@@ -601,9 +632,10 @@ pub async fn reconcile(state: &AppState) -> Result<Value, String> {
                 }
                 m.insert(a.account.clone(), h);
             }
-            (m, w.ledger.len())
+            (m, w.ledger.len(), unsynced)
         })
         .await;
+    let mut exact = open.is_empty();
     let mut actors = Vec::new();
     let mut in_sync = open.is_empty() && cursor as usize == ledger_len;
     for (acct, eng) in &engine {
@@ -611,12 +643,18 @@ pub async fn reconcile(state: &AppState) -> Result<Value, String> {
         let chain = near.balances(&chain_acct).await?;
         let diff: BTreeMap<_, _> = eng.iter().map(|(t, v)| (t.clone(), v - chain.get(t).copied().unwrap_or(0))).filter(|(_, d)| *d != 0).collect();
         in_sync &= diff.is_empty();
-        actors.push(json!({ "engine_account": acct, "chain_account": chain_acct, "engine": eng, "chain": chain, "difference": diff }));
+        // Net of the ledger entries the next flow sync will carry: with nothing in
+        // flight this must be exactly zero, at any moment.
+        let pending = unsynced.get(acct).cloned().unwrap_or_default();
+        let net: BTreeMap<_, _> = eng.iter().map(|(t, v)| (t.clone(), v - chain.get(t).copied().unwrap_or(0) - pending.get(t).copied().unwrap_or(0))).filter(|(_, d)| *d != 0).collect();
+        exact &= net.is_empty();
+        actors.push(json!({ "engine_account": acct, "chain_account": chain_acct, "engine": eng, "chain": chain, "difference": diff, "unsynced": pending, "difference_net_of_unsynced": net }));
     }
     Ok(json!({
         "enabled": true,
         "contract": near.contract.to_string(),
         "in_sync": in_sync,
+        "exact": exact,
         "unsynced_ledger_entries": ledger_len as i64 - cursor,
         "open_settlements": open.into_iter().map(|(o,)| o).collect::<Vec<_>>(),
         "actors": actors,
@@ -673,6 +711,10 @@ mod tests {
         assert!(!may_compensate(&[a("failed", 1), a("unknown", now - 60), a("failed", 3)], now));
         // An unknown outcome older than the quote's lifetime (+ margin) can no longer land.
         assert!(may_compensate(&[a("failed", 1), a("unknown", now - UNKNOWN_SETTLES_AFTER_SECS), a("failed", 3)], now));
+        // A balance refusal is a wait for funding until it has persisted half an hour.
+        let b = |at: i64| json!({ "outcome": "failed", "at": at, "reason": "balance" });
+        assert!(!may_compensate(&[b(now - 60), b(now - 30), b(now - 10)], now));
+        assert!(may_compensate(&[b(now - BALANCE_SETTLES_AFTER_SECS), b(now - 30), b(now - 10)], now));
         // An unrecorded outcome counts as unknown.
         assert!(!may_compensate(&[a("failed", 1), json!({}), a("failed", 3)], now));
     }
@@ -690,6 +732,9 @@ mod tests {
     }
 
     async fn seed(db: &sqlx::PgPool, contract: &str, rows: &[(&str, &str)]) -> Vec<i64> {
+        // Rows a crashed earlier run of this test left behind (never the real contract's).
+        let prefix = format!("{}%", &contract[..contract.find('-').map_or(contract.len(), |i| contract[i + 1..].find('-').map_or(contract.len(), |j| i + 1 + j + 1))]);
+        sqlx::query("DELETE FROM settlements WHERE contract LIKE $1 AND contract LIKE 'test-%' AND created_at < now() - interval '1 minute'").bind(&prefix).execute(db).await.unwrap();
         let mut ids = vec![];
         for (kind, op) in rows {
             let (id,): (i64,) = sqlx::query_as("INSERT INTO settlements (kind, op_id, tick, payload, contract) VALUES ($1, $2, 0, '{}', $3) RETURNING id")
@@ -730,6 +775,11 @@ mod tests {
         sqlx::query("UPDATE settlements SET status = 'confirmed' WHERE id = $1").bind(ids[4]).execute(&db).await.unwrap();
         // The agent trade and later flows wait behind the deferred batch.
         assert!(claim(&db, &contract, "w").await.unwrap().is_none());
+        // A row refused for balance blocks nothing: the trade behind it may fund it.
+        sqlx::query("UPDATE settlements SET defer_reason = 'balance', next_attempt_at = now() + interval '1 minute' WHERE id = $1").bind(ids[0]).execute(&db).await.unwrap();
+        assert_eq!(claim(&db, &contract, "w").await.unwrap().unwrap().0, ids[1], "the trade goes ahead of the balance-deferred batch");
+        sqlx::query("UPDATE settlements SET status = 'confirmed' WHERE id = $1").bind(ids[1]).execute(&db).await.unwrap();
+        sqlx::query("UPDATE settlements SET defer_reason = 'issuance_budget', next_attempt_at = now() + interval '1 hour' WHERE id = $1").bind(ids[0]).execute(&db).await.unwrap();
         // Once the epoch resets, the batch goes first again.
         sqlx::query("UPDATE settlements SET next_attempt_at = now() - interval '1 second' WHERE id = $1").bind(ids[0]).execute(&db).await.unwrap();
         assert_eq!(claim(&db, &contract, "w").await.unwrap().unwrap().0, ids[0]);

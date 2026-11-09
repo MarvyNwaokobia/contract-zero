@@ -89,6 +89,20 @@ All settings live at `/settings`. Seven categories sit in a rail on the left; on
 
 **Security:** the page never shows the quick-trade secret, which stays in storage; only its public half is read. No session token is shown either, because the session cookie is `HttpOnly`. The probe checks the rendered page for the secret.
 
+## In the pause menu
+
+Leaving a contract mid-fight abandons it, so the pause menu carries the settings you'd tune between fights. They're in four tabs, apply at once and are saved:
+
+| Tab | Settings |
+|---|---|
+| **View** | Quality, field of view, HUD scale, crosshair style, frame-rate readout |
+| **Audio** | Master, music, effects, voice and radio, ambience |
+| **Controls** | Look and aiming speed, invert Y, hold or toggle for aim, crouch and interact |
+| **Comfort** | Subtitles, reduce motion, reduce flashes, high-contrast prompts, colour palette |
+
+- **All settings** opens the full page in a **new tab**, so the fight survives, and changes made there reach the paused fight.
+- **On a phone held landscape,** the menu scrolls, so the panel is always in reach.
+
 ## Deliberately not offered
 
 These aren't in the game, so the page doesn't offer them as working controls:
@@ -100,7 +114,6 @@ These aren't in the game, so the page doesn't offer them as working controls:
 
 ## Deferred
 
-- **Pause menu.** It still has only quality and sensitivity, with no link into the full Configuration Center. Leaving a contract mid-fight abandons it.
 - **Sync conflicts.** Sync is last-writer-wins for all five sections together, not per field.
 - **Browser coverage.** Firefox and Safari were not run; every check here is Chrome.
 
@@ -123,6 +136,11 @@ These aren't in the game, so the page doesn't offer them as working controls:
     - a rebound move key moves the operator while the old one doesn't; invert Y; a rebound reload key reloads while the old one doesn't;
     - crosshair style and colour; HUD scale; palette colours; the high-contrast prompt with the bound key;
     - no page errors.
+- **`node apps/web/probe-pause.mjs` passes 9 of 9 checks:**
+  - FOV, music volume and invert Y set from the pause menu apply in the fight (music at zero stops the score);
+  - "All settings" opens a new tab, and a change made there reaches the paused fight;
+  - the menu fits a 740×360 phone held landscape;
+  - the bottom-left HUD stack (rank and XP, health, second winds, kills) has no overlaps. **Fixed:** the XP bar used to sit inside the health bar, and the second-wind pips over the kill counter.
 - **`node apps/web/probe-settings.mjs`** (the Milestone 8 checks, updated for the new page) still passes.
 - **`node apps/web/probe-a11y.mjs`** now checks each settings category separately. All seven have no WCAG A or AA violations, signed in.
 - **Unit tests:**

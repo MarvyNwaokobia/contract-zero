@@ -33,6 +33,7 @@ import { FieldProps } from './FieldProps';
 import { ItemInspector } from '@/components/inspect/ItemInspector';
 import type { InspectItem } from '@/components/inspect/itemInfo';
 import { useSettings, updateSettings, renderPlan, PALETTES, type RenderPlan, type Settings } from '@/lib/settings';
+import { PauseSettings } from '@/components/settings/PauseSettings';
 import { DEFAULT_BINDS, actionsByCode, bindLabel, type Action, type Binds } from '@/lib/keybinds';
 import { FieldRuntime, trainingField, BLAST_RADIUS, CARRY_MAX, type FieldEvent, type FieldRecord, type ProtoEvent } from '../fps/field';
 import { CAMPAIGN, CAMPAIGN_KEY, PROGRESS_KEY, ZONE_THEMES, themeForMission, SURVIVAL_MISSION, GAUNTLET_MISSION, ENDLESS_MISSION, SEASONAL_MISSION, survivalWaveCount, survivalWaveHp, gauntletWaveCount, gauntletWaveHp, type Mission } from '../fps/campaign';
@@ -4342,15 +4343,9 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
     try { window.localStorage.removeItem('cz_degraded'); } catch { /* private mode */ }
     updateSettings((s) => ({ ...s, quality: q }));
   }, []);
-  // Look sensitivity: the frame loop reads controls.current.lookSens, so a drag is
-  // felt immediately; the setting persists it.
-  const lookSens = settings.lookSens;
+  // Look sensitivity: the frame loop reads controls.current.lookSens, so a change in
+  // the pause menu is felt the moment play resumes.
   useEffect(() => { controls.current.lookSens = settings.lookSens; }, [settings.lookSens]);
-  const pickLookSens = useCallback((v: number) => {
-    const clamped = Math.max(SENS_MIN, Math.min(SENS_MAX, v));
-    controls.current.lookSens = clamped;
-    updateSettings((s) => ({ ...s, lookSens: clamped }));
-  }, []);
   // The player's mix, and silence while the tab is in the background (if chosen).
   useEffect(() => { audio.setMix(settings.audio); }, [audio, settings.audio]);
   useEffect(() => {
@@ -4758,7 +4753,7 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
 
         {/* rank + XP toward the next 1000 (the earn loop). On touch it lives TOP-left,
             clear of the movement thumb (it used to sit under the joystick). */}
-        <div style={{ position: 'absolute', left: isTouch ? 14 : 26, width: isTouch ? 150 : 210, ...(isTouch ? { top: 58 * hudK } : { bottom: 48 * hudK }), ...hz(isTouch ? 'top left' : 'bottom left') }}>
+        <div style={{ position: 'absolute', left: isTouch ? 14 : 26, width: isTouch ? 150 : 210, ...(isTouch ? { top: 70 * hudK } : { bottom: 74 * hudK }), ...hz(isTouch ? 'top left' : 'bottom left') }}>
           <div ref={(r) => { hud.current.rankText = r; }} style={{ fontSize: 12, letterSpacing: 1.5, fontWeight: 700, color: '#cd7f32' }}>BRONZE · 0 / 1000 XP</div>
           <div style={{ width: '100%', height: 4, background: '#2b3138', marginTop: 4, borderRadius: 2 }}>
             <div ref={(r) => { hud.current.xpBar = r; }} style={{ width: '0%', height: '100%', background: '#cd7f32', borderRadius: 2 }} />
@@ -4786,14 +4781,14 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
 
         {/* health bar — the vital stat. On touch it takes the prime top-left slot
             (it used to sit over the movement thumb); desktop keeps it bottom-left. */}
-        <div style={{ position: 'absolute', left: isTouch ? 14 : 26, width: isTouch ? 150 : 220, height: 9, background: 'rgba(0,0,0,.55)', border: '1px solid rgba(255,255,255,.15)', ...(isTouch ? { top: 40 * hudK } : { bottom: 46 * hudK }), ...hz(isTouch ? 'top left' : 'bottom left') }}>
+        <div style={{ position: 'absolute', left: isTouch ? 14 : 26, width: isTouch ? 150 : 220, height: 9, background: 'rgba(0,0,0,.55)', border: '1px solid rgba(255,255,255,.15)', ...(isTouch ? { top: 40 * hudK } : { bottom: 58 * hudK }), ...hz(isTouch ? 'top left' : 'bottom left') }}>
           <div ref={(r) => { hud.current.healthFill = r; }} style={{ width: '100%', height: '100%', background: '#5fd08a', transition: 'width .12s, background .2s' }} />
         </div>
         {/* second winds left in this attempt — a lit pip each. Sits just under the
             health bar, because it IS a health stat: it is how many more times this
             bar can come back. */}
         <div ref={(r) => { hud.current.refills = r; }}
-          style={{ position: 'absolute', left: isTouch ? 14 : 26, fontSize: 11, letterSpacing: 3, lineHeight: 1, ...(isTouch ? { top: 54 * hudK } : { bottom: 30 * hudK }), ...hz(isTouch ? 'top left' : 'bottom left') }} />
+          style={{ position: 'absolute', left: isTouch ? 14 : 26, fontSize: 11, letterSpacing: 3, lineHeight: 1, ...(isTouch ? { top: 54 * hudK } : { bottom: 42 * hudK }), ...hz(isTouch ? 'top left' : 'bottom left') }} />
 
         {/* damage vignette (red edges on hit / when low) */}
         <div ref={(r) => { hud.current.vignette = r; }} style={{ position: 'absolute', inset: 0, opacity: 0, pointerEvents: 'none', boxShadow: 'inset 0 0 150px 44px rgba(200,20,10,.85)', transition: 'opacity .09s' }} />
@@ -4872,7 +4867,7 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
         </div>
         {/* C4 · pause menu — deliberate, non-destructive, works in every mode */}
         {paused && !selectOpen && !debrief && (
-          <div style={{ position: 'absolute', inset: 0, zIndex: 46, background: 'rgba(3,6,10,.9)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', fontFamily: UI_FONT, color: '#e9edf2', pointerEvents: 'auto', cursor: 'auto' }}>
+          <div style={{ position: 'absolute', inset: 0, zIndex: 46, background: 'rgba(3,6,10,.9)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'safe center', overflowY: 'auto', padding: '16px 0', fontFamily: UI_FONT, color: '#e9edf2', pointerEvents: 'auto', cursor: 'auto' }}>
             <div style={{ fontSize: 12, letterSpacing: 8, color: '#37d0e0' }}>PAUSED</div>
             <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: 3, margin: '10px 0 4px' }}>
               {mode === 'endless' ? mission.name : mode === 'gauntlet' ? 'THE GAUNTLET' : mode === 'survival' ? 'THE KILL-HOUSE' : mission.name}
@@ -4890,40 +4885,8 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
                 </button>
               )}
             </div>
-            {/* Manual graphics quality — instant relief on a laggy machine (LOW = drop
-                shadows, set-dressing, and render resolution). AUTO adapts on its own. */}
-            <div style={{ display: 'flex', gap: 8, marginTop: 20, alignItems: 'center' }}>
-              <span style={{ fontSize: 10, letterSpacing: 2, color: '#6f7d8c' }}>GRAPHICS</span>
-              {(['auto', 'high', 'medium', 'low'] as const).map((q) => (
-                <button key={q} onClick={() => pickQuality(q)} style={{
-                  ...btnC4(quality === q ? '#37d0e0' : '#5a6773'),
-                  padding: '5px 12px', fontSize: 11, letterSpacing: 1,
-                  background: quality === q ? 'rgba(55,208,224,.14)' : 'transparent',
-                  opacity: quality === q ? 1 : 0.65,
-                }}>{q.toUpperCase()}</button>
-              ))}
-            </div>
-            {/* Look sensitivity. Here rather than in a settings screen because the only
-                way to judge it is to change it and immediately fight again — RESUME is
-                one tap away, and the value is live the moment the slider moves. */}
-            <div style={{ display: 'flex', gap: 10, marginTop: 16, alignItems: 'center', width: 'min(88vw, 340px)' }}>
-              <span style={{ fontSize: 10, letterSpacing: 2, color: '#6f7d8c', whiteSpace: 'nowrap' }}>
-                {isTouch ? 'AIM SPEED' : 'MOUSE SPEED'}
-              </span>
-              <input
-                type="range"
-                min={SENS_MIN} max={SENS_MAX} step={0.05} value={lookSens}
-                onChange={(e) => pickLookSens(Number(e.currentTarget.value))}
-                aria-label="Look sensitivity"
-                style={{ flex: 1, accentColor: '#37d0e0', height: 26, cursor: 'pointer', touchAction: 'none' }}
-              />
-              <span style={{ fontSize: 11, color: '#37d0e0', fontVariantNumeric: 'tabular-nums', width: 38, textAlign: 'right' }}>
-                {lookSens.toFixed(2)}
-              </span>
-              {lookSens !== SENS_DEFAULT && (
-                <button onClick={() => pickLookSens(SENS_DEFAULT)} style={{ ...btnC4('#5a6773'), padding: '4px 8px', fontSize: 9, letterSpacing: 1 }}>RESET</button>
-              )}
-            </div>
+            {/* Quick settings: live, saved, and never a reason to leave the fight. */}
+            <PauseSettings s={settings} onQuality={pickQuality} touch={isTouch} />
             <div style={{ fontSize: 11, color: '#7d8a96', letterSpacing: 1, marginTop: 18 }}>{isTouch ? 'tap RESUME to return to the fight' : 'ESC resumes · this pause is safe, nothing is lost'}</div>
           </div>
         )}

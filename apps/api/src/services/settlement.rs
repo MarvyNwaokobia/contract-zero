@@ -605,8 +605,10 @@ pub async fn process_next(state: &AppState) -> Result<bool, String> {
     let now = chrono::Utc::now();
     match result {
         Ok(mut verified) => {
-            if kind == "order_fill" {
-                // The fill landed; if its chained refund didn't, send the refund now.
+            if matches!(kind.as_str(), "order_fill" | "order_close" | "order_expire") {
+                // The step landed (or had already); if the order's refund didn't (e.g.
+                // the ledger refused it), send the refund now. It always goes to the
+                // requester, whoever signs the retry.
                 if let Ok(v) = finish_refund(&near, &payload).await {
                     verified.extend(v);
                 }
@@ -744,7 +746,7 @@ async fn finish_refund(near: &NearClient, p: &Value) -> Result<Vec<Verified>, St
     if state["state"].as_str() != Some("Refunding") || pending {
         return Ok(vec![]);
     }
-    let role = Role::for_actor(p["party"].as_str().unwrap_or_default().split('.').next().unwrap_or_default()).ok_or("no signing key")?;
+    let role = p["party"].as_str().and_then(|a| Role::for_actor(a.split('.').next().unwrap_or_default())).unwrap_or(Role::Vex);
     Ok(vec![near.call(role, "retry_refund", json!({ "order_id": order }), 0).await?])
 }
 

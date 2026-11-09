@@ -1,0 +1,216 @@
+{
+  "results": [
+    {
+      "name": "a raid on the faction's ammunition starts",
+      "ok": true,
+      "detail": "46 units at Cinder Yard"
+    },
+    {
+      "name": "the raid extracts and settles",
+      "ok": true,
+      "detail": "46 of 46 ammo"
+    },
+    {
+      "name": "the commander posts a supply order (not a purchase from one merchant)",
+      "ok": true,
+      "detail": "#1946: 59 ammo, at most 2124 cr, urgency 2"
+    },
+    {
+      "name": "both merchants considered the order",
+      "ok": true,
+      "detail": "halcyon: proposed; vex: proposed"
+    },
+    {
+      "name": "merchants proposed on chain",
+      "ok": true,
+      "detail": "halcyon, vex"
+    },
+    {
+      "name": "the commander chose by its rule, and said why",
+      "ok": true,
+      "detail": "Take Vex Exchange's 59 ammo for 1225 cr on #1946 (urgent: most coverage first, then price). On the table: Vex Exchange 59×20cr, Halcyon Logistics 54×23cr."
+    },
+    {
+      "name": "the chain holds the same fills",
+      "ok": true,
+      "detail": "59 ammo for 1225 cr; on chain Closed 59/1225"
+    },
+    {
+      "name": "the next mission is armed from the new stock",
+      "ok": true,
+      "detail": "{\"defense\":2,\"depot\":\"fuel\",\"guards\":9,\"planned\":9,\"rifles\":9,\"sidearms\":0,\"stock_now\":86}"
+    },
+    {
+      "name": "the API prepares the exact call to sign",
+      "ok": true,
+      "detail": "u7-3a9629ee"
+    },
+    {
+      "name": "the player signs place_order with their own key",
+      "ok": true,
+      "detail": "CTxpkFxWyugArgjDgqtEb5M68PeSomfajtPt67rbup3Y"
+    },
+    {
+      "name": "the API records it only after reading it back",
+      "ok": true,
+      "detail": {
+        "order": 1954
+      }
+    },
+    {
+      "name": "a replayed confirmation is refused",
+      "ok": true,
+      "detail": "order refused: nonce 7 already used (last 7)"
+    },
+    {
+      "name": "someone else's order can't be claimed",
+      "ok": true,
+      "detail": "not a player order id"
+    },
+    {
+      "name": "trading partners answer the player on chain",
+      "ok": true,
+      "detail": "Vex Exchange 3 for 158"
+    },
+    {
+      "name": "a fill the chain has not seen is refused",
+      "ok": true,
+      "detail": "the chain doesn't show that fill yet"
+    },
+    {
+      "name": "the player accepts the best offer on chain",
+      "ok": true,
+      "detail": "3z1H6c5bVw98iU2d55zZBQzG8fC3PGwPDHaycg3ieB1p"
+    },
+    {
+      "name": "the API applies it after reading the fill back",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "the player received exactly the goods on chain",
+      "ok": true,
+      "detail": "med 11 → 14"
+    },
+    {
+      "name": "exactly one of cancel and accept wins on chain",
+      "ok": true,
+      "detail": "cancel ok, accept refused; chain Closed/cancelled fills 0"
+    },
+    {
+      "name": "the economy mirrors only the winner",
+      "ok": true,
+      "detail": "cancel 200, accept 409"
+    },
+    {
+      "name": "a 1 cr/unit order is placed and escrowed",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "no merchant answers below its floor, and it expires on chain",
+      "ok": true,
+      "detail": "expired"
+    },
+    {
+      "name": "the escrow came back exactly",
+      "ok": true,
+      "detail": "2658 → 2658"
+    },
+    {
+      "name": "1Click is reachable and lists its assets",
+      "ok": true,
+      "detail": "216 assets, execution disabled"
+    },
+    {
+      "name": "CONTRACT ZERO assets are not among them",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "a live dry quote returns its minimum and reference",
+      "ok": true,
+      "detail": "0.36141 USDC (min 357795), b4b45dcc-02b4-4942-b295-58f89676baee"
+    },
+    {
+      "name": "the quote is kept with its protocol reference",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "a game asset is refused before any request",
+      "ok": true,
+      "detail": "nep245:assets.contract-zero.testnet:ammo is a CONTRACT ZERO game asset; NEAR Intents doesn't support it (see docs/contract-zero/INTENTS.md)"
+    },
+    {
+      "name": "economy and chain reconcile exactly",
+      "ok": true,
+      "detail": "no differences"
+    }
+  ],
+  "evidence": {
+    "raid": {
+      "session": "bc93dbb0-6cbc-4935-a1fe-23d7a2fcc5d1",
+      "units": 46,
+      "op": "raid:1945"
+    },
+    "autonomous": {
+      "order": "o1946",
+      "settlement": [
+        {
+          "op": "order:o1946",
+          "tx": [
+            "EzjMDkvJWhQf3aDqyhEZJPW1isiDC78WtCm31TdVK6cs"
+          ]
+        },
+        {
+          "op": "propose:o1946|p1947",
+          "tx": [
+            "Ho3adT1d2NW7n6WyB3D8hZtxhDWAvNBgmsSUxYns6ctk"
+          ]
+        },
+        {
+          "op": "propose:o1946|p1948",
+          "tx": [
+            "FwabqBo7SYLqtfAf6R7xcJQjP9RQSgJJDRiucm8C1uEV"
+          ]
+        },
+        {
+          "op": "fill:o1946|p1948",
+          "tx": [
+            "AK5TAFMzgjD2jGdTbSr95fCvsiFkyYoTovB2n6aeVysZ"
+          ]
+        }
+      ],
+      "choice": "Take Vex Exchange's 59 ammo for 1225 cr on #1946 (urgent: most coverage first, then price). On the table: Vex Exchange 59×20cr, Halcyon Logistics 54×23cr.",
+      "next_mission": {
+        "defense": 2,
+        "depot": "fuel",
+        "guards": 9,
+        "planned": 9,
+        "rifles": 9,
+        "sidearms": 0,
+        "stock_now": 86
+      }
+    },
+    "player_order": {
+      "order": "u7-3a9629ee",
+      "place_tx": "CTxpkFxWyugArgjDgqtEb5M68PeSomfajtPt67rbup3Y",
+      "accept_tx": "3z1H6c5bVw98iU2d55zZBQzG8fC3PGwPDHaycg3ieB1p",
+      "merchant": "vex",
+      "qty": 3,
+      "total": 158
+    },
+    "intents": {
+      "correlation_id": "b4b45dcc-02b4-4942-b295-58f89676baee",
+      "amount_out": "361410",
+      "min_amount_out": "357795",
+      "fees": [
+        {
+          "fee": 20,
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd"
+        }
+      ]
+    }
+  }
+}

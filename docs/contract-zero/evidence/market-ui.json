@@ -1,0 +1,87 @@
+[
+ {
+  "name": "both trading partners are shown",
+  "ok": true,
+  "detail": [
+   "partner-vex",
+   "partner-halcyon"
+  ]
+ },
+ {
+  "name": "the supply order form is offered when signed in",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "the market shows supply orders",
+  "ok": true,
+  "detail": "13 orders"
+ },
+ {
+  "name": "the official protocol is labelled apart",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "the live asset list is shown, without CZ assets",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "a live dry quote shows receive, minimum, fees and expiry",
+  "ok": true,
+  "detail": "0.1 wNEAR → USDCReceive ≈ 0.352535 (~$0.352)Minimum received: 349009 (base units)Fees: 20 bps · est. 12 sQuote expires 13:58:18Reference 008cc410-855b-423f-8e5e"
+ },
+ {
+  "name": "a game asset is refused with the reason",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "desktop: the Exchange has no sideways scroll",
+  "ok": true,
+  "detail": {
+   "sw": 1280,
+   "iw": 1280
+  }
+ },
+ {
+  "name": "a procurement chain shows proposals, the winner and settlement",
+  "ok": true,
+  "detail": "Ashen Compactsells 34 fuelopen1Player operationplayer.contract-zero.testnet ran a raid on Ashen Compact's ammunition (extracted, 59 units taken).2Surplusfuel surplus: have 1303Supply orderOffer 34 sur"
+ },
+ {
+  "name": "the execution path says it is not NEAR Intents",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "desktop: the War Room has no sideways scroll",
+  "ok": true,
+  "detail": {
+   "sw": 1280,
+   "iw": 1280
+  }
+ },
+ {
+  "name": "phone: the Exchange has no sideways scroll",
+  "ok": true,
+  "detail": {
+   "sw": 390,
+   "iw": 390
+  }
+ },
+ {
+  "name": "phone: the War Room has no sideways scroll",
+  "ok": true,
+  "detail": {
+   "sw": 390,
+   "iw": 390
+  }
+ },
+ {
+  "name": "no page errors",
+  "ok": true,
+  "detail": []
+ }
+]

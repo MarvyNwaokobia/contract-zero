@@ -2,7 +2,7 @@
 FBX to GLB batch converter
 
 Run with Intel (x86_64) Blender on Intel Macs:
-  /Applications/Blender.app/Contents/MacOS/Blender --background --python scripts/fbx_to_glb.py -- apps/web/public/characters/raw apps/web/public/characters/glb
+  /Applications/Blender.app/Contents/MacOS/Blender --background --python scripts/fbx_to_glb.py -- apps/web/assets-src/characters/raw apps/web/public/characters/glb
 
 Download Intel Blender: https://www.blender.org/download/  → macOS Intel 64 bit
 """

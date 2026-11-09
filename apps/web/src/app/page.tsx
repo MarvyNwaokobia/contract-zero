@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { TopBar } from '@/components/ui/Shell'
 import { api, RESOURCE_LABEL, type ActorView, type BoardEntry, type ResourceName } from '@/lib/api'
-import { loadSettings, type Quality } from '@/lib/settings'
+import { fixedTier, loadSettings, type Quality } from '@/lib/settings'
 import { useProfile, useSession, useStash } from '@/lib/useSession'
 import { WorldClockPanel } from '@/components/world/WorldClock'
 
@@ -73,7 +73,7 @@ export default function Hub() {
   const stash = useStash()
   const [quality, setQuality] = useState<Quality | null>(null)
   const [clean, setClean] = useState(false)
-  useEffect(() => { setQuality(loadSettings().quality); setClean(new URLSearchParams(window.location.search).has('clean')) }, [])
+  useEffect(() => { setQuality(fixedTier(loadSettings().quality)); setClean(new URLSearchParams(window.location.search).has('clean')) }, [])
 
   const world = useQuery({ queryKey: ['world'], queryFn: api.world, refetchInterval: 10_000 })
   const decisions = useQuery({ queryKey: ['decisions'], queryFn: () => api.decisions(6), refetchInterval: 15_000 })

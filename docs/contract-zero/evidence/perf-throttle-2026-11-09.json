@@ -1,0 +1,65 @@
+{
+  "mode": "throttle",
+  "rows": [
+    {
+      "site": "cinder-yard",
+      "quality": "high",
+      "fps": 19,
+      "p95ms": 66.8,
+      "calls": 288,
+      "triangles": 324606,
+      "pixelRatio": 2,
+      "shadowCasters": 1
+    },
+    {
+      "site": "cinder-yard",
+      "quality": "medium",
+      "fps": 59,
+      "p95ms": 16.7,
+      "calls": 270,
+      "triangles": 324552,
+      "pixelRatio": 1.5,
+      "shadowCasters": 1
+    },
+    {
+      "site": "cinder-yard",
+      "quality": "low",
+      "fps": 60,
+      "p95ms": 16.7,
+      "calls": 141,
+      "triangles": 146242,
+      "pixelRatio": 1,
+      "shadowCasters": 0
+    },
+    {
+      "site": "blacksite",
+      "quality": "high",
+      "fps": 50,
+      "p95ms": 50,
+      "calls": 248,
+      "triangles": 304072,
+      "pixelRatio": 2,
+      "shadowCasters": 1
+    },
+    {
+      "site": "blacksite",
+      "quality": "medium",
+      "fps": 51,
+      "p95ms": 33.4,
+      "calls": 229,
+      "triangles": 290664,
+      "pixelRatio": 1.5,
+      "shadowCasters": 1
+    },
+    {
+      "site": "blacksite",
+      "quality": "low",
+      "fps": 59,
+      "p95ms": 16.7,
+      "calls": 122,
+      "triangles": 140888,
+      "pixelRatio": 1,
+      "shadowCasters": 0
+    }
+  ]
+}

@@ -8,7 +8,7 @@ be matched to classes by eye.
 
 Run:
   /Applications/Blender.app/Contents/MacOS/Blender --background --python scripts/preview_fbx.py -- \
-      apps/web/public/characters/raw design/captures/characters "File A.fbx" "File B.fbx"
+      apps/web/assets-src/characters/raw design/captures/characters "File A.fbx" "File B.fbx"
 
 Omit the trailing filenames to preview every .fbx directly inside the source dir.
 """

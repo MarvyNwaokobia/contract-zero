@@ -55,8 +55,8 @@ export const VIEWMODEL_ADS = new THREE.Vector3(0.1, -0.1, -0.5);
 // `scale` is a small fudge for hand-fit, not a size proxy; z/y slide the weapon
 // in the hands (a long DMR sits pushed out, a pistol held in close).
 export const WEAPON_VIEW: Record<GunId, { scale: number; z: number; y: number }> = {
-  sidearm: { scale: 1.0, z: 0.12, y: -0.02 }, // a compact pistol, held in close
-  smg: { scale: 1.0, z: 0.05, y: -0.01 },     // stubby, snappy
+  sidearm: { scale: 1.0, z: 0.16, y: 0.03 },  // a compact pistol, raised so the grip and hand read
+  smg: { scale: 1.0, z: 0.08, y: 0.025 },     // stubby, snappy; raised so both hands read
   assault_rifle: { scale: 1.0, z: 0, y: 0 },  // the baseline
   marksman: { scale: 1.0, z: -0.05, y: 0.01 },// long — pushed out front
   legendary: { scale: 1.0, z: 0, y: 0 },      // the ZX-0 Prototype
@@ -343,10 +343,10 @@ interface GripTune {
 }
 
 const GRIP: Record<GunId, GripTune> = {
-  sidearm:         { fire: -0.06, support: null, scale: 0.94 },
-  smg:             { fire: -0.10, support: 0.16 },
+  sidearm:         { fire: -0.30, support: null, scale: 0.94 }, // procedural pistol: grip behind the trigger guard
+  smg:             { fire: -0.05, support: 0.22 },  // procedural SMG: support hand on the foregrip
   assault_rifle:   { fire: -0.09, support: 0.16 },
-  marksman:        { fire: -0.10, support: 0.15 },
+  marksman:        { fire: -0.26, support: 0.05 },  // procedural DMR: long stock, grip well back
   legendary:       { fire: -0.09, support: 0.15 },
   ashfall_carbine: { fire: -0.06, support: 0.18 },  // bullpup: grip is well forward
   warden_repeater: { fire: -0.10, support: 0.16 },

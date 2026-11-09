@@ -19,7 +19,7 @@
   --color-friendly: #46c37b;
   --color-fog: #e8e4dc;
   --color-muted: #8d929a;
-  --color-dim: #5b6068;
+  --color-dim: #878d96; /* ≥ 4.5:1 on every panel (WCAG AA) */
   --font-display: var(--font-rajdhani), 'Rajdhani', ui-sans-serif, system-ui, sans-serif;
   --font-sans: var(--font-barlow), 'Barlow', ui-sans-serif, system-ui, sans-serif;
 

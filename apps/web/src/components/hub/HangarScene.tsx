@@ -17,7 +17,7 @@ import * as THREE from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { OperatorRig, type OperatorApi } from '@/engine/scene/OperatorRig'
 import { usePbr } from '@/engine/scene/usePbr'
-import { QUALITY, type Quality } from '@/lib/settings'
+import { QUALITY, fixedTier, type Quality } from '@/lib/settings'
 
 const TEX = '/textures/hangar'
 const W = 26 // hangar width (x)
@@ -385,7 +385,7 @@ function CameraRig({ onFps }: { onFps?: (fps: number) => void }) {
 }
 
 export default function HangarScene({ quality, onFps }: { quality: Quality; onFps?: (fps: number) => void }) {
-  const q = QUALITY[quality]
+  const q = QUALITY[fixedTier(quality)]
   return (
     <Canvas
       dpr={q.dpr}

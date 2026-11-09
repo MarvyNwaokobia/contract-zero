@@ -28,24 +28,23 @@ const PROCEDURAL_LEN: Record<ProceduralGunId, number> = {
   rift_lance:      1.16,  // longest in the set
   seraph_lmg:      1.02,  // heavy, bulky rather than long
   ember_halo:      0.9,
+  // Standard issue and the Marksman: original procedural models (they replaced GLBs
+  // whose source and licence could not be confirmed; see apps/web/CREDITS.md).
+  sidearm:         0.26,
+  smg:             0.52,
+  marksman:        1.12,
 };
 
 const PROCEDURAL_IDS = Object.keys(PROCEDURAL_LEN) as ProceduralGunId[];
 
 export const GUN_MODEL_URL: Record<Exclude<GunId, ProceduralGunId>, string> = {
-  sidearm: '/models/guns/sidearm.glb',
-  smg: '/models/guns/smg.glb',
   assault_rifle: '/models/guns/rifle.glb',
-  marksman: '/models/guns/marksman.glb',
   legendary: '/models/guns/blaster.glb',
 };
 
 /** Real-ish weapon length (metres) each model is scaled to — sets relative size. */
 const GUN_LEN: Record<Exclude<GunId, ProceduralGunId>, string | number> = {
-  sidearm: 0.26,
-  smg: 0.52,
   assault_rifle: 0.88,
-  marksman: 1.12,
   legendary: 0.82,
 };
 
@@ -56,10 +55,7 @@ const GUN_LEN: Record<Exclude<GunId, ProceduralGunId>, string | number> = {
  * against the viewmodel.
  */
 const GUN_FIX: Record<Exclude<GunId, ProceduralGunId>, { flipY: boolean; yaw?: number; pitch?: number; roll?: number }> = {
-  sidearm:       { flipY: true },
-  smg:           { flipY: true },
   assault_rifle: { flipY: true },  // matches the old rifle.ts FLIP
-  marksman:      { flipY: true },
   legendary:     { flipY: true },
 };
 

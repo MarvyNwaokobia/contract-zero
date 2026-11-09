@@ -1,0 +1,95 @@
+{
+  "mode": "gpu",
+  "rows": [
+    {
+      "site": "dustline-depot",
+      "quality": "high",
+      "fps": 35,
+      "p95ms": 33.4,
+      "calls": 254,
+      "triangles": 344963,
+      "pixelRatio": 2,
+      "shadowCasters": 1
+    },
+    {
+      "site": "dustline-depot",
+      "quality": "medium",
+      "fps": 53,
+      "p95ms": 33.3,
+      "calls": 234,
+      "triangles": 324704,
+      "pixelRatio": 1.5,
+      "shadowCasters": 1
+    },
+    {
+      "site": "dustline-depot",
+      "quality": "low",
+      "fps": 60,
+      "p95ms": 16.7,
+      "calls": 119,
+      "triangles": 156513,
+      "pixelRatio": 1,
+      "shadowCasters": 0
+    },
+    {
+      "site": "blacksite",
+      "quality": "high",
+      "fps": 28,
+      "p95ms": 50.1,
+      "calls": 248,
+      "triangles": 304561,
+      "pixelRatio": 2,
+      "shadowCasters": 1
+    },
+    {
+      "site": "blacksite",
+      "quality": "medium",
+      "fps": 55,
+      "p95ms": 33.3,
+      "calls": 231,
+      "triangles": 304570,
+      "pixelRatio": 1.5,
+      "shadowCasters": 1
+    },
+    {
+      "site": "blacksite",
+      "quality": "low",
+      "fps": 60,
+      "p95ms": 16.8,
+      "calls": 120,
+      "triangles": 126989,
+      "pixelRatio": 1,
+      "shadowCasters": 0
+    },
+    {
+      "site": "cinder-yard",
+      "quality": "high",
+      "fps": 51,
+      "p95ms": 33.3,
+      "calls": 289,
+      "triangles": 324684,
+      "pixelRatio": 2,
+      "shadowCasters": 1
+    },
+    {
+      "site": "cinder-yard",
+      "quality": "medium",
+      "fps": 60,
+      "p95ms": 16.7,
+      "calls": 271,
+      "triangles": 324656,
+      "pixelRatio": 1.5,
+      "shadowCasters": 1
+    },
+    {
+      "site": "cinder-yard",
+      "quality": "low",
+      "fps": 60,
+      "p95ms": 16.8,
+      "calls": 140,
+      "triangles": 144817,
+      "pixelRatio": 1,
+      "shadowCasters": 0
+    }
+  ]
+}

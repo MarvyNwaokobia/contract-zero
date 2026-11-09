@@ -141,12 +141,12 @@ function Blinker({ x, y, z, color }: { x: number; y: number; z: number; color: s
 }
 
 /** A refinery flare stack: a tall steel stack and a flame that never quite settles. */
-function FlareStack({ x, z, h }: { x: number; z: number; h: number }) {
+function FlareStack({ x, z, h, calm = false }: { x: number; z: number; h: number; calm?: boolean }) {
   const flame = useRef<THREE.Mesh>(null);
   const light = useRef<THREE.PointLight>(null);
   useFrame((st) => {
     const t = st.clock.elapsedTime;
-    const k = 1 + Math.sin(t * 9) * 0.12 + Math.sin(t * 23) * 0.06;
+    const k = calm ? 1 : 1 + Math.sin(t * 9) * 0.12 + Math.sin(t * 23) * 0.06;
     if (flame.current) { flame.current.scale.set(k, 1.2 * k + Math.sin(t * 5) * 0.15, k); flame.current.rotation.y = t * 0.8; }
     if (light.current) light.current.intensity = 34 * k;
   });
@@ -191,7 +191,7 @@ function Steam({ x, z, minimal }: { x: number; z: number; minimal: boolean }) {
   );
 }
 
-export function LevelArt({ level, minimal = false, lit = true, night: nightProp }: { level: LevelDef; minimal?: boolean; lit?: boolean; night?: boolean }) {
+export function LevelArt({ level, minimal = false, lit = true, night: nightProp, calm = false }: { level: LevelDef; minimal?: boolean; lit?: boolean; night?: boolean; calm?: boolean }) {
   // Night look (glowing windows, cool lamps) follows the hour, not the map.
   const night = nightProp ?? level.id === 'blacksite';
   const corrugated = usePbr('corrugated_iron_02', [1, 1], HANGAR);
@@ -422,7 +422,7 @@ export function LevelArt({ level, minimal = false, lit = true, night: nightProp 
         : <Instanced key={k} items={items} material={(mats as Record<string, THREE.Material>)[k] ?? mats.concrete} cast={cast && !NO_SHADOW.includes(k)} />,
       )}
       {beacons.map((b, i) => <Blinker key={i} x={b.x} y={b.h ?? 5} z={b.z} color={b.color ?? '#ff3b30'} />)}
-      {level.art.filter((a) => a.kind === 'stack').map((a, i) => <FlareStack key={`stack${i}`} x={a.x} z={a.z} h={a.h ?? 20} />)}
+      {level.art.filter((a) => a.kind === 'stack').map((a, i) => <FlareStack key={`stack${i}`} x={a.x} z={a.z} h={a.h ?? 20} calm={calm} />)}
       {level.art.filter((a) => a.kind === 'steam').map((a, i) => <Steam key={`steam${i}`} x={a.x} z={a.z} minimal={minimal} />)}
       {floods.map((f, i) => (
         <group key={i}>

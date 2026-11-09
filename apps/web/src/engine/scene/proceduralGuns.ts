@@ -170,7 +170,87 @@ function muzzleBrake(mat: THREE.Material, cutMat: THREE.Material, r = 0.014): TH
 // ── The weapons ──────────────────────────────────────────────────────────────
 
 export type ProceduralGunId =
-  | 'ashfall_carbine' | 'warden_repeater' | 'rift_lance' | 'seraph_lmg' | 'ember_halo';
+  | 'ashfall_carbine' | 'warden_repeater' | 'rift_lance' | 'seraph_lmg' | 'ember_halo'
+  | 'sidearm' | 'smg' | 'marksman';
+
+/**
+ * SERVICE SIDEARM — a polymer-framed pistol: slide with serrations, a dust-cover
+ * rail, a trigger guard, an angled grip with the magazine base below it. The
+ * standard-issue secondary, so plain: no accent.
+ */
+function serviceSidearm(): THREE.Group {
+  const g = new THREE.Group();
+  const frame = MAT.polymer(0x2b2e33);
+  const slide = MAT.alloy(0x3b4048);
+  const cut = MAT.cut();
+  g.add(place(roundedBox(0.03, 0.034, 0.19, 0.008, slide), 0, 0.03, 0.0));        // slide
+  g.add(slots(6, 0.009, 0.032, 0.022, 0.003, -0.085, 0.03, cut));                  // rear serrations
+  g.add(place(roundedBox(0.008, 0.008, 0.02, 0.002, cut), 0, 0.05, 0.08));         // front sight
+  g.add(place(roundedBox(0.018, 0.008, 0.012, 0.002, cut), 0, 0.05, -0.085));      // rear sight
+  g.add(place(roundedBox(0.026, 0.026, 0.15, 0.006, frame), 0, 0.004, 0.01));      // frame
+  g.add(place(tube(0.006, 0.006, 0.02, MAT.steel()), 0, 0.034, 0.1));              // muzzle
+  g.add(rail(0.05, 0.05, -0.012, frame, cut));                                      // dust-cover rail (underside)
+  const guard = new THREE.Mesh(new THREE.TorusGeometry(0.019, 0.004, 6, 14, Math.PI), frame);
+  guard.rotation.set(0, Math.PI / 2, Math.PI);
+  g.add(place(guard, 0, -0.012, 0.005));                                            // trigger guard
+  g.add(place(pistolGrip(frame, 0.26), 0, -0.05, -0.055));
+  g.add(place(roundedBox(0.03, 0.01, 0.046, 0.003, slide), 0, -0.11, -0.072));     // magazine base
+  return g;
+}
+
+/**
+ * COMPACT SMG — a short, boxy submachine gun: a squared receiver, a vertical
+ * foregrip, a straight stick magazine forward of the grip and a folding wire stock.
+ */
+function compactSmg(): THREE.Group {
+  const g = new THREE.Group();
+  const shell = MAT.polymer(0x30343a);
+  const metal = MAT.alloy(0x4a5058);
+  const barrel = MAT.steel();
+  const cut = MAT.cut();
+  g.add(place(roundedBox(0.046, 0.07, 0.24, 0.01, shell), 0, 0, 0.0));             // receiver
+  g.add(slots(5, 0.02, 0.048, 0.004, 0.006, -0.06, 0.02, cut));                    // receiver ribs
+  g.add(rail(0.17, 0.0, 0.04, metal, cut));
+  g.add(place(tube(0.012, 0.012, 0.1, barrel), 0, 0.006, 0.16));                    // barrel
+  g.add(place(tube(0.016, 0.016, 0.04, metal), 0, 0.006, 0.2));                     // suppressor-style cap
+  g.add(place(roundedBox(0.026, 0.06, 0.03, 0.008, shell), 0, -0.065, 0.08));      // vertical foregrip
+  g.add(place(magazine(metal, 0.12, 0.0), 0, -0.05, 0.03));                         // straight stick mag
+  g.add(place(pistolGrip(shell, 0.28), 0, -0.07, -0.06));
+  // Folding wire stock: two struts and a butt plate.
+  for (const x of [-0.016, 0.016]) g.add(place(tube(0.004, 0.004, 0.16, metal, 6), x, 0.0, -0.2));
+  g.add(place(roundedBox(0.044, 0.05, 0.012, 0.004, shell), 0, 0.0, -0.285));
+  g.add(place(roundedBox(0.03, 0.026, 0.03, 0.006, metal), 0, 0.055, -0.03));      // red-dot housing
+  g.add(place(tube(0.009, 0.009, 0.004, MAT.glass(0xff5a3a)), 0, 0.058, -0.015));
+  return g;
+}
+
+/**
+ * MARKSMAN RIFLE — a long, slim precision rifle: a fluted heavy barrel with a brake,
+ * a free-float handguard, a long optic on a high mount, a short box magazine and an
+ * adjustable stock with a cheek riser.
+ */
+function marksmanRifle(): THREE.Group {
+  const g = new THREE.Group();
+  const furniture = MAT.polymer(0x3d4044);
+  const metal = MAT.alloy(0x2c3036);
+  const barrel = MAT.steel(0x17181b);
+  const cut = MAT.cut();
+  g.add(place(roundedBox(0.044, 0.064, 0.26, 0.01, metal), 0, 0, -0.02));          // receiver
+  g.add(rail(0.36, 0.04, 0.042, metal, cut));
+  g.add(place(roundedBox(0.04, 0.046, 0.28, 0.012, furniture), 0, 0.0, 0.25));     // handguard
+  g.add(slots(6, 0.04, 0.042, 0.006, 0.014, 0.15, -0.012, cut));                    // handguard cuts
+  g.add(place(tube(0.012, 0.012, 0.5, barrel), 0, 0.004, 0.5));                     // heavy barrel
+  g.add(place(muzzleBrake(metal, cut, 0.016), 0, 0.004, 0.77));
+  g.add(place(opticTube(metal, MAT.glass(0x7fb0ff), 0.16, 0.016), 0, 0.075, 0.0)); // long optic
+  g.add(place(roundedBox(0.028, 0.03, 0.024, 0.004, metal), 0, 0.058, -0.06));      // rear mount
+  g.add(place(roundedBox(0.028, 0.03, 0.024, 0.004, metal), 0, 0.058, 0.06));       // front mount
+  g.add(place(magazine(metal, 0.07, 0.0), 0, -0.05, 0.02));                         // short box mag
+  g.add(place(pistolGrip(furniture, 0.3), 0, -0.07, -0.09));
+  g.add(place(roundedBox(0.038, 0.07, 0.2, 0.014, furniture), 0, -0.01, -0.25));   // stock
+  g.add(place(roundedBox(0.032, 0.02, 0.1, 0.006, furniture), 0, 0.035, -0.23));   // cheek riser
+  g.add(place(roundedBox(0.04, 0.09, 0.02, 0.008, cut), 0, -0.01, -0.355));        // butt pad
+  return g;
+}
 
 /**
  * DUSTLINE CARBINE — a compact bullpup. Magazine BEHIND the grip, which is what makes
@@ -349,6 +429,9 @@ const BUILDERS: Record<ProceduralGunId, () => THREE.Group> = {
   rift_lance: riftLance,
   seraph_lmg: seraphLmg,
   ember_halo: emberHalo,
+  sidearm: serviceSidearm,
+  smg: compactSmg,
+  marksman: marksmanRifle,
 };
 
 /**

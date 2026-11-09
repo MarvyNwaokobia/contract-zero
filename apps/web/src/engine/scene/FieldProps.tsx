@@ -154,7 +154,7 @@ function useSmokeTexture() {
 
 const PUFFS = 9;
 
-function ExfilZone({ field, lowSpec }: { field: FieldRuntime; lowSpec: boolean }) {
+function ExfilZone({ field, lowSpec, calm = false }: { field: FieldRuntime; lowSpec: boolean; calm?: boolean }) {
   const z = field.spec.exfil!;
   const ring = useRef<THREE.Mesh>(null);
   const arc = useRef<THREE.Mesh>(null);
@@ -196,7 +196,7 @@ function ExfilZone({ field, lowSpec }: { field: FieldRuntime; lowSpec: boolean }
         (s.material as THREE.SpriteMaterial).color.set(phase === 'counting' || phase === 'done' ? '#7fe0a0' : '#ff9a4a');
       });
     }
-    if (flareLight.current) flareLight.current.intensity = live ? 5 + Math.sin(t * 23) * 1.5 + Math.sin(t * 7) * 1.2 : 0;
+    if (flareLight.current) flareLight.current.intensity = live ? (calm ? 5 : 5 + Math.sin(t * 23) * 1.5 + Math.sin(t * 7) * 1.2) : 0;
     if (zoneLight.current) zoneLight.current.intensity = phase === 'counting' ? 3 : 0;
     void dt;
   });
@@ -248,7 +248,7 @@ function ExfilZone({ field, lowSpec }: { field: FieldRuntime; lowSpec: boolean }
   );
 }
 
-export function FieldProps({ field, lowSpec = false, guns }: { field: FieldRuntime; lowSpec?: boolean; guns?: Record<GunId, THREE.Group> }) {
+export function FieldProps({ field, lowSpec = false, guns, calm = false }: { field: FieldRuntime; lowSpec?: boolean; guns?: Record<GunId, THREE.Group>; calm?: boolean }) {
   const refs = useRef(new Map<string, THREE.Group>());
   const [count, setCount] = useState(field.items.size);
   const boomAt = useRef(-1);
@@ -299,13 +299,14 @@ export function FieldProps({ field, lowSpec = false, guns }: { field: FieldRunti
             const a = t - boomAt.current;
             const ball = boom.getObjectByName('ball') as THREE.Mesh | undefined;
             if (ball) {
-              ball.visible = a < 0.9;
+              // Reduced flashes: no fireball pulse, a steady glow instead.
+              ball.visible = !calm && a < 0.9;
               ball.scale.setScalar(0.5 + a * 6);
               ball.position.y = 1 + a * 1.5;
               (ball.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 0.9 - a);
             }
             const fire = boom.getObjectByName('fire') as THREE.PointLight | undefined;
-            if (fire) fire.intensity = a < 0.4 ? 80 : 6 + Math.sin(t * 17) * 2 + Math.sin(t * 5) * 2;
+            if (fire) fire.intensity = calm ? 6 : a < 0.4 ? 80 : 6 + Math.sin(t * 17) * 2 + Math.sin(t * 5) * 2;
           }
         }
       }
@@ -324,7 +325,7 @@ export function FieldProps({ field, lowSpec = false, guns }: { field: FieldRunti
           {i.kind === 'charge' && <Charge />}
         </group>
       ))}
-      {field.spec.exfil && <ExfilZone field={field} lowSpec={lowSpec} />}
+      {field.spec.exfil && <ExfilZone field={field} lowSpec={lowSpec} calm={calm} />}
     </group>
   );
 }

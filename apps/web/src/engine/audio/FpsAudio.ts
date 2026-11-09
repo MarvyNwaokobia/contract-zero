@@ -81,6 +81,12 @@ export class FpsAudio {
   private uiBus!: GainNode;
   private ambBus!: GainNode;
   private ambBaseVol = 0.05;
+  /** The player's mix (Settings → Audio) and whether the tab is in the background. */
+  private mix = { master: 0.9, effects: 1, voice: 1, ambience: 0.8, ui: 0.8 };
+  private backgroundMuted = false;
+  private voiceBus!: GainNode;
+  /** The ambience level after the player's ambience slider. */
+  private get ambTarget(): number { return this.ambBaseVol * this.mix.ambience; }
   private ambLp: BiquadFilterNode | null = null; // the ambience tone filter (retuned per zone)
   private drone: OscillatorNode | null = null;   // optional low zone hum (the Rift / Survival)
   /** A refinery's machinery: a pump hum and steam vents letting go now and then. */
@@ -139,8 +145,10 @@ export class FpsAudio {
       this.gunBus.gain.value = 0.9;
       this.impactBus.gain.value = 0.9;
       this.uiBus.gain.value = 0.8;
-      this.ambBus.gain.value = this.ambBaseVol;
-      for (const b of [this.gunBus, this.impactBus, this.uiBus, this.ambBus]) b.connect(this.master);
+      this.ambBus.gain.value = this.ambTarget;
+      this.voiceBus = ctx.createGain();
+      for (const b of [this.gunBus, this.impactBus, this.uiBus, this.ambBus, this.voiceBus]) b.connect(this.master);
+      this.applyMix();
 
       this.startAmbience();
       void this.loadSamples();
@@ -175,8 +183,8 @@ export class FpsAudio {
     this.lyaw = yaw;
   }
 
-  stats(): FpsAudioStats {
-    return { ...this.stats_ };
+  stats(): FpsAudioStats & { mix: { master: number; effects: number; voice: number; ambience: number; ui: number }; backgroundMuted: boolean; masterGain: number | null } {
+    return { ...this.stats_, mix: { ...this.mix }, backgroundMuted: this.backgroundMuted, masterGain: this.master ? this.master.gain.value : null };
   }
 
   dispose(): void {
@@ -491,7 +499,7 @@ export class FpsAudio {
   private playVoFile(id: string): void {
     try {
       const el = new Audio(`/vo/${id}.mp3`);
-      el.volume = 0.95;
+      el.volume = this.backgroundMuted ? 0 : Math.min(1, 0.95 * this.mix.voice * Math.min(1, this.mix.master / 0.9));
       // Some lines run long: hold the subtitle for the RECORDING, not a guess.
       el.addEventListener('loadedmetadata', () => {
         if (Number.isFinite(el.duration) && el.duration > 0) this.voDurations.set(id, el.duration);
@@ -528,7 +536,7 @@ export class FpsAudio {
     const g = ctx.createGain();
     g.gain.setValueAtTime(vol, now);
     g.gain.exponentialRampToValueAtTime(0.001, now + dur);
-    src.connect(bp).connect(g).connect(this.uiBus);
+    src.connect(bp).connect(g).connect(this.voiceBus ?? this.uiBus);
     src.start(now);
     src.stop(now + dur + 0.02);
   }
@@ -660,7 +668,7 @@ export class FpsAudio {
     if (!ctx) return; // applied by startAmbience() on the next unlock()
     if (this.ambLp) this.ambLp.frequency.setTargetAtTime(cfg.lp, ctx.currentTime, 0.4);
     this.ambBus.gain.cancelScheduledValues(ctx.currentTime);
-    this.ambBus.gain.setTargetAtTime(cfg.vol, ctx.currentTime, 0.6);
+    this.ambBus.gain.setTargetAtTime(this.ambTarget, ctx.currentTime, 0.6);
     this.setDrone(cfg.drone);
   }
 
@@ -686,6 +694,31 @@ export class FpsAudio {
   }
 
   // ── internals ─────────────────────────────────────────────────────────────
+  /** The player's volume mix, applied immediately (0…1 each). */
+  setMix(m: { master: number; effects: number; voice: number; ambience: number; ui: number }): void {
+    this.mix = { ...m };
+    this.applyMix();
+  }
+
+  /** Silence everything while the tab is hidden (if the player wants that). */
+  setBackgroundMuted(muted: boolean): void {
+    this.backgroundMuted = muted;
+    this.applyMix();
+  }
+
+  private applyMix(): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.master) return;
+    const t = ctx.currentTime;
+    const set = (g: GainNode | undefined, v: number) => g?.gain.setTargetAtTime(v, t, 0.05);
+    set(this.master, this.backgroundMuted ? 0 : this.mix.master);
+    set(this.gunBus, 0.9 * this.mix.effects);
+    set(this.impactBus, 0.9 * this.mix.effects);
+    set(this.uiBus, this.mix.ui);
+    set(this.voiceBus, this.mix.voice);
+    set(this.ambBus, this.ambTarget);
+  }
+
   /** Turn the refinery machinery bed on or off (Cinder Yard). */
   setMachinery(on: boolean): void {
     this.machineryOn = on;
@@ -776,8 +809,8 @@ export class FpsAudio {
     const g = this.ambBus.gain;
     const now = ctx.currentTime;
     g.cancelScheduledValues(now);
-    g.setValueAtTime(Math.max(0, this.ambBaseVol * (1 - amount)), now);
-    g.linearRampToValueAtTime(this.ambBaseVol, now + seconds + 0.25);
+    g.setValueAtTime(Math.max(0, this.ambTarget * (1 - amount)), now);
+    g.linearRampToValueAtTime(this.ambTarget, now + seconds + 0.25);
   }
 
   private tick(freq: number, vol: number, delay: number): void {

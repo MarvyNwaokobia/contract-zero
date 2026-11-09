@@ -2,7 +2,8 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { PerformanceMonitor, AdaptiveDpr } from '@react-three/drei';
+import { AdaptiveDpr } from '@react-three/drei';
+import { AutoQuality, readAutoLevel, writeAutoLevel, type AutoLevel } from '../perf/autoQuality';
 import { EffectComposer, Bloom, Noise, Vignette, ChromaticAberration, N8AO } from '@react-three/postprocessing';
 import { BlendFunction } from 'postprocessing';
 import * as THREE from 'three';
@@ -31,6 +32,7 @@ import { LevelArt } from './LevelArt';
 import { FieldProps } from './FieldProps';
 import { ItemInspector } from '@/components/inspect/ItemInspector';
 import type { InspectItem } from '@/components/inspect/itemInfo';
+import { useSettings, updateSettings, type Settings } from '@/lib/settings';
 import { FieldRuntime, trainingField, BLAST_RADIUS, CARRY_MAX, type FieldEvent, type FieldRecord, type ProtoEvent } from '../fps/field';
 import { CAMPAIGN, CAMPAIGN_KEY, PROGRESS_KEY, ZONE_THEMES, themeForMission, SURVIVAL_MISSION, GAUNTLET_MISSION, ENDLESS_MISSION, SEASONAL_MISSION, survivalWaveCount, survivalWaveHp, gauntletWaveCount, gauntletWaveHp, type Mission } from '../fps/campaign';
 import {
@@ -274,6 +276,21 @@ function detectTouchDevice(): boolean {
   // and trackpad laptops that merely happen to have a touchscreen.
   if (navigator.maxTouchPoints > 0 && window.matchMedia?.('(pointer: coarse)')?.matches) return true;
   return false;
+}
+
+/** Feeds frame times to the auto-quality controller (inside the Canvas). */
+function AutoQualityProbe({ level, onStep }: { level: AutoLevel; onStep: (l: AutoLevel) => void }) {
+  const ctl = useMemo(() => new AutoQuality(level), [level]);
+  useFrame((_, dt) => {
+    const step = ctl.frame(dt);
+    if (step !== null) onStep(step);
+  });
+  useEffect(() => {
+    const w = window as unknown as Record<string, unknown>;
+    w.__czAutoQuality = () => ({ level: ctl.level, fps: Math.round(ctl.fps) });
+    return () => { delete w.__czAutoQuality; };
+  }, [ctl]);
+  return null;
 }
 
 /** Shared outlined-button style for the pause menu (C4). */
@@ -578,7 +595,7 @@ function PerfHud({ hud }: { hud: React.MutableRefObject<Hud> }) {
   return null;
 }
 
-function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, onComplete, onDeath, endOnDeath, pausedRef, gateRef, accountRank, accountXp, equippedGun, equippedAmmo, equippedMods, fieldKit, endlessOpts, coop, onProtocol, onInspect, inspectingRef }: {
+function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, onComplete, onDeath, endOnDeath, pausedRef, gateRef, accountRank, accountXp, equippedGun, equippedAmmo, equippedMods, fieldKit, endlessOpts, coop, onProtocol, onInspect, inspectingRef, settingsRef }: {
   /** Contract mode: a final death ends the run (the page shows the result) instead of restarting the op. */
   endOnDeath?: boolean;
   hud: React.MutableRefObject<Hud>; controls: React.MutableRefObject<Controls>;
@@ -619,6 +636,8 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
    *  fight goes on but the player's input is held (standing still, weapon down). */
   onInspect?: (item: InspectItem) => void;
   inspectingRef?: React.MutableRefObject<boolean>;
+  /** Live player settings (FOV, reduced motion and flashes, subtitles, interaction). */
+  settingsRef?: React.MutableRefObject<Settings>;
 }) {
   const { camera, gl, scene } = useThree();
 
@@ -1040,6 +1059,12 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
   const holdProgress = useRef(0);       // sim-seconds held on a defend point
   const wantHeal = useRef(false);
   const wantInspect = useRef(false);
+  /** The quality tier in force, for the dev readout (props change without a remount). */
+  const tierRef = useRef({ minimal, lightFx });
+  tierRef.current = { minimal, lightFx };
+  /** Toggle-to-interact: E starts a hold that runs until it completes, E again, or the target changes. */
+  const interactLatch = useRef(false);
+  const latchTarget = useRef<string | null>(null);
   const fieldToast = useRef<{ text: string; until: number; color: string }>({ text: '', until: 0, color: '#e9edf2' });
   const lastFieldHtml = useRef('');
   const lastBeep = useRef(-1);
@@ -1281,6 +1306,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       keys.current.add(e.code);
       if (e.code === 'KeyR') wantReload.current = true;
       if (e.code === 'KeyH') wantHeal.current = true;      // apply a field dressing
+      if (e.code === 'KeyE' && settingsRef?.current.access.toggleInteract) interactLatch.current = !interactLatch.current; // toggle mode
       if (e.code === 'KeyI' && !inspectingRef?.current) wantInspect.current = true; // inspect what you're looking at
       if (e.code === 'KeyB') cycleFireMode.current = true; // toggle semi/burst/auto
       if (e.code === 'Digit1') wantSlot.current = 0;       // primary
@@ -1432,7 +1458,27 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       pitch: +staggerP.current.toFixed(4), yaw: +staggerY.current.toFixed(4), shake: +shake.current.toFixed(4),
     });
     w.__czColliders = () => COLLIDERS;
-    w.__czCam = () => ({ x: +camera.position.x.toFixed(3), z: +camera.position.z.toFixed(3) });
+    w.__czCam = () => ({ x: +camera.position.x.toFixed(3), z: +camera.position.z.toFixed(3), fov: +(camera as THREE.PerspectiveCamera).fov.toFixed(1), roll: +camera.rotation.z.toFixed(4) });
+    // Draw calls and triangles per frame, counted across every pass (post-processing
+    // resets the renderer's counters each pass, so the default reading is the last quad).
+    w.__czDrawStats = (frames = 30) => new Promise((res) => {
+      const info = gl.info;
+      info.autoReset = false;
+      info.reset();
+      let n = 0;
+      const tick = () => {
+        if (++n < frames) { requestAnimationFrame(tick); return; }
+        const out = { calls: Math.round(info.render.calls / frames), triangles: Math.round(info.render.triangles / frames) };
+        info.autoReset = true;
+        res(out);
+      };
+      requestAnimationFrame(tick);
+    });
+    w.__czRender = () => {
+      let casting = 0;
+      scene.traverse((o) => { if ((o as THREE.Light).isLight && o.castShadow) casting++; });
+      return { pixelRatio: gl.getPixelRatio(), shadowCasters: casting, ...tierRef.current };
+    };
     // audition any presence line (also lets us verify which ids have a recording)
     w.__czVo = (id: string, speaker: Speaker) => audio.vo(id, speaker);
     w.__czSetXp = (n: number) => { careerXp.current = n; try { window.localStorage.setItem(XP_KEY, String(n)); } catch { /* ignore */ } };
@@ -1479,7 +1525,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       delete w.__czState; delete w.__czKillAll; delete w.__czKillRoom; delete w.__czKillPlayer; delete w.__czAim; delete w.__czAudio;
       delete w.__czMission; delete w.__czEndless; delete w.__czWarp; delete w.__czSkipBriefing;
       delete w.__czXp; delete w.__czSetXp; delete w.__czStory; delete w.__czVo; delete w.__czRig; delete w.__czPlayer; delete w.__czColliders; delete w.__czCam; delete w.__czStagger; delete w.__czHurtBoss; delete w.__czWakeRoom; delete w.__czSwitch; delete w.__czFire; delete w.__czToggle;
-      delete w.__czRevive; delete w.__czResupply; delete w.__czWaveSkip; delete w.__czPerf; delete w.__czField; delete w.__czPath;
+      delete w.__czRevive; delete w.__czResupply; delete w.__czWaveSkip; delete w.__czPerf; delete w.__czField; delete w.__czPath; delete w.__czRender; delete w.__czDrawStats;
     };
   }, [sim, audio]);
 
@@ -1738,14 +1784,18 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       eyeY,
       pos.current.z - sinY * leanX + shoveZ.current,
     );
-    const sh = shake.current;
+    // Reduced motion: no shake or handheld sway, and a much gentler hit stagger.
+    const calm = settingsRef?.current.access.reduceMotion ? 0 : 1;
+    const sh = shake.current * calm;
+    const stag = calm ? 1 : 0.3;
     cam.rotation.set(
-      pitch.current + recoilP.current + swayPitch + staggerP.current + (Math.random() - 0.5) * sh * 0.5,
-      yaw.current + recoilY.current + swayYaw + staggerY.current + (Math.random() - 0.5) * sh * 0.5,
-      -lean * 0.14 + swayRoll + (Math.random() - 0.5) * sh,
+      pitch.current + recoilP.current + swayPitch * calm + staggerP.current * stag + (Math.random() - 0.5) * sh * 0.5,
+      yaw.current + recoilY.current + swayYaw * calm + staggerY.current * stag + (Math.random() - 0.5) * sh * 0.5,
+      -lean * 0.14 + swayRoll * calm + (Math.random() - 0.5) * sh,
       'YXZ',
     );
-    const adsFov = THREE.MathUtils.lerp(55, 42, adsCur.current);
+    const baseFov = settingsRef?.current.fov ?? 55;
+    const adsFov = THREE.MathUtils.lerp(baseFov, Math.min(baseFov, 42), adsCur.current);
     if (Math.abs(cam.fov - adsFov) > 0.05) { cam.fov = adsFov; cam.updateProjectionMatrix(); }
     cam.updateMatrixWorld();
     cam.matrixWorldInverse.copy(cam.matrixWorld).invert(); // for threat-arrow projection
@@ -1801,8 +1851,9 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       const local = tmp.copy(VIEWMODEL_HIP).lerp(VIEWMODEL_ADS, adsCur.current);
       local.z += view.z; local.y += view.y;                 // where this weapon sits
       // bob: a gentle walk figure-8 on the viewmodel when moving
-      local.x += Math.sin(bobPhase.current) * BOB * (moving ? 1 : 0);
-      local.y += Math.abs(Math.cos(bobPhase.current)) * BOB * (moving ? 1 : 0);
+      const bob = BOB * (moving ? 1 : 0) * (settingsRef?.current.access.reduceMotion ? 0 : 1);
+      local.x += Math.sin(bobPhase.current) * bob;
+      local.y += Math.abs(Math.cos(bobPhase.current)) * bob;
       local.y -= swapRaise.current * 0.22;                  // dips down as it's raised
       local.z += recoilP.current * 2.2; // kick back toward the camera on fire
       // WALL PULLBACK: retract the viewmodel toward the eye when a wall is close ahead,
@@ -1836,7 +1887,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
     nvgAmt.current += (((sim.hasAttachment('nvg') && !blackout) ? 1 : 0) - nvgAmt.current) * Math.min(1, dt * 8);
     gl.toneMappingExposure = 1.32 + nvgAmt.current * 1.7; // brighter base; NVG lifts further
     // Optic deepens the ADS zoom (narrower FOV); no optic = a gentler aim zoom.
-    const fovTarget = THREE.MathUtils.lerp(55, sim.hasAttachment('optic') ? 30 : 45, adsCur.current);
+    const fovTarget = THREE.MathUtils.lerp(settingsRef?.current.fov ?? 55, sim.hasAttachment('optic') ? 30 : 45, adsCur.current);
     if (Math.abs(cam.fov - fovTarget) > 0.02) { cam.fov = fovTarget; cam.updateProjectionMatrix(); }
     // Flashlight: a forward cone from the muzzle line.
     flashLight.intensity += ((sim.hasAttachment('light') ? 7 : 0) - flashLight.intensity) * Math.min(1, dt * 10);
@@ -1921,7 +1972,8 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       if (ev.kind === 'fire') {
         // muzzle flash + light + recoil kick
         muzzleRef.current.getWorldPosition(tmp2);
-        if (muzzleLight.current) { muzzleLight.current.position.copy(tmp2); muzzleLight.current.intensity = feel.lightIntensity; }
+        // Reduced flashes: automatic fire would otherwise flicker the whole scene ~10×/s.
+        if (muzzleLight.current) { muzzleLight.current.position.copy(tmp2); muzzleLight.current.intensity = feel.lightIntensity * (settingsRef?.current.access.reduceFlashes ? 0.25 : 1); }
         if (flashRef.current) { flashRef.current.position.copy(tmp2); flashRef.current.visible = true; flashRef.current.scale.setScalar(0.18 * feel.flashScale * (0.8 + Math.random() * 0.5)); }
         flashUntil.current = now + 0.045;
         const kick = 0.02 * feel.kick * (1 - 0.4 * adsCur.current);
@@ -2038,8 +2090,14 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       FIELD.exfilAllowed = !!cur && completeAt.current < 0 && sim.time > briefingUntil.current
         && (cur.kind === 'extract' || (cur.kind === 'secure' && FIELD.carried.length > 0));
       const view = { x: pos.current.x, z: pos.current.z, eyeY: cam.position.y, yaw: yaw.current, pitch: pitch.current };
-      const interact = sim.playerAlive && completeAt.current < 0 && (held('KeyE') || ct.interact);
-      for (const fe of FIELD.update(dt, view, interact, sim, losClear)) onFieldEvent(fe);
+      const toggle = !!settingsRef?.current.access.toggleInteract;
+      if (toggle && interactLatch.current && latchTarget.current !== null && FIELD.target?.id !== latchTarget.current) interactLatch.current = false;
+      latchTarget.current = interactLatch.current ? (FIELD.target?.id ?? null) : null;
+      const pressing = toggle ? interactLatch.current || ct.interact : held('KeyE') || ct.interact;
+      const interact = sim.playerAlive && completeAt.current < 0 && pressing;
+      const fevs = FIELD.update(dt, view, interact, sim, losClear);
+      if (toggle && fevs.length) interactLatch.current = false; // done (or refused): release the latch
+      for (const fe of fevs) onFieldEvent(fe);
       // A position heartbeat each second of game time lets the server check movement.
       if (FIELD.ms - lastHeartbeat.current >= 1000) { lastHeartbeat.current = FIELD.ms; FIELD.note('pos'); }
       if (FIELD.log.length) { const evs = FIELD.log.splice(0); onProtocol?.(evs); }
@@ -3089,7 +3147,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
     if (h.loadout) {
       // two-slot readout: the active weapon's number is bright, the other dim
       h.loadout.innerHTML = snap.loadout.length < 2 ? '' :
-        snap.loadout.map((_, i) => `<span style="color:${i === snap.slot ? '#37d0e0' : '#4a5763'}">${i + 1}</span>`).join('<span style="color:#39434d"> · </span>');
+        snap.loadout.map((_, i) => `<span style="color:${i === snap.slot ? '#37d0e0' : '#7d8a96'}">${i + 1}</span>`).join('<span style="color:#39434d"> · </span>');
     }
     if (h.nvgTint) h.nvgTint.style.opacity = String(nvgAmt.current);
     if (h.scope) h.scope.style.opacity = String(snap.attachments.includes('optic') ? adsCur.current : 0);
@@ -3098,7 +3156,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       const on = new Set(snap.attachments);
       h.attachments.innerHTML = ATTACH_CHIPS.map((c) => {
         const active = on.has(c.id);
-        return `<span style="font-size:10px;letter-spacing:1px;padding:3px 7px;border-radius:4px;border:1px solid ${active ? c.color : '#2a3440'};background:${active ? c.color + '22' : 'transparent'};color:${active ? c.color : '#4a5763'}">${c.label}<span style="opacity:.55"> ${c.key}</span></span>`;
+        return `<span style="font-size:10px;letter-spacing:1px;padding:3px 7px;border-radius:4px;border:1px solid ${active ? c.color : '#2a3440'};background:${active ? c.color + '22' : 'transparent'};color:${active ? c.color : '#7d8a96'}">${c.label}<span style="opacity:.55"> ${c.key}</span></span>`;
       }).join('');
     }
     // Mobile kit chips carry no on/off state in their static style, so light them
@@ -3138,7 +3196,9 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
     }
     if (h.vignette) {
       const lowHp = 1 - Math.min(1, snap.playerHp / 35);
-      h.vignette.style.opacity = String(Math.min(0.85, Math.max(vignetteHit.current, lowHp * 0.5)));
+      // Reduced flashes: the hit flash is a steady tint, never a full-screen pulse.
+      const cap = settingsRef?.current.access.reduceFlashes ? 0.3 : 0.85;
+      h.vignette.style.opacity = String(Math.min(cap, Math.max(vignetteHit.current, lowHp * 0.5)));
     }
 
     // mission HUD: current objective + distance, and the briefing fade
@@ -3320,9 +3380,11 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       const line = voQueue.current.shift()!;
       audio.vo(line.id, line.speaker);
       const meta = SPEAKER_META[line.speaker];
-      if (h.subName) { h.subName.textContent = meta.name; h.subName.style.color = meta.color; }
+      const subs = settingsRef?.current.subtitles;
+      if (h.subName) { h.subName.textContent = meta.name; h.subName.style.color = subs?.speakerColors === false ? '#e9edf2' : meta.color; }
       if (h.subText) h.subText.textContent = line.text;
-      if (h.subWrap) h.subWrap.style.opacity = '1';
+      // Subtitles off: the radio still plays, the text doesn't.
+      if (h.subWrap) h.subWrap.style.opacity = subs?.on === false ? '0' : '1';
       voStartedAt.current = now;
       voCurrentId.current = line.id;
       voUntil.current = now + Math.max(2.8, line.text.length * 0.055); // read-speed guess
@@ -3453,7 +3515,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
           off the FRONT of this list, which shifts every later index and would make
           React re-render every wall in the world on each room advance — a hitch per
           doorway. Keyed this way, the walls that didn't change keep their identity. */}
-      {LEVEL && <LevelArt level={LEVEL} minimal={minimal} lit={mission.zone !== 'DUSTLINE'} night={mission.conditions ? mission.conditions.phase === 'night' : undefined} />}
+      {LEVEL && <LevelArt level={LEVEL} minimal={minimal} lit={mission.zone !== 'DUSTLINE'} night={mission.conditions ? mission.conditions.phase === 'night' : undefined} calm={settingsRef?.current.access.reduceFlashes} />}
       {!LEVEL && LEVEL_WALLS.map((c, i) => (
         <group key={`w${c.x}_${c.z}_${c.w}_${c.d}`}>
           {/* Every wall SHARES one unit cube and is scaled to size. Authoring a fresh
@@ -3488,7 +3550,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       {!minimal && <SetDressing props={DRESSING} mats={propMaterials} />}
 
       {/* the op's physical objects: supplies, cargo, charges, the extraction zone */}
-      <FieldProps field={FIELD} lowSpec={lowSpec || minimal} guns={gunProtos} />
+      <FieldProps field={FIELD} lowSpec={lowSpec || minimal} guns={gunProtos} calm={settingsRef?.current.access.reduceFlashes} />
 
       {/* waypoint beacon at the current objective */}
       <group ref={waypointRef}>
@@ -3759,7 +3821,7 @@ function MissionSelect({ current, progress, onPick, onSurvival, onGauntlet, gaun
           </button>
         </div>
 
-        <div style={{ fontSize: 11, color: '#4a5763', letterSpacing: 1, textAlign: 'center', marginTop: 8 }}>
+        <div style={{ fontSize: 11, color: '#7d8a96', letterSpacing: 1, textAlign: 'center', marginTop: 8 }}>
           selecting an operation restarts it from the breach · press M to toggle this board
         </div>
       </div>
@@ -4157,46 +4219,65 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
   const [isTouch] = useState(detectTouchDevice);
   // Graphics quality. 'auto' = detect (default), 'high' = force full effects,
   // 'low' = force the minimal tier. Persisted so a weak machine stays fixed.
-  const [quality, setQuality] = useState<'auto' | 'high' | 'low'>(() => {
-    if (typeof window === 'undefined') return 'auto';
-    const q = window.localStorage.getItem('cz_quality');
-    return q === 'high' || q === 'low' ? q : 'auto';
-  });
-  const pickQuality = useCallback((q: 'auto' | 'high' | 'low') => {
-    setQuality(q);
-    setDegraded(false); // let 'auto' re-evaluate; 'high'/'low' are explicit
-    try {
-      window.localStorage.setItem('cz_quality', q);
-      // HIGH means "this machine is fine" → forget the auto-detect so it starts full.
-      if (q === 'high') window.localStorage.removeItem('cz_degraded');
-    } catch { /* private mode */ }
+  // Every player setting (graphics, audio, subtitles, controls, accessibility) comes
+  // from one place (lib/settings) and applies live; the pause menu writes to it too.
+  const settings = useSettings();
+  const settingsRef = useRef<Settings>(settings);
+  settingsRef.current = settings;
+  const quality = settings.quality;
+  const pickQuality = useCallback((q: Settings['quality']) => {
+    // Choosing a tier (or Auto again) forgets what auto had learned: Auto re-measures.
+    setAutoLevel(0);
+    try { window.localStorage.removeItem('cz_degraded'); } catch { /* private mode */ }
+    updateSettings((s) => ({ ...s, quality: q }));
   }, []);
-  // Look sensitivity. Mirrored in React state purely so the slider re-renders; the
-  // frame loop reads controls.current.lookSens, so a drag is felt immediately.
-  const [lookSens, setLookSens] = useState<number>(loadLookSens);
+  // Look sensitivity: the frame loop reads controls.current.lookSens, so a drag is
+  // felt immediately; the setting persists it.
+  const lookSens = settings.lookSens;
+  useEffect(() => { controls.current.lookSens = settings.lookSens; }, [settings.lookSens]);
   const pickLookSens = useCallback((v: number) => {
     const clamped = Math.max(SENS_MIN, Math.min(SENS_MAX, v));
-    setLookSens(clamped);
     controls.current.lookSens = clamped;
-    try { window.localStorage.setItem(SENS_KEY, String(clamped)); } catch { /* private mode */ }
+    updateSettings((s) => ({ ...s, lookSens: clamped }));
   }, []);
+  // The player's mix, and silence while the tab is in the background (if chosen).
+  useEffect(() => { audio.setMix(settings.audio); }, [audio, settings.audio]);
+  useEffect(() => {
+    const apply = () => audio.setBackgroundMuted(settingsRef.current.muteInBackground && document.hidden);
+    apply();
+    document.addEventListener('visibilitychange', apply);
+    return () => document.removeEventListener('visibilitychange', apply);
+  }, [audio, settings.muteInBackground]);
+  // Subtitles: size, backing and speaker colours (on/off is read as each line plays).
+  useEffect(() => {
+    const h = hud.current;
+    const px = settings.subtitles.size === 's' ? 13 : settings.subtitles.size === 'l' ? 21 : 16;
+    if (h.subText) { h.subText.style.fontSize = `${px}px`; h.subText.style.lineHeight = '1.5'; }
+    if (h.subName) h.subName.style.fontSize = `${Math.round(px * 0.72)}px`;
+    if (h.subWrap) {
+      h.subWrap.style.background = `rgba(0,0,0,${settings.subtitles.background})`;
+      h.subWrap.style.padding = settings.subtitles.background > 0 ? '8px 14px' : '0';
+      h.subWrap.style.borderRadius = '6px';
+      h.subWrap.dataset.speakerColors = settings.subtitles.speakerColors ? '1' : '0';
+    }
+  }, [settings.subtitles]);
 
   // Auto-detect: PerformanceMonitor flags a machine that can't hold framerate even
   // after AdaptiveDpr has dropped the resolution. A warmup window + a small counter
   // avoid tripping on the one-time load hitch. PERSISTED: once a machine degrades we
   // remember it, so the NEXT launch starts minimal immediately instead of re-suffering
   // ~5s of full-quality slowdown before detection kicks in. (Only used in 'auto'.)
-  const [degraded, setDegraded] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    return window.localStorage.getItem('cz_degraded') === '1';
+  // Auto quality (engine/perf/autoQuality): measured frame rate steps the tier down
+  // one level at a time (high → medium → low), and the step is remembered so the
+  // next launch starts where this machine settled.
+  const [autoLevel, setAutoLevel] = useState<AutoLevel>(() => {
+    if (typeof window === 'undefined') return 0;
+    try { return readAutoLevel(window.localStorage.getItem('cz_degraded')); } catch { return 0; }
   });
-  const markDegraded = useCallback(() => {
-    setDegraded(true);
-    try { window.localStorage.setItem('cz_degraded', '1'); } catch { /* private mode */ }
+  const stepDown = useCallback((l: AutoLevel) => {
+    setAutoLevel(l);
+    try { const v = writeAutoLevel(l); if (v) window.localStorage.setItem('cz_degraded', v); } catch { /* private mode */ }
   }, []);
-  const degradeHits = useRef(0);
-  const sceneMountedAt = useRef(0);
-  useEffect(() => { sceneMountedAt.current = performance.now(); }, [missionIndex, mode, runNonce]);
 
   // minimal = the aggressive tier (dpr 1, no shadows, no set-dressing, lean impacts).
   // lightFx = drop the heavy postprocessing passes.
@@ -4220,9 +4301,12 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
   // stand on — so there is nothing device-specific to protect here. Mobile gets the
   // same tier, and the auto-degrade path that already ran on phones now does
   // something when it fires.
-  const autoMinimal = quality === 'low' || (quality === 'auto' && degraded);
+  // The tier in force: a fixed choice, or where Auto has settled.
+  const tier = quality === 'auto' ? (['high', 'medium', 'low'] as const)[autoLevel] : quality;
+  const autoMinimal = tier === 'low';
   const minimal = autoMinimal;
-  const lightFx = isTouch || autoMinimal;
+  // MEDIUM keeps shadows and set dressing but drops the heavy postprocessing passes.
+  const lightFx = isTouch || autoMinimal || tier === 'medium';
 
   // Lock the PAGE to the game while the scene is mounted (restored on unmount so
   // other pages still scroll). Without this, iOS Safari lets a stray double-tap /
@@ -4469,25 +4553,15 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
         // AdaptiveDpr already trimming, so leaving it capped at 1.5 was leaving the
         // largest single lever untouched on exactly the devices that needed it.
         // Healthy phones keep 1.5 and capable desktops keep 2, unchanged.
-        dpr={minimal ? [1, 1] : (isTouch ? [1, 1.5] : [1, 2])}
+        dpr={minimal ? [1, 1] : (isTouch || tier === 'medium' ? [1, 1.5] : [1, 2])}
         camera={{ position: [mission.start[0], 1.6, mission.start[1]], fov: 55, near: 0.01, far: 320 }}
       >
-        {/* Auto-degrade: after a warmup, sustained declines (or the flipflop fallback)
-            flip `degraded` → the minimal tier. Only matters while quality==='auto'. */}
-        <PerformanceMonitor
-          flipflops={3}
-          onFallback={markDegraded}
-          onDecline={() => {
-            if (performance.now() - sceneMountedAt.current < 2500) return; // ignore load hitch
-            degradeHits.current += 1;
-            if (degradeHits.current >= 2) markDegraded();
-          }}
-          onIncline={() => { degradeHits.current = 0; }}
-        />
+        {/* Auto quality: measured frame rate steps the tier down one level at a time. */}
+        {quality === 'auto' && autoLevel < 2 && <AutoQualityProbe level={autoLevel} onStep={stepDown} />}
         <AdaptiveDpr />
         {perfOn && <PerfHud hud={hud} />}
         <Suspense fallback={null}>
-          <FpsWorld key={`${mode}-${missionIndex}-${runNonce}`} hud={hud} controls={controls} audio={audio} lowSpec={isTouch} lightFx={lightFx} minimal={minimal} mission={mission} onComplete={handleComplete} onDeath={handleDeath} endOnDeath={mode === 'contract'} pausedRef={menuOpenRef} gateRef={gateRef} accountRank={accountRank} accountXp={accountXp} equippedGun={equippedGun} equippedAmmo={equippedAmmo} equippedMods={equippedMods} fieldKit={fieldKit} endlessOpts={mode === 'endless' ? endless : undefined} coop={mode === 'endless' ? coop : undefined} onProtocol={mode === 'contract' ? (evs) => contractRef.current?.onProtocol?.(evs) : undefined} onInspect={openInspect} inspectingRef={inspectingRef} />
+          <FpsWorld key={`${mode}-${missionIndex}-${runNonce}`} hud={hud} controls={controls} audio={audio} lowSpec={isTouch} lightFx={lightFx} minimal={minimal} mission={mission} onComplete={handleComplete} onDeath={handleDeath} endOnDeath={mode === 'contract'} pausedRef={menuOpenRef} gateRef={gateRef} accountRank={accountRank} accountXp={accountXp} equippedGun={equippedGun} equippedAmmo={equippedAmmo} equippedMods={equippedMods} fieldKit={fieldKit} endlessOpts={mode === 'endless' ? endless : undefined} coop={mode === 'endless' ? coop : undefined} onProtocol={mode === 'contract' ? (evs) => contractRef.current?.onProtocol?.(evs) : undefined} onInspect={openInspect} inspectingRef={inspectingRef} settingsRef={settingsRef} />
         </Suspense>
       </Canvas>
       {inspecting && <div style={{ cursor: 'auto' }}><ItemInspector item={inspecting} onClose={closeInspect} inFight /></div>}
@@ -4677,7 +4751,7 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
                 shadows, set-dressing, and render resolution). AUTO adapts on its own. */}
             <div style={{ display: 'flex', gap: 8, marginTop: 20, alignItems: 'center' }}>
               <span style={{ fontSize: 10, letterSpacing: 2, color: '#6f7d8c' }}>GRAPHICS</span>
-              {(['auto', 'high', 'low'] as const).map((q) => (
+              {(['auto', 'high', 'medium', 'low'] as const).map((q) => (
                 <button key={q} onClick={() => pickQuality(q)} style={{
                   ...btnC4(quality === q ? '#37d0e0' : '#5a6773'),
                   padding: '5px 12px', fontSize: 11, letterSpacing: 1,
@@ -4707,7 +4781,7 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
                 <button onClick={() => pickLookSens(SENS_DEFAULT)} style={{ ...btnC4('#5a6773'), padding: '4px 8px', fontSize: 9, letterSpacing: 1 }}>RESET</button>
               )}
             </div>
-            <div style={{ fontSize: 11, color: '#4a5763', letterSpacing: 1, marginTop: 18 }}>{isTouch ? 'tap RESUME to return to the fight' : 'ESC resumes · this pause is safe, nothing is lost'}</div>
+            <div style={{ fontSize: 11, color: '#7d8a96', letterSpacing: 1, marginTop: 18 }}>{isTouch ? 'tap RESUME to return to the fight' : 'ESC resumes · this pause is safe, nothing is lost'}</div>
           </div>
         )}
         {debrief && !selectOpen && (

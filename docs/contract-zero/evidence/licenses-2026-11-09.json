@@ -1,0 +1,40 @@
+{
+  "npm": {
+    "total": 111,
+    "permissive": 110,
+    "weak-copyleft": 1,
+    "flagged": [
+      {
+        "name": "@img/sharp-libvips-darwin-arm64",
+        "version": "1.2.4",
+        "license": "LGPL-3.0-or-later",
+        "verdict": "weak-copyleft"
+      }
+    ]
+  },
+  "cargo": {
+    "total": 643,
+    "permissive": 640,
+    "weak-copyleft": 3,
+    "flagged": [
+      {
+        "name": "progenitor-client",
+        "version": "0.11.2",
+        "license": "MPL-2.0",
+        "verdict": "weak-copyleft"
+      },
+      {
+        "name": "memory_units",
+        "version": "0.4.0",
+        "license": "MPL-2.0",
+        "verdict": "weak-copyleft"
+      },
+      {
+        "name": "wee_alloc",
+        "version": "0.4.5",
+        "license": "MPL-2.0",
+        "verdict": "weak-copyleft"
+      }
+    ]
+  }
+}

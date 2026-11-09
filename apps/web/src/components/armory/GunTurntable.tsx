@@ -28,12 +28,10 @@ import { GunIcon } from './GunIcons'
 
 const PROCEDURAL: Record<string, number> = {
   ashfall_carbine: 0.72, warden_repeater: 1.06, rift_lance: 1.16, seraph_lmg: 1.02, ember_halo: 0.9,
+  sidearm: 0.26, smg: 0.52, marksman: 1.12,
 }
 const GLB_URL: Record<string, string> = {
-  sidearm: '/models/guns/sidearm.glb',
-  smg: '/models/guns/smg.glb',
   assault_rifle: '/models/guns/rifle.glb',
-  marksman: '/models/guns/marksman.glb',
   legendary: '/models/guns/blaster.glb',
 }
 

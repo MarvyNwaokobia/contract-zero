@@ -382,3 +382,46 @@ Before Milestone 8, a playtest found that cargo, sabotage, recovery and extracti
 - A modified client can claim a case it didn't carry (but never invent, repeat or exceed one).
 - No item inspection screen beyond the prompt's contents line.
 - The sabotage blast is procedural (no particle system).
+
+### Milestone 8: settings, accessibility, performance and licensing (2026-11-09)
+
+**Built:**
+- **One settings model** (`lib/settings.ts`), applied live in fights:
+  - graphics: Auto, High, Medium or Low, plus field of view;
+  - a five-channel volume mix, with background mute;
+  - subtitles: on or off, size, backing and speaker colours;
+  - look sensitivity, and toggle-to-interact;
+  - reduce motion, and reduce flashes.
+  - The old keys are migrated, and the pause menu writes to the same settings.
+- **A new Settings page:** labelled native controls, keyboard focus rings, test buttons per volume channel and a live subtitle preview.
+- **Adaptive quality that works.**
+  - A tested stepwise controller (`engine/perf/autoQuality.ts`) replaces drei's `PerformanceMonitor`, which never triggered at 30–38 fps.
+  - There is a new Medium tier.
+  - Auto remembers where it settled.
+- **Accessibility:** the dim text token was raised to WCAG AA contrast, and so were the faint HUD hints.
+- **Licensing:**
+  - The three unsourced gun GLBs were replaced with original procedural models, with hands and framing retuned.
+  - The unsourced gunshot and impact samples were replaced with original synthesised ones (`scripts/generate-sfx.mjs`).
+  - The unused melee sounds were removed, and the raw Mixamo FBX files moved out of `public/` into the git-ignored `assets-src/`.
+  - Dependency audit script; `LICENSING.md` and `CREDITS.md`.
+
+**Verified:**
+- **Tests:** web 498, including settings normalisation and migration, auto-quality steps, and the quick-trade rule.
+- **`probe-a11y.mjs`:** all nine pages pass with no WCAG 2.1 AA violations; before the fix there were contrast failures on three.
+- **`probe-settings.mjs`:** set by keyboard and mouse, then confirmed in a fight:
+  - FOV 70, the low tier (pixel ratio 1, no shadow casters), 21 px subtitles, effects at 0;
+  - one-press E took a crate;
+  - camera roll was 0 with reduced motion;
+  - changes mid-fight applied live;
+  - background mute engaged.
+- **`probe-perf.mjs`:** fps, frame times, draw calls and triangles per map and tier, on GPU and with the CPU throttled 4×. Low runs at 60 fps on every map with about half the draw calls. Auto stepped Blacksite at 2× from about 30 to 60 fps.
+- **`license-audit.mjs`:** npm 110 of 111 permissive and Cargo 640 of 643, with the four weak-copyleft packages used unmodified (see `LICENSING.md`).
+- **`probe-field.mjs`:** a regression raid still extracts at 60 fps.
+
+**Open:**
+- No colour-blind palette or key remapping.
+- The 3D fight isn't screen-reader accessible.
+- No real-phone or Firefox/Safari measurements.
+- `wee_alloc` should be disabled at the next contract deployment.
+
+See `ACCESSIBILITY.md`, `PERFORMANCE.md` and `LICENSING.md`.

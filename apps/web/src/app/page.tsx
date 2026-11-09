@@ -50,7 +50,7 @@ function NextOperation({ e, others, signedIn }: { e: BoardEntry; others: BoardEn
       </div>
       <div className="mt-4 border-l-2 border-hostile/70 pl-3 text-sm">
         <div><span className="font-semibold text-fog">{rifles + sidearms} guards</span> <span className="text-muted">· {rifles} rifles{sidearms ? `, ${sidearms} sidearms` : ''} · HP {g.guard_hp}</span></div>
-        <div className="text-muted">{g.reinforce_per_drop ? `${g.reinforce_per_drop} reinforcements per wave while you load` : 'No reinforcements: they are out of medicine'}</div>
+        <div className="text-muted">{g.reinforce_per_drop ? `${g.reinforce_per_drop} reinforcement${g.reinforce_per_drop === 1 ? '' : 's'} per wave while you work` : 'No reinforcements: they are out of medicine'}</div>
       </div>
       <p className="mt-3 text-sm text-muted">
         Taking it strips {e.target_name} of {e.manifest} {e.resource}. Expect its commander to restock from Vex, and its next patrols to field what it can still arm.
@@ -136,7 +136,8 @@ export default function Hub() {
           {/* operations console */}
           <div className="flex flex-col justify-end gap-4">
             {world.isError && <section className="cz-panel p-4 text-sm text-hostile">Command is unreachable: the game server is down.</section>}
-            <WorldClockPanel clock={world.data?.clock} />
+            {/* One line here: the full clock panel lives on the Contract Board. */}
+            <section className="cz-panel px-4 py-3"><WorldClockPanel clock={world.data?.clock} compact /></section>
             {next ? (
               <NextOperation e={next} others={board.filter((b) => b !== next)} signedIn={!!session} />
             ) : (

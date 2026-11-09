@@ -15,13 +15,14 @@
 //  - a legitimate partial extraction (walked at walking pace, E held on one case,
 //    the countdown run in the zone) pays exactly that case, once, on chain.
 //
-// Usage: node scripts/field-e2e.mjs [apiUrl]
+// Usage: node scripts/field-e2e.mjs [apiUrl] [target]   (target: vanguard (default) or ashen, for Cinder Yard)
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { client, loadKey, signIn } from './lib/cz-auth.mjs';
 
 const API = process.argv[2] ?? 'http://127.0.0.1:8080';
+const TARGET = process.argv[3] ?? 'vanguard';
 const RPC = 'https://rpc.testnet.fastnear.com';
 const ASSETS = 'assets.contract-zero.testnet';
 const LAYOUTS = JSON.parse(readFileSync(new URL('../apps/api/src/services/layouts.json', import.meta.url), 'utf8'));
@@ -55,7 +56,7 @@ const me = client(API, login.cookie);
 async function start() {
   for (let i = 0; i < 30; i++) {
     const board = (await me.get('/board')).body.board;
-    const e = board.find((b) => b.kind === 'raid' && b.target === 'vanguard') ?? board.find((b) => b.kind === 'raid');
+    const e = board.find((b) => b.kind === 'raid' && b.target === TARGET) ?? board.find((b) => b.kind === 'raid');
     if (e) {
       const r = await me.post('/missions/start', { target: e.target, resource: e.resource, kind: 'raid' });
       if (r.status === 200) return { ...r.body, at: Date.now() };

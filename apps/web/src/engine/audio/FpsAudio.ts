@@ -83,6 +83,9 @@ export class FpsAudio {
   private ambBaseVol = 0.05;
   private ambLp: BiquadFilterNode | null = null; // the ambience tone filter (retuned per zone)
   private drone: OscillatorNode | null = null;   // optional low zone hum (the Rift / Survival)
+  /** A refinery's machinery: a pump hum and steam vents letting go now and then. */
+  private machineryOn = false;
+  private machinery: { oscs: OscillatorNode[]; gain: GainNode; hiss: number } | null = null;
   private zone = 'DUSTLINE';
 
   // Listener pose (camera), updated each frame.
@@ -683,9 +686,68 @@ export class FpsAudio {
   }
 
   // ── internals ─────────────────────────────────────────────────────────────
+  /** Turn the refinery machinery bed on or off (Cinder Yard). */
+  setMachinery(on: boolean): void {
+    this.machineryOn = on;
+    const ctx = this.ctx;
+    if (!ctx) return; // applied on unlock
+    if (!on) {
+      if (this.machinery) {
+        const m = this.machinery;
+        m.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.3);
+        window.clearInterval(m.hiss);
+        setTimeout(() => m.oscs.forEach((o) => { try { o.stop(); } catch { /* stopped */ } }), 1200);
+        this.machinery = null;
+      }
+      return;
+    }
+    if (this.machinery) return;
+    const gain = ctx.createGain();
+    gain.gain.value = 0;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 180;
+    gain.connect(lp).connect(this.ambBus);
+    // Two detuned saws a few hertz apart: the beat is the pumps.
+    const oscs = [49, 51.5, 98].map((f, i) => {
+      const o = ctx.createOscillator();
+      o.type = i < 2 ? 'sawtooth' : 'sine';
+      o.frequency.value = f;
+      const g = ctx.createGain();
+      g.gain.value = i < 2 ? 0.05 : 0.03;
+      o.connect(g).connect(gain);
+      o.start();
+      return o;
+    });
+    gain.gain.setTargetAtTime(1, ctx.currentTime, 1.2);
+    // A steam vent somewhere lets go every few seconds.
+    const hiss = window.setInterval(() => {
+      const c = this.ctx;
+      if (!c || !this.machineryOn) return;
+      const now = c.currentTime;
+      const n = c.createBufferSource();
+      n.buffer = this.noise(1.4);
+      const bp = c.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 2600 + Math.random() * 1500;
+      bp.Q.value = 0.7;
+      const g = c.createGain();
+      g.gain.setValueAtTime(0, now);
+      g.gain.linearRampToValueAtTime(0.035, now + 0.15);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 1.3);
+      const pan = c.createStereoPanner();
+      pan.pan.value = Math.random() * 1.6 - 0.8;
+      n.connect(bp).connect(g).connect(pan).connect(this.ambBus);
+      n.start(now);
+      n.stop(now + 1.4);
+    }, 4800);
+    this.machinery = { oscs, gain, hiss };
+  }
+
   private startAmbience(): void {
     const ctx = this.ctx;
     if (!ctx) return;
+    if (this.machineryOn) setTimeout(() => this.setMachinery(true), 0);
     const cfg = ZONE_AMB[this.zone] ?? ZONE_AMB.DUSTLINE;
     const buffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
     const data = buffer.getChannelData(0);

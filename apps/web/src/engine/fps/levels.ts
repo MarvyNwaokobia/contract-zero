@@ -6,31 +6,37 @@
  * collider (`walls` block movement and sight; `cover` is waist-to-chest high), so
  * what you see is what stops you and what stops a bullet. Enemies path-find around
  * it (fps/nav). `art` is visual-only (roofs, light poles, catwalks overhead) and never
- * collides. Two levels so far, built to be different places, not relit copies:
+ * collides. Three levels, built to be different places, not relit copies:
  *
  *  - DUSTLINE DEPOT: a large outdoor logistics yard at dusk. Gate and motor pool, a
  *    container wall with two crossings, then a warehouse with racks and two doors.
  *  - BLACKSITE: a fortified research facility at night. A floodlit courtyard, then
  *    interiors: a central corridor, labs, a control room and the vault at the back.
+ *  - CINDER YARD (cinderYard.ts): the Ashen Compact's refinery. A checkpoint, a tank
+ *    farm, a blast wall, then a processing deck with fractionation columns, a loading
+ *    bay, an arms shed and a control room under a burning flare stack.
  *
  * Mission-agnostic: a level offers zones to place guards in (`rooms`) and named
  * points for objectives; the mission director decides what happens there.
  */
 
 import type { CoverBox } from './FpsSim'
+import { CINDER_YARD } from './cinderYard'
 
-export type LevelId = 'dustline_depot' | 'blacksite'
+export type LevelId = 'dustline_depot' | 'blacksite' | 'cinder_yard'
 
 /** What a box looks like (colliders) or is (art). The scene picks a mesh per kind. */
 export type Kind =
   | 'fence' | 'barrier' | 'container' | 'truck' | 'tank' | 'booth' | 'tower_leg' | 'crate' | 'case'
   | 'warehouse' | 'rack' | 'concrete' | 'facade' | 'interior' | 'desk' | 'server' | 'door_frame'
+  | 'column' | 'pipe_rack' | 'pump'
 
 export interface Box extends CoverBox { kind: Kind; color?: string }
 
 /** Visual-only set pieces. */
 export interface Art {
   kind: 'roof' | 'tower' | 'light_pole' | 'floodlight' | 'catwalk' | 'beacon' | 'radar' | 'road' | 'stripe' | 'camera' | 'lamp'
+    | 'pipe' | 'stack' | 'steam'
   x: number; z: number; w?: number; d?: number; h?: number; rot?: number; color?: string
 }
 
@@ -265,7 +271,7 @@ const BLACKSITE: LevelDef = {
   shadowHalf: 36,
 }
 
-export const LEVELS: Record<LevelId, LevelDef> = { dustline_depot: DEPOT, blacksite: BLACKSITE }
+export const LEVELS: Record<LevelId, LevelDef> = { dustline_depot: DEPOT, blacksite: BLACKSITE, cinder_yard: CINDER_YARD }
 
 /** Which level a contract plays on when it carries no site (contracts from before
  *  sites were bound to the world map played wherever the clock said). */

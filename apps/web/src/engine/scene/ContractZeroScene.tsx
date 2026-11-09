@@ -1356,6 +1356,8 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
   // Load this op's ambience bed (retunes the room tone + zone drone; the mission
   // remounts per op, so this fires whenever the zone changes).
   useEffect(() => { audio.setZone(mission.zone); }, [audio, mission.zone]);
+  // The refinery runs while you fight in it.
+  useEffect(() => { audio.setMachinery(mission.level === 'cinder_yard'); return () => audio.setMachinery(false); }, [audio, mission.level]);
 
   // ── Probe hooks (headless verification; development builds only, see DEV_HOOKS) ──
   useEffect(() => {
@@ -3451,7 +3453,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
           off the FRONT of this list, which shifts every later index and would make
           React re-render every wall in the world on each room advance — a hitch per
           doorway. Keyed this way, the walls that didn't change keep their identity. */}
-      {LEVEL && <LevelArt level={LEVEL} minimal={minimal} lit={mission.zone !== 'DUSTLINE'} />}
+      {LEVEL && <LevelArt level={LEVEL} minimal={minimal} lit={mission.zone !== 'DUSTLINE'} night={mission.conditions ? mission.conditions.phase === 'night' : undefined} />}
       {!LEVEL && LEVEL_WALLS.map((c, i) => (
         <group key={`w${c.x}_${c.z}_${c.w}_${c.d}`}>
           {/* Every wall SHARES one unit cube and is scaled to size. Authoring a fresh

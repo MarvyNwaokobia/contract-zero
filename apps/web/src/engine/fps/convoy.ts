@@ -99,11 +99,12 @@ export function conditionsFor(phase: Phase): SiteConditions {
 export const PRACTICE_SITES: SiteRef[] = [
   { id: 'dustline-depot', name: 'Dustline Depot', owner: 'vanguard', layout: 'dustline_depot', facility: 'munitions warehouse', exfil: "Vex's flatbed at the south gate", environment: 'Outdoor logistics yard' },
   { id: 'blacksite', name: 'Blacksite', owner: 'vanguard', layout: 'blacksite', facility: 'armoury vault', exfil: 'landing zone outside the gate', environment: 'Fortified research facility' },
+  { id: 'cinder-yard', name: 'Cinder Yard', owner: 'ashen', layout: 'cinder_yard', facility: 'loading bay', exfil: 'the flatbed on the road outside the south gate', environment: 'Ashen Compact refinery' },
 ];
 
 /** Names of the two charge targets on each map, by site. */
-function chargeTargets(site: SiteRef | undefined, layout: LevelId): [string, string] {
-  if (site?.id === 'cinder-yard') return ['refinery tanks', 'pump house'];
+function chargeTargets(_site: SiteRef | undefined, layout: LevelId): [string, string] {
+  if (layout === 'cinder_yard') return ['crude manifold', 'fractionation column'];
   return layout === 'blacksite' ? ['APC motor bay', 'server room'] : ['fuel depot', 'munitions line'];
 }
 
@@ -242,10 +243,10 @@ function shell(c: ConvoyContract, st: Setting, gun: GunId, kind: OpKind) {
   };
 }
 
-const cinder = (st: Setting) => st.site?.id === 'cinder-yard';
-const entryObj = (st: Setting) => (cinder(st) ? 'HIT THE YARD GATE' : st.lv.id === 'blacksite' ? 'BREACH THE COURTYARD' : 'HIT THE MOTOR POOL');
-const clearObj = (st: Setting) => (cinder(st) ? 'CLEAR THE GATE YARD' : st.lv.id === 'blacksite' ? 'CLEAR THE COURTYARD' : 'CLEAR THE MOTOR POOL');
-const pushObj = (st: Setting) => (cinder(st) ? 'CROSS INTO THE TANK FARM' : st.lv.id === 'blacksite' ? 'ENTER THE FACILITY' : 'CROSS INTO THE YARD');
+const cinder = (st: Setting) => st.lv.id === 'cinder_yard';
+const entryObj = (st: Setting) => (cinder(st) ? 'BREACH THE CHECKPOINT' : st.lv.id === 'blacksite' ? 'BREACH THE COURTYARD' : 'HIT THE MOTOR POOL');
+const clearObj = (st: Setting) => (cinder(st) ? 'CLEAR THE TANK FARM' : st.lv.id === 'blacksite' ? 'CLEAR THE COURTYARD' : 'CLEAR THE MOTOR POOL');
+const pushObj = (st: Setting) => (cinder(st) ? 'THROUGH THE BLAST WALL' : st.lv.id === 'blacksite' ? 'ENTER THE FACILITY' : 'CROSS INTO THE YARD');
 
 export function buildConvoyMission(c: ConvoyContract, gun: GunId = 'assault_rifle' as GunId): Mission {
   const st = setting(c);

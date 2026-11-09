@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildConvoyMission, buildSabotageMission, buildRecoveryMission, conditionsFor, convoyDifficulty, loadSeconds, CARGO_POINT, type ConvoyContract } from './convoy';
+import { buildConvoyMission, buildOperationMission, buildSabotageMission, buildRecoveryMission, conditionsFor, convoyDifficulty, loadSeconds, CARGO_POINT, type ConvoyContract } from './convoy';
 import type { CoverBox } from './index';
 
 const base: ConvoyContract = {
@@ -133,5 +133,32 @@ describe('convoy mission from the server guard plan', () => {
   it('can field no guards at all when the faction has no ammunition', () => {
     const empty = { ...plan, hall: { rifles: 0, sidearms: 0 }, yard: { rifles: 0, sidearms: 0 } };
     expect(buildConvoyMission({ ...base, guards: empty }).enemies).toHaveLength(0);
+  });
+});
+
+describe('Cinder Yard', () => {
+  const site = { id: 'cinder-yard', name: 'Cinder Yard', layout: 'cinder_yard' as const, facility: 'loading bay', exfil: 'the flatbed on the road outside the south gate' };
+  const base = { id: 'cy', issuer: 'Vex Exchange', target: 'Ashen Compact', cargo: { resource: 'fuel' as const, units: 60 }, defense: 3, seed: 5, site };
+
+  it('plays on its own map, not the depot', () => {
+    for (const kind of ['raid', 'sabotage', 'recovery'] as const) {
+      const m = buildOperationMission({ ...base, kind });
+      expect(m.level).toBe('cinder_yard');
+      expect(m.site?.name).toBe('Cinder Yard');
+    }
+  });
+
+  it('sabotage hits the crude manifold and a fractionation column', () => {
+    const m = buildSabotageMission({ ...base, kind: 'sabotage' });
+    expect(m.objectives.filter((o) => o.kind === 'plant').map((o) => o.text)).toEqual(['PLANT CHARGE · CRUDE MANIFOLD', 'PLANT CHARGE · FRACTIONATION COLUMN']);
+  });
+
+  it('places every guard clear of the refinery at every difficulty', () => {
+    for (let defense = 1; defense <= 5; defense++) for (const seed of [1, 7, 99]) {
+      const m = buildConvoyMission({ ...base, defense, seed });
+      for (const e of m.enemies) for (const b of [...m.walls, ...m.cover]) {
+        expect(inside(e.pos[0], e.pos[1], b, 0.3), `${e.pos} in ${JSON.stringify(b)}`).toBe(false);
+      }
+    }
   });
 });

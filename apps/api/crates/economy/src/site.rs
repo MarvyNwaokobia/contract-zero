@@ -26,6 +26,7 @@ use crate::{OpKind, Resource, TICKS_PER_DAY};
 pub enum Layout {
     DustlineDepot,
     Blacksite,
+    CinderYard,
 }
 
 impl Layout {
@@ -33,6 +34,7 @@ impl Layout {
         match self {
             Layout::DustlineDepot => "dustline_depot",
             Layout::Blacksite => "blacksite",
+            Layout::CinderYard => "cinder_yard",
         }
     }
 }
@@ -95,16 +97,15 @@ pub const CINDER_YARD: Site = Site {
     id: "cinder-yard",
     name: "Cinder Yard",
     region: "Dustline basin, refinery flats",
-    environment: "Refinery yard: tank farm, container stacks, store shed",
+    environment: "Refinery: tank farm, fractionation columns, loading bay, arms shed, control room",
     owner: "ashen",
-    // The refinery map is not built yet: Cinder Yard plays on the depot layout, and
-    // the briefing says so.
-    layout: Layout::DustlineDepot,
-    shared_layout: true,
-    stores: ["arms shed", "aid shed", "refinery tanks"],
-    holding: "container stacks",
-    lines: ["", "", "refinery tanks"],
-    exfil: "the Compact's own road out, south gate",
+    layout: Layout::CinderYard,
+    shared_layout: false,
+    // Everything the Compact ships is staged at the loading bay.
+    stores: ["loading bay", "loading bay", "loading bay"],
+    holding: "control room",
+    lines: ["", "", "fractionation unit"],
+    exfil: "the flatbed on the road outside the south gate",
     handover: "the owner's truck at the east fence",
 };
 
@@ -234,6 +235,8 @@ mod tests {
         assert_eq!(site_for("vanguard", OpKind::Recovery, Resource::Fuel).id, "blacksite");
         assert_eq!(site_for("vanguard", OpKind::Raid, Resource::Med).id, "blacksite");
         assert_eq!(site_for("ashen", OpKind::Sabotage, Resource::Fuel).id, "cinder-yard");
+        assert_eq!(site_for("ashen", OpKind::Raid, Resource::Ammo).layout, Layout::CinderYard);
+        assert!(SITES.iter().all(|s| !s.shared_layout), "every site has its own map");
         assert_eq!(facility(s, OpKind::Sabotage, Resource::Ammo), "munitions line");
     }
 

@@ -16,7 +16,7 @@ import { usePbr } from './usePbr';
 
 const HANGAR = '/textures/hangar';
 
-type Inst = { x: number; y: number; z: number; sx: number; sy: number; sz: number; ry?: number; color?: string };
+type Inst = { x: number; y: number; z: number; sx: number; sy: number; sz: number; rx?: number; ry?: number; rz?: number; color?: string };
 
 /** Instanced unit boxes (optionally per-instance tinted). */
 function Instanced({ items, material, cast = true, geometry }: { items: Inst[]; material: THREE.Material; cast?: boolean; geometry?: THREE.BufferGeometry }) {
@@ -24,10 +24,10 @@ function Instanced({ items, material, cast = true, geometry }: { items: Inst[]; 
   useEffect(() => {
     const m = ref.current;
     if (!m) return;
-    const mat = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
+    const mat = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
     const c = new THREE.Color();
     items.forEach((it, i) => {
-      q.setFromAxisAngle(up, it.ry ?? 0);
+      q.setFromEuler(e.set(it.rx ?? 0, it.ry ?? 0, it.rz ?? 0));
       mat.compose(new THREE.Vector3(it.x, it.y, it.z), q, new THREE.Vector3(it.sx, it.sy, it.sz));
       m.setMatrixAt(i, mat);
       if (it.color) m.setColorAt(i, c.set(it.color));
@@ -140,8 +140,60 @@ function Blinker({ x, y, z, color }: { x: number; y: number; z: number; color: s
   );
 }
 
-export function LevelArt({ level, minimal = false, lit = true }: { level: LevelDef; minimal?: boolean; lit?: boolean }) {
-  const night = level.id === 'blacksite';
+/** A refinery flare stack: a tall steel stack and a flame that never quite settles. */
+function FlareStack({ x, z, h }: { x: number; z: number; h: number }) {
+  const flame = useRef<THREE.Mesh>(null);
+  const light = useRef<THREE.PointLight>(null);
+  useFrame((st) => {
+    const t = st.clock.elapsedTime;
+    const k = 1 + Math.sin(t * 9) * 0.12 + Math.sin(t * 23) * 0.06;
+    if (flame.current) { flame.current.scale.set(k, 1.2 * k + Math.sin(t * 5) * 0.15, k); flame.current.rotation.y = t * 0.8; }
+    if (light.current) light.current.intensity = 34 * k;
+  });
+  return (
+    <group position={[x, 0, z]}>
+      <mesh position={[0, h / 2, 0]} castShadow><cylinderGeometry args={[0.45, 0.7, h, 14]} /><meshStandardMaterial color="#5a5c5f" roughness={0.5} metalness={0.7} /></mesh>
+      {[0.25, 0.5, 0.75].map((f) => <mesh key={f} position={[0, h * f, 0]}><torusGeometry args={[0.62, 0.06, 6, 18]} /><meshStandardMaterial color="#8a2a20" /></mesh>)}
+      <mesh ref={flame} position={[0, h + 1.1, 0]}><coneGeometry args={[0.7, 2.6, 12, 1, true]} /><meshBasicMaterial color="#ffb347" transparent opacity={0.85} side={THREE.DoubleSide} depthWrite={false} blending={THREE.AdditiveBlending} /></mesh>
+      <pointLight ref={light} position={[0, h + 1.5, 0]} color="#ff8a3a" intensity={34} distance={40} decay={1.6} />
+    </group>
+  );
+}
+
+/** A steam vent: a pipe stub and white plumes that rise and thin out. */
+function Steam({ x, z, minimal }: { x: number; z: number; minimal: boolean }) {
+  const group = useRef<THREE.Group>(null);
+  const tex = useMemo(() => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const g = c.getContext('2d')!;
+    const grd = g.createRadialGradient(32, 32, 2, 32, 32, 31);
+    grd.addColorStop(0, 'rgba(255,255,255,0.8)'); grd.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grd; g.fillRect(0, 0, 64, 64);
+    return new THREE.CanvasTexture(c);
+  }, []);
+  const n = minimal ? 3 : 6;
+  useFrame((st) => {
+    const t = st.clock.elapsedTime;
+    group.current?.children.forEach((c, i) => {
+      if (!(c as THREE.Sprite).isSprite) return;
+      const k = (t * 0.32 + i / n) % 1;
+      c.position.set(Math.sin(i * 2.1 + t * 0.4) * 0.3 * k, 1.2 + k * 4.5, Math.cos(i * 1.3) * 0.3 * k);
+      c.scale.setScalar(0.6 + k * 2.4);
+      ((c as THREE.Sprite).material as THREE.SpriteMaterial).opacity = 0.45 * (1 - k);
+    });
+  });
+  return (
+    <group ref={group} position={[x, 0, z]}>
+      <mesh position={[0, 0.6, 0]}><cylinderGeometry args={[0.18, 0.18, 1.2, 10]} /><meshStandardMaterial color="#4c4f53" metalness={0.6} roughness={0.5} /></mesh>
+      {Array.from({ length: n }, (_, i) => <sprite key={i}><spriteMaterial map={tex} transparent depthWrite={false} color="#e8ecef" opacity={0.3} /></sprite>)}
+    </group>
+  );
+}
+
+export function LevelArt({ level, minimal = false, lit = true, night: nightProp }: { level: LevelDef; minimal?: boolean; lit?: boolean; night?: boolean }) {
+  // Night look (glowing windows, cool lamps) follows the hour, not the map.
+  const night = nightProp ?? level.id === 'blacksite';
   const corrugated = usePbr('corrugated_iron_02', [1, 1], HANGAR);
   const plate = usePbr('metal_plate', [1, 1], HANGAR);
   const concrete = usePbr('concrete_floor_worn_001', [1, 1], HANGAR);
@@ -169,7 +221,13 @@ export function LevelArt({ level, minimal = false, lit = true }: { level: LevelD
       glass: new THREE.MeshStandardMaterial({ color: '#0b0e12', emissive: night ? '#8fb6ff' : '#ffcf8a', emissiveIntensity: night ? 0.9 : 0.35, roughness: 0.2 }),
       wood: tri(planks, { color: '#9a7a52', roughness: 0.9 }),
       case: new THREE.MeshStandardMaterial({ color: '#3f4733', roughness: 0.6, metalness: 0.3 }),
-      tank: tri(plate, { color: '#c8c3b8', roughness: 0.45, metalness: 0.6 }),
+      // Refinery tanks are smooth painted steel, not tread plate.
+      tank: level.id === 'cinder_yard'
+        ? new THREE.MeshStandardMaterial({ color: '#a9a69c', roughness: 0.55, metalness: 0.35 })
+        : tri(plate, { color: '#c8c3b8', roughness: 0.45, metalness: 0.6 }),
+      rust: tri(plate, { color: '#7a4a32', roughness: 0.7, metalness: 0.45 }),
+      pipe: new THREE.MeshStandardMaterial({ color: '#6b6e72', roughness: 0.45, metalness: 0.7 }),
+      hazard: new THREE.MeshStandardMaterial({ color: '#c9a227', roughness: 0.6 }),
       fence: new THREE.MeshStandardMaterial({ map: link, transparent: true, alphaTest: 0.35, side: THREE.DoubleSide, roughness: 0.6, metalness: 0.5, color: '#9a9a96' }),
       desk: new THREE.MeshStandardMaterial({ color: '#d7d9dc', roughness: 0.5 }),
       screen: new THREE.MeshStandardMaterial({ color: '#000', emissive: '#58c6ff', emissiveIntensity: 1.6 }),
@@ -181,7 +239,7 @@ export function LevelArt({ level, minimal = false, lit = true }: { level: LevelD
       panel: new THREE.MeshStandardMaterial({ color: '#000', emissive: '#e8f0ff', emissiveIntensity: 2.2 }),
       redLed: new THREE.MeshBasicMaterial({ color: '#ff3b30' }),
     };
-  }, [corrugated, plate, concrete, plaster, planks, night]);
+  }, [corrugated, plate, concrete, plaster, planks, night, level.id]);
 
   const parts = useMemo(() => {
     const out: Record<string, Inst[]> = {};
@@ -275,6 +333,29 @@ export function LevelArt({ level, minimal = false, lit = true }: { level: LevelD
         case 'server':
           add('server', { x, y: h / 2, z, sx: w, sy: h, sz: d });
           break;
+        case 'column':
+          // A fractionation column: a tall vessel ringed with platforms and a ladder cage.
+          add('tankCyl', { x, y: h / 2, z, sx: w, sy: h, sz: d });
+          for (const y of [h * 0.3, h * 0.6, h * 0.9]) {
+            add('steel', { x, y, z, sx: w + 1.4, sy: 0.08, sz: d + 1.4 });
+            add('hazard', { x, y: y + 1, z: z + d / 2 + 0.7, sx: w + 1.4, sy: 0.05, sz: 0.05 });
+          }
+          add('steel', { x: x + w / 2 + 0.35, y: h / 2, z, sx: 0.06, sy: h, sz: 0.5 });
+          break;
+        case 'pipe_rack':
+          // A low pipe rack: a steel frame carrying three lines. Waist-high cover.
+          for (let t = -len / 2; t <= len / 2 + 0.01; t += Math.max(1.5, len / 4)) { const [px, pz] = fwd(t); add('steel', { x: px, y: h / 2, z: pz, sx: 0.1, sy: h, sz: 0.1 }); }
+          for (const [dy, off] of [[h, -0.25], [h, 0.05], [h * 0.55, 0.3]] as const) {
+            const [px, pz] = fwd(0);
+            add('pipeCyl', { x: px + (alongZ ? off : 0), y: dy, z: pz + (alongZ ? 0 : off), sx: 0.28, sy: len, sz: 0.28, rx: alongZ ? Math.PI / 2 : 0, rz: alongZ ? 0 : Math.PI / 2 });
+          }
+          break;
+        case 'pump':
+          // A pump skid: a base, the motor and the pump casing.
+          add('steel', { x, y: 0.15, z, sx: w, sy: 0.3, sz: d });
+          add('rust', { x: x - w * 0.2, y: 0.75, z, sx: w * 0.45, sy: 0.9, sz: d * 0.7 });
+          add('pipeCyl', { x: x + w * 0.22, y: 0.7, z, sx: d * 0.6, sy: w * 0.4, sz: d * 0.6, rz: Math.PI / 2 });
+          break;
         default:
           add('concrete', { x, y: h / 2, z, sx: w, sy: h, sz: d });
       }
@@ -307,6 +388,14 @@ export function LevelArt({ level, minimal = false, lit = true }: { level: LevelD
           break;
         }
         case 'lamp': add('panel', { x, y: (a.h ?? 3.3) - 0.03, z, sx: 1.4, sy: 0.05, sz: 0.3 }); break;
+        case 'pipe': {
+          // An elevated pipe run with supports every few metres.
+          const along = (a.d ?? 0) > (a.w ?? 0);
+          const len = along ? a.d ?? 4 : a.w ?? 4, h = a.h ?? 5;
+          add('pipeCyl', { x, y: h, z, sx: 0.4, sy: len, sz: 0.4, rx: along ? Math.PI / 2 : 0, rz: along ? 0 : Math.PI / 2 });
+          for (let t = -len / 2; t <= len / 2 + 0.01; t += 4) add('steel', { x: along ? x : x + t, y: h / 2, z: along ? z + t : z, sx: 0.12, sy: h, sz: 0.12 });
+          break;
+        }
         case 'camera':
           add('frame', { x, y: a.h ?? 3, z, sx: 0.18, sy: 0.18, sz: 0.4 });
           add('redLed', { x, y: (a.h ?? 3) + 0.05, z: z + 0.21, sx: 0.04, sy: 0.04, sz: 0.02 });
@@ -324,14 +413,17 @@ export function LevelArt({ level, minimal = false, lit = true }: { level: LevelD
 
   return (
     <group>
-      <Mountains color={night ? '#0b1220' : '#5a3f30'} />
+      <Mountains color={night ? '#0b1220' : level.id === 'cinder_yard' ? '#4a3426' : '#5a3f30'} />
       {Object.entries(parts).map(([k, items]) =>
         k === 'tankCyl' ? <Instanced key={k} items={items} material={mats.tank} geometry={CYL} cast={cast} />
+        : k === 'pipeCyl' ? <Instanced key={k} items={items} material={mats.pipe} geometry={CYL} cast={cast} />
         : k === 'tire' ? <Instanced key={k} items={items} material={mats.tire} geometry={WHEEL} cast={false} />
         : k === 'fenceMesh' ? <Instanced key={k} items={items} material={mats.fence} cast={false} />
         : <Instanced key={k} items={items} material={(mats as Record<string, THREE.Material>)[k] ?? mats.concrete} cast={cast && !NO_SHADOW.includes(k)} />,
       )}
       {beacons.map((b, i) => <Blinker key={i} x={b.x} y={b.h ?? 5} z={b.z} color={b.color ?? '#ff3b30'} />)}
+      {level.art.filter((a) => a.kind === 'stack').map((a, i) => <FlareStack key={`stack${i}`} x={a.x} z={a.z} h={a.h ?? 20} />)}
+      {level.art.filter((a) => a.kind === 'steam').map((a, i) => <Steam key={`steam${i}`} x={a.x} z={a.z} minimal={minimal} />)}
       {floods.map((f, i) => (
         <group key={i}>
           <mesh position={[f.x, f.h ?? 7.4, f.z]}><boxGeometry args={[0.7, 0.5, 0.5]} /><primitive object={mats.lampHead} attach="material" /></mesh>

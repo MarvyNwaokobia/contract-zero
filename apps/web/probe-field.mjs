@@ -20,6 +20,7 @@ const RUNS = [
   ['dustline-depot', 'sabotage', 'dusk'], ['dustline-depot', 'recovery', 'day'],
   ['blacksite', 'raid', 'night'], ['blacksite', 'raid', 'day'],
   ['blacksite', 'sabotage', 'night'], ['blacksite', 'recovery', 'night'],
+  ['cinder-yard', 'raid', 'day'], ['cinder-yard', 'sabotage', 'night'], ['cinder-yard', 'recovery', 'dusk'],
 ].filter(([s, k, p]) => `${s}-${k}-${p}`.includes(FILTER));
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -148,6 +149,8 @@ for (const [site, kind, phase] of RUNS) {
 
         r.checks[id] = (await field(page)).planted.includes(id) && cur?.item === id;
       }
+      // Get clear during the fuse, as a player would: the blast hurts within 7 m.
+      await page.evaluate(() => { const o = window.__czObjectives().find((x) => x.kind === 'reach' && x.text !== window.__czObjectives()[0].text); window.__czWarp(o.pos[0], o.pos[1]); });
       r.checks.detonated = !!(await until(page, () => window.__czField().detonated, null, 90_000));
       await sleep(400);
       await page.evaluate(() => window.__czLook(Math.PI, 0));

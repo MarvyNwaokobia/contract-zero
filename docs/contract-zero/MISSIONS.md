@@ -10,7 +10,7 @@ An operation is bound to a **site** when its plan is made (`crates/economy/src/s
 |---|---|---|---|
 | **Dustline Depot** | Vanguard | `dustline_depot` | munitions warehouse and munitions line (ammunition), motor-pool fuel depot (fuel), warehouse aid store (medicine), container yard |
 | **Blacksite** | Vanguard | `blacksite` | medical vault, armoury vault, APC motor bay, server room, control room (seized cargo) |
-| **Cinder Yard** | Ashen Compact | shares `dustline_depot` | refinery tanks (fuel), arms shed, aid shed, container stacks |
+| **Cinder Yard** | Ashen Compact | `cinder_yard` | loading bay (all cargo), tank farm and crude manifold, fractionation columns, arms shed, control room (seized cargo) |
 
 | Target | Operation | Site |
 |---|---|---|
@@ -19,7 +19,14 @@ An operation is bound to a **site** when its plan is made (`crates/economy/src/s
 | Vanguard | recovery of seized caravan cargo | Blacksite (where Vanguard keeps what it doesn't log) |
 | Ashen Compact | anything | Cinder Yard |
 
-**Cinder Yard has no map of its own yet.** It plays on the Dustline Depot layout. The briefing says so, and its objectives are worded for a yard gate and a tank farm. A refinery map is the first new environment to build.
+**Cinder Yard** is the Ashen Compact's refinery, a map of its own (`fps/cinderYard.ts`):
+- a security checkpoint and gate on the south road;
+- a tank farm with four storage tanks, pipe racks, pump skids and a tanker at the loading arm;
+- a blast wall with a main gap and a west maintenance passage;
+- a processing deck with two fractionation columns under pipe bridges and catwalks, the loading bay in the middle, the arms shed and the control room;
+- a flare stack, steam vents and sodium lighting.
+
+Sabotage there hits the crude manifold and a fractionation column.
 
 **Compatibility.** Plans saved before sites have an empty `site`; `RaidPlan::site()` derives it. Clients that don't send a site fall back to the old zone rule (`levelForZone`).
 
@@ -112,7 +119,8 @@ Every applicable mission ends in a marked zone, and the method fits the place:
 
 | Site | Raid / sabotage exit | Recovery handover |
 |---|---|---|
-| Dustline Depot / Cinder Yard | Vex's flatbed at the south gate | the owner's truck at the east fence |
+| Dustline Depot | Vex's flatbed at the south gate | the owner's truck at the east fence |
+| Cinder Yard | the Compact's flatbed on the road outside the south checkpoint | the owner's truck at the east fence |
 | Blacksite | a painted landing zone with an H, outside the gate | the escort's truck at the gate |
 
 **What marks the zone:**
@@ -190,7 +198,7 @@ What the remaining attack can't do:
 `/training` has three modes. None of them call the economy or NEAR.
 
 - **Campaign:** the 15 authored operations (Dustline, Redyard, Blacksite), plus the Kill-House. Gauntlet unlocks after op 15.
-- **Practice:** choose the environment, time of day, operation, defense level 1–5 and cargo. The intel panel shows the result. It uses the same builder, objects and extraction as a live contract, with a locally computed object list.
+- **Practice:** choose the environment (Dustline Depot, Blacksite or Cinder Yard), time of day, operation, defense level 1–5 and cargo. The intel panel shows the result. It uses the same builder, objects and extraction as a live contract, with a locally computed object list.
 - **Endless:** the procedural room chain (`fps/endless.ts`), with rooms generated ahead of you in growing waves. Finite ammunition, with magazines dropped by guards. Unscored.
 
 ## Seasonal: not built, deliberately
@@ -214,7 +222,7 @@ Start the API (`apps/api`, `cargo run`) and the web app (`apps/web`, `npx next d
 | Any site × hour × type × difficulty | `/training` → Practice |
 | Endless | `/training` → Endless |
 | Campaign and Kill-House | `/training` → Campaign (Esc → Operations to choose an op). To unlock every op, run `localStorage.setItem('cz_progress','15')` in the console and reload. |
-| Direct, dev builds only | `/dev/level?site=dustline-depot\|blacksite&phase=day\|dusk\|night&kind=raid\|sabotage\|recovery&defense=1..5&seed=n` |
+| Direct, dev builds only | `/dev/level?site=dustline-depot\|blacksite\|cinder-yard&phase=day\|dusk\|night&kind=raid\|sabotage\|recovery&defense=1..5&seed=n&gun=smg` |
 
 **Controls:**
 - **Interaction:** E to interact (hold), H for a field dressing.
@@ -222,7 +230,7 @@ Start the API (`apps/api`, `cargo run`) and the web app (`apps/web`, `npx next d
 - **Touch screens:** USE (hold) and MED buttons.
 
 **Automated:**
-- `node apps/web/probe-field.mjs [web] [outdir] [filter]`: every operation type in both maps, in day, dusk and night variants. It checks supplies, holds versus taps, cargo, the speed penalty, charges and detonation, the seized case, the extraction call, leaving the zone, completion and the record. It also runs one real fight (finite ammunition, reloads, dropped magazines), measures frame rate and takes screenshots.
+- `node apps/web/probe-field.mjs [web] [outdir] [filter]`: every operation type on all three maps, in day, dusk and night variants. It checks supplies, holds versus taps, cargo, the speed penalty, charges and detonation, the seized case, the extraction call, leaving the zone, completion and the record. It also runs one real fight (finite ammunition, reloads, dropped magazines), measures frame rate and takes screenshots.
 - `node apps/web/probe-modes.mjs [web] [api] [outdir]`: the clock on the Hub and the board, contract intel before the loadout (signed in), and Practice, Endless and Campaign.
 - `node scripts/field-e2e.mjs [api]`, against the live API and NEAR testnet:
   - sites and conditions on the board;

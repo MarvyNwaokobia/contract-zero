@@ -59,7 +59,7 @@ The server fixes each operation's objects at start (`mission::field_manifest`), 
 |---|---|---|
 | Ammunition crate | 0.8 s | 90 rounds of rifle *or* pistol ammunition (the band colour says which). Takes what fits; the rest stays. The lid opens when it's empty. Crates on site: 1 + the faction's spare ammunition / 60, up to 4. |
 | Medical case | 0.8 s | 2 field dressings. Cases exist only if the faction holds medicine (none at 0, 1 below 20, 2 at 20+). |
-| Dropped magazine | 0.4 s | Two in three guards drop one where they fall (rifle or pistol, matched to the player's weapons). |
+| Dropped weapon | 0.6 s | Every guard drops the gun the economy armed them with: an assault rifle, or a sidearm when the faction was short of ammunition. It carries what was left in it plus a spare magazine, and tumbles and settles with the drop physics. The same gun as one you carry gives its rounds. A different gun swaps into its slot (rifles primary, sidearms secondary), and yours is left on the ground with its rounds, to take back if you want. |
 | Cargo case (raid) | 2 s | The manifest is split into cases of about 25 units, at most 4 (60 units → 3 × 20). Colour-coded by resource. |
 | Seized case (recovery) | 3 s | One strapped, blinking case holding the whole manifest. |
 | Charge (sabotage) | 5 s | Set on a named target: the fuel depot and the munitions line at the depot, the APC motor bay and the server room at the Blacksite. |
@@ -72,6 +72,7 @@ The server fixes each operation's objects at start (`mission::field_manifest`), 
 - **Field dressings.** Start with one and carry up to 3. Press H to apply one: 1.4 s with the weapon lowered, then +55 HP.
 - **Arena modes.** The Kill-House and Gauntlet keep an unlimited reserve.
 - **Separate from the economy.** Weapon ammunition is not the economic ammunition resource. Loose supplies are consumed in the fight and are never settled; the economy's ammunition moves only as cargo.
+- **Battlefield weapons are temporary.** A looted gun exists only in this run. It is never reported to the server, never minted or transferred, and is gone when the mission ends. Your owned gun tokens stay in your account whatever you swap during a fight. There is no way to extract an enemy weapon as a permanent item.
 
 **Carrying cargo:**
 - At most 3 cases at once. Each case costs 10% movement speed, and the seized case costs 20%.

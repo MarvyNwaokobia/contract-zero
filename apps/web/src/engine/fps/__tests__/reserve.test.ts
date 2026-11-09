@@ -68,3 +68,27 @@ describe('field dressings', () => {
     expect(s.addMedkit()).toBe(false);
   });
 });
+
+describe('battlefield weapons', () => {
+  it('a rifle replaces the primary with its own rounds and hands back the old one', () => {
+    const s = new FpsSim({ loadout: ['smg', 'sidearm'], enemies: [], reserveMags: 2 });
+    const old = s.takeWeapon('assault_rifle', 17, 40);
+    expect(old).toEqual({ id: 'smg', mag: 30, reserve: 60 });
+    expect(s.loadout).toEqual(['assault_rifle', 'sidearm']);
+    expect(s.gun.id).toBe('assault_rifle');
+    expect([s.ammo, s.reserve]).toEqual([17, 40]);
+  });
+  it('a sidearm goes in the secondary slot and becomes active', () => {
+    const s = new FpsSim({ loadout: ['assault_rifle', 'sidearm'], enemies: [], reserveMags: 2 });
+    const old = s.takeWeapon('sidearm', 5, 0);
+    expect(old.id).toBe('sidearm');
+    expect(s.loadout).toEqual(['assault_rifle', 'sidearm']);
+    expect([s.gun.id, s.ammo, s.reserve]).toEqual(['sidearm', 5, 0]);
+  });
+  it('rounds are clamped to what the weapon can hold', () => {
+    const s = new FpsSim({ loadout: ['smg', 'sidearm'], enemies: [], reserveMags: 2 });
+    s.takeWeapon('assault_rifle', 999, 99_999);
+    expect(s.ammo).toBe(s.gun.magazine);
+    expect(s.reserve).toBe(6 * s.gun.magazine);
+  });
+});

@@ -14,6 +14,8 @@ import { useMemo, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { FieldRuntime, Interactable } from '../fps/field';
+import type { GunId } from '../combat/GunStats';
+import { WEAPON_VIEW } from './viewmodelHands';
 
 const RES_COLOR: Record<string, string> = { AMMUNITION: '#5b6640', 'MEDICAL SUPPLIES': '#d9dcd6', FUEL: '#9b3328' };
 
@@ -70,6 +72,20 @@ function CargoCase({ item, label }: { item: Interactable; label: string }) {
       {seized && <mesh name="blink" position={[0, 0.56, 0]}><sphereGeometry args={[0.05, 8, 8]} /><meshBasicMaterial color="#ff5a2a" /></mesh>}
     </group>
   );
+}
+
+/** A weapon on the ground: the real model, lying where physics left it. */
+function GroundWeapon({ item, guns }: { item: Interactable; guns?: Record<GunId, THREE.Group> }) {
+  const obj = useMemo(() => {
+    const proto = item.gun && guns?.[item.gun];
+    if (!proto) return null;
+    const g = proto.clone(true);
+    g.scale.setScalar(WEAPON_VIEW[item.gun!]?.scale ?? 1);
+    g.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
+    return g;
+  }, [item.gun, guns]);
+  if (!obj) return <Box s={[0.9, 0.08, 0.14]} p={[0, 0.07, 0]} c="#22252a" />;
+  return <primitive object={obj} name="gun" />;
 }
 
 function Pouch() {
@@ -232,7 +248,7 @@ function ExfilZone({ field, lowSpec }: { field: FieldRuntime; lowSpec: boolean }
   );
 }
 
-export function FieldProps({ field, lowSpec = false }: { field: FieldRuntime; lowSpec?: boolean }) {
+export function FieldProps({ field, lowSpec = false, guns }: { field: FieldRuntime; lowSpec?: boolean; guns?: Record<GunId, THREE.Group> }) {
   const refs = useRef(new Map<string, THREE.Group>());
   const [count, setCount] = useState(field.items.size);
   const boomAt = useRef(-1);
@@ -247,8 +263,18 @@ export function FieldProps({ field, lowSpec = false }: { field: FieldRuntime; lo
       const g = refs.current.get(i.id);
       if (!g) continue;
       const live = field.items.get(i.id) ?? i;
-      g.visible = live.state !== 'carried' && !(live.kind === 'pouch' && live.state === 'empty');
+      g.visible = live.state !== 'carried' && !(live.kind === 'pouch' && live.state === 'empty') && !(live.kind === 'weapon' && live.state === 'done');
       g.position.set(live.pos[0], 0, live.pos[1]);
+      if (live.kind === 'weapon') {
+        const gun = g.getObjectByName('gun');
+        if (gun && live.pose) {
+          gun.position.set(0, live.pose.y, 0);
+          gun.quaternion.set(live.pose.q[0], live.pose.q[1], live.pose.q[2], live.pose.q[3]);
+        } else if (gun) {
+          gun.position.set(0, 0.07, 0);
+          gun.rotation.set(0, (live.pos[0] * 7.3) % Math.PI, Math.PI / 2);
+        }
+      }
       // Empty containers: the lid opens and the contents go.
       const lid = g.getObjectByName('lid');
       if (lid) lid.rotation.x = live.state === 'empty' ? -1.9 : 0;
@@ -294,6 +320,7 @@ export function FieldProps({ field, lowSpec = false }: { field: FieldRuntime; lo
           {i.kind === 'med_case' && <MedCase />}
           {(i.kind === 'cargo_case' || i.kind === 'seized_case') && <CargoCase item={i} label={label} />}
           {i.kind === 'pouch' && <Pouch />}
+          {i.kind === 'weapon' && <GroundWeapon item={i} guns={guns} />}
           {i.kind === 'charge' && <Charge />}
         </group>
       ))}

@@ -32,6 +32,7 @@
  */
 
 import { type AmmoClass } from './FpsSim';
+import type { GunId } from '../combat/GunStats';
 import type { FieldLayout, ExfilSpot } from './levels';
 
 export type OpKind = 'raid' | 'sabotage' | 'recovery';
@@ -79,7 +80,7 @@ export function practiceManifest(kind: OpKind, units: number, defense: number): 
   };
 }
 
-export type InteractKind = 'ammo_crate' | 'med_case' | 'pouch' | 'cargo_case' | 'seized_case' | 'charge' | 'exfil';
+export type InteractKind = 'ammo_crate' | 'med_case' | 'pouch' | 'cargo_case' | 'seized_case' | 'charge' | 'exfil' | 'weapon';
 
 export interface Interactable {
   id: string;
@@ -96,6 +97,14 @@ export interface Interactable {
   units?: number;
   /** A charge's target, shown in the prompt ("FUEL DEPOT"). */
   target?: string;
+  /** A weapon on the ground: which, its rounds, and whose it was. Battlefield
+   *  weapons are temporary: they exist only for this run and are never settled. */
+  gun?: GunId;
+  mag?: number;
+  reserve?: number;
+  origin?: 'enemy' | 'player';
+  /** Where physics left it lying (height and orientation), for drawing. */
+  pose?: { y: number; q: [number, number, number, number] };
 }
 
 export interface ExfilZone extends ExfilSpot {
@@ -172,6 +181,7 @@ export type FieldEvent =
   | { kind: 'extractLeft' }
   | { kind: 'extracted'; carried: string[] }
   | { kind: 'dropped'; ids: string[] }
+  | { kind: 'weapon'; id: string; gun: GunId; mag: number; reserve: number; swapped: GunId | null; ammoOnly: boolean }
   | { kind: 'refused'; why: string };
 
 /** What the scene lends the runtime: the sim's inventory. */
@@ -179,7 +189,13 @@ export interface Pockets {
   reserveRoom(cls: AmmoClass): number;
   addReserve(cls: AmmoClass, rounds: number): number;
   addMedkit(): boolean;
+  /** Battlefield weapons (optional: the scene's sim has them). */
+  readonly loadout?: GunId[];
+  takeWeapon?(id: GunId, mag: number, reserve: number): { id: GunId; mag: number; reserve: number };
 }
+
+/** Which rounds a gun takes (mirrors FpsSim.ammoClassOf, kept local to stay pure). */
+const roundsFor = (g: GunId): AmmoClass => (g === 'sidearm' || g === 'smg' ? 'pistol' : 'rifle');
 
 export interface ViewState { x: number; z: number; eyeY: number; yaw: number; pitch: number }
 
@@ -195,6 +211,9 @@ export type ProtoEvent =
 export interface FieldRecord { secured: string[]; charges: string[]; delivered: string | null; looted: string[] }
 
 export type ExfilPhase = 'locked' | 'ready' | 'counting' | 'done';
+
+/** Interactions the server's mission protocol knows about. */
+const REPORTED = new Set<InteractKind>(['cargo_case', 'seized_case', 'charge', 'ammo_crate', 'med_case']);
 
 export class FieldRuntime {
   readonly spec: FieldSpec;
@@ -312,7 +331,9 @@ export class FieldRuntime {
       const pre = this.precheck(t, pockets);
       if (pre) { if (this.hold === 0) out.push(pre); this.hold = 1e-6; }
       else {
-        if (this.hold === 0 && t.kind !== 'exfil' && t.kind !== 'pouch') this.log.push({ kind: 'hold_start', object: t.id, t: Math.round((this.time - dt) * 1000), pos: this.lastPos });
+        // Only objects of the server's manifest are reported; battlefield weapons and
+        // magazines are local, and an id the server doesn't know would taint the run.
+        if (this.hold === 0 && REPORTED.has(t.kind)) this.log.push({ kind: 'hold_start', object: t.id, t: Math.round((this.time - dt) * 1000), pos: this.lastPos });
         this.hold += dt;
         if (this.hold >= t.holdSecs) { this.hold = 0; out.push(...this.complete(t, pockets)); }
       }
@@ -350,6 +371,7 @@ export class FieldRuntime {
     if (t.kind === 'ammo_crate' && t.ammoClass && p.reserveRoom(t.ammoClass) <= 0) return { kind: 'full', id: t.id, what: 'ammo' };
     if ((t.kind === 'cargo_case' || t.kind === 'seized_case') && this.carried.length >= CARRY_MAX) return { kind: 'full', id: t.id, what: 'cargo' };
     if (t.kind === 'exfil' && !this.canExtract()) return { kind: 'refused', why: this.refusal() };
+    if (t.kind === 'weapon' && t.gun && p.loadout?.includes(t.gun) && p.reserveRoom(roundsFor(t.gun)) <= 0) return { kind: 'full', id: t.id, what: 'ammo' };
     return null;
   }
 
@@ -386,6 +408,25 @@ export class FieldRuntime {
         this.log.push({ kind: 'plant', object: t.id, t: this.ms, pos: this.lastPos });
         if (this.allChargesPlanted) this.fuseAt = this.time + FUSE_SECS;
         return [{ kind: 'planted', id: t.id, planted: this.planted.length, total: this.spec.charges?.length ?? 0 }];
+      case 'weapon': {
+        const gun = t.gun!;
+        const rounds = (t.mag ?? 0) + (t.reserve ?? 0);
+        // The same gun you carry: take its rounds, leave the empty weapon.
+        if (p.loadout?.includes(gun) || !p.takeWeapon) {
+          const took = p.addReserve(roundsFor(gun), rounds);
+          if (took <= 0) return [{ kind: 'full', id: t.id, what: 'ammo' }];
+          const left = rounds - took;
+          t.mag = Math.min(t.mag ?? 0, left);
+          t.reserve = left - (t.mag ?? 0);
+          if (left <= 0) t.state = 'empty';
+          return [{ kind: 'weapon', id: t.id, gun, mag: 0, reserve: took, swapped: null, ammoOnly: true }];
+        }
+        // Otherwise swap: yours goes down where you stand, with what it has left.
+        const old = p.takeWeapon(gun, t.mag ?? 0, t.reserve ?? 0);
+        t.state = 'done';
+        this.dropWeapon(this.lastPos[0] + 0.5, this.lastPos[1] + 0.3, old.id, old.mag, Number.isFinite(old.reserve) ? old.reserve : 0, 'player');
+        return [{ kind: 'weapon', id: t.id, gun, mag: t.mag ?? 0, reserve: t.reserve ?? 0, swapped: old.id, ammoOnly: false }];
+      }
       case 'exfil':
         this.exfilPhase = 'counting';
         this.exfilProgress = 0;
@@ -407,6 +448,14 @@ export class FieldRuntime {
     });
     if (this.exfilPhase === 'counting') { this.exfilPhase = 'ready'; this.exfilProgress = 0; }
     return ids.length ? [{ kind: 'dropped', ids }] : [];
+  }
+
+  /** A weapon on the ground: a dead guard's, or one you swapped away. Temporary
+   *  battlefield equipment; never in the record. */
+  dropWeapon(x: number, z: number, gun: GunId, mag: number, reserve: number, origin: 'enemy' | 'player'): Interactable {
+    const w: Interactable = { id: `weapon-${++this.pouchSeq}`, kind: 'weapon', pos: [x, z], y: 0.1, holdSecs: 0.6, label: gun, state: 'idle', gun, mag, reserve, origin };
+    this.items.set(w.id, w);
+    return w;
   }
 
   /** A dead guard's spare magazine. Not economic, so not in the record. */

@@ -170,3 +170,35 @@ describe('protocol events for the server', () => {
     expect(Math.hypot(h.pos[0] - c.pos[0], h.pos[1] - c.pos[1])).toBeLessThan(1);
   });
 });
+
+describe('battlefield weapons', () => {
+  function armed(loadout: ('smg' | 'sidearm' | 'assault_rifle')[]) {
+    const p = pockets() as ReturnType<typeof pockets> & { loadout: string[]; takeWeapon: (id: never, m: number, r: number) => { id: never; mag: number; reserve: number } };
+    p.loadout = [...loadout];
+    p.takeWeapon = (id, mag, reserve) => { const old = { id: p.loadout[0] as never, mag: 30, reserve: 60 }; p.loadout[0] = id; void mag; void reserve; return old; };
+    return p;
+  }
+
+  it('a different gun swaps; yours is left on the ground with its rounds; nothing enters the record', () => {
+    const f = new FieldRuntime(buildField('raid', lv.field, practiceManifest('raid', 30, 2), opts));
+    const p = armed(['smg', 'sidearm']);
+    const w = f.dropWeapon(0, 0, 'assault_rifle', 17, 24, 'enemy');
+    const ev = holdOn(f, w.pos, 1, p as never);
+    expect(ev.find((e) => e.kind === 'weapon')).toMatchObject({ gun: 'assault_rifle', swapped: 'smg', ammoOnly: false });
+    expect(p.loadout[0]).toBe('assault_rifle');
+    const left = [...f.items.values()].find((i) => i.kind === 'weapon' && i.origin === 'player');
+    expect(left).toMatchObject({ gun: 'smg', mag: 30, reserve: 60, state: 'idle' });
+    expect(f.record()).toEqual({ secured: [], charges: [], delivered: null, looted: [] });
+    expect(f.log.some((e) => (e as { object?: string }).object === w.id)).toBe(false);
+  });
+
+  it('the same gun gives its rounds and stays on the ground until empty', () => {
+    const f = new FieldRuntime(buildField('raid', lv.field, practiceManifest('raid', 30, 2), opts));
+    const p = armed(['assault_rifle', 'sidearm']);
+    const w = f.dropWeapon(0, 0, 'assault_rifle', 10, 24, 'enemy');
+    const ev = holdOn(f, w.pos, 1, p as never);
+    expect(ev.find((e) => e.kind === 'weapon')).toMatchObject({ ammoOnly: true, reserve: 34 });
+    expect(p.rounds).toBe(34);
+    expect(f.items.get(w.id)!.state).toBe('empty');
+  });
+});

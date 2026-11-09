@@ -211,7 +211,7 @@ if (!FILTER || FILTER === 'combat') {
   const page = await ctx.newPage();
   page.on('pageerror', (e) => r.errors.push(String(e)));
   try {
-    await page.goto(`${BASE}/dev/level?site=dustline-depot&kind=raid&phase=day&defense=1&seed=3`);
+    await page.goto(`${BASE}/dev/level?site=dustline-depot&kind=raid&phase=day&defense=1&seed=3&gun=smg`);
     await page.waitForSelector('canvas', { timeout: 120_000 });
     await until(page, () => !!window.__czField, null, 60_000);
     await page.mouse.click(640, 360);
@@ -246,18 +246,24 @@ if (!FILTER || FILTER === 'combat') {
     r.checks.kills = kills;
     r.checks.reserve_after = after.reserve;
     r.checks.reserve_spent = start.reserve - after.reserve;
-    r.checks.pouches = after.items.filter((i) => i.kind === 'pouch').length;
-    const pouch = after.items.find((i) => i.kind === 'pouch');
-    if (pouch) {
+    // Guards drop the weapon they carried. Take a rifle: it swaps for the SMG, which
+    // is left on the ground with its rounds.
+    const guns = after.items.filter((i) => i.kind === 'weapon');
+    r.checks.weapons_dropped = guns.map((g) => g.id);
+    const rifle = (await page.evaluate(() => window.__czField().items)).find((i) => i.kind === 'weapon' && i.state === 'idle');
+    if (rifle) {
       await page.evaluate(() => window.__czKillAll());
-      await standAt(page, pouch.pos);
-      await page.screenshot({ path: `${OUT}/combat-pouch-prompt.png` });
-      const before = (await field(page)).reserve;
-      await holdE(page, (id) => window.__czField().items.find((i) => i.id === id).state === 'empty', pouch.id, 15_000);
-      const fp = await field(page);
-      r.checks.pouch_pickup = { id: pouch.id, rounds: pouch.rounds, state: fp.items.find((i) => i.id === pouch.id).state };
-      await page.keyboard.press('Digit2'); await sleep(400);
-      r.checks.sidearm_reserve = (await field(page)).reserve;
+      for (let i = 0; i < 20; i++) { const it = (await field(page)).items.find((x) => x.id === rifle.id); if (it) { rifle.pos = it.pos; } await sleep(150); }
+      await standAt(page, rifle.pos);
+      await page.screenshot({ path: `${OUT}/combat-weapon-prompt.png` });
+      const before = await page.evaluate(() => window.__czState().loadout);
+      await holdE(page, (id) => window.__czField().items.find((i) => i.id === id).state !== 'idle', rifle.id, 15_000);
+      await sleep(600);
+      const st = await page.evaluate(() => window.__czState());
+      const fl = await field(page);
+      r.checks.weapon_swap = { before, after: st.loadout, active: st.gunId, ammo: `${st.ammo}/${st.reserve}`, left_on_ground: fl.items.filter((i) => i.kind === 'weapon' && i.state === 'idle').map((i) => i.id) };
+      r.checks.record_has_no_weapons = JSON.stringify(fl.record);
+      await page.screenshot({ path: `${OUT}/combat-weapon-taken.png` });
     }
     await page.screenshot({ path: `${OUT}/combat-after.png` });
   } catch (e) { r.errors.push(`probe: ${e.message}`); }

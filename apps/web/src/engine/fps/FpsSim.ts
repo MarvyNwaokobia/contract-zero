@@ -738,6 +738,41 @@ export class FpsSim {
     return this.switchGun((this.activeSlot + 1) % this.loadout.length);
   }
 
+  /** The slot a weapon of this kind goes in: sidearms secondary, everything else primary. */
+  slotFor(id: GunId): number {
+    return id === 'sidearm' && this.loadout.length > 1 ? 1 : 0;
+  }
+
+  /** Rounds in a slot's magazine and reserve (for a weapon being dropped). */
+  slotAmmo(slot: number): { id: GunId; mag: number; reserve: number } {
+    return { id: this.loadout[slot], mag: this.ammoBySlot[slot], reserve: this.reserveBySlot[slot] };
+  }
+
+  /**
+   * Take a battlefield weapon into its slot, with the rounds it carries. Returns
+   * what was in that slot (to be dropped where you stand). Battlefield weapons are
+   * temporary: they exist only in this run.
+   */
+  takeWeapon(id: GunId, mag: number, reserve: number): { id: GunId; mag: number; reserve: number } {
+    const slot = this.slotFor(id);
+    const old = this.slotAmmo(slot);
+    const stats = this.resolveGun(id);
+    this.loadout[slot] = id;
+    this.ammoBySlot[slot] = Math.max(0, Math.min(stats.magazine, Math.floor(mag)));
+    this.reserveBySlot[slot] = Number.isFinite(this.reserveBySlot[slot]) ? Math.max(0, Math.min(RESERVE_CAP_MAGS * stats.magazine, Math.floor(reserve))) : Infinity;
+    if (slot === this.activeSlot) {
+      this.gun = stats;
+      this.fireMode = (GUN_FIRE_MODES[id] ?? ['auto'])[0];
+      this.reloading = false;
+      this.burstLeft = 0;
+      this.nextShotAt = this.time + SWAP_TIME;
+    } else {
+      this.switchGun(slot);
+    }
+    this.events.push({ kind: 'weaponSwitch', gunId: id, slot, name: stats.name });
+    return old;
+  }
+
   /** A walkable route between two points on a level with navigation (null without). */
   pathBetween(fx: number, fz: number, tx: number, tz: number): [number, number][] | null {
     if (!this.nav) return null;

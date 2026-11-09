@@ -20,7 +20,7 @@ import {
 import { RANK_COLORS } from '../../lib/constants';
 import { linesFor, SPEAKER_META, type PresenceLine, type PresenceTrigger, type Speaker } from '../story/presence';
 import { GUN_FEEL } from '../combat/GunFeel';
-import { STARTER_GUN_ID, type GunId } from '../combat/GunStats';
+import { STARTER_GUN_ID, getGun, type GunId } from '../combat/GunStats';
 import type { AmmoId, AttachmentId, AttachmentSlot } from '../combat/Loadout';
 import { FpsAudio } from '../audio';
 import { computeEdgeArrow } from '../verb/threatArrow';
@@ -30,7 +30,6 @@ import { LEVELS } from '../fps/levels';
 import { LevelArt } from './LevelArt';
 import { FieldProps } from './FieldProps';
 import { FieldRuntime, trainingField, BLAST_RADIUS, CARRY_MAX, type FieldEvent, type FieldRecord, type ProtoEvent } from '../fps/field';
-import { ammoClassOf } from '../fps/FpsSim';
 import { CAMPAIGN, CAMPAIGN_KEY, PROGRESS_KEY, ZONE_THEMES, themeForMission, SURVIVAL_MISSION, GAUNTLET_MISSION, ENDLESS_MISSION, SEASONAL_MISSION, survivalWaveCount, survivalWaveHp, gauntletWaveCount, gauntletWaveHp, type Mission } from '../fps/campaign';
 import {
   buildChain, generateRoom, entryCap, spawnPointFor, zForWaveStart, firstRoomOfWave, roomsForWave, ROOM_W,
@@ -1038,6 +1037,8 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
   const lastFieldHtml = useRef('');
   const lastBeep = useRef(-1);
   const lastHeartbeat = useRef(0);
+  /** Guards' weapons still falling: field item id → its tumble physics. */
+  const enemyDrops = useRef(new Map<string, DroppedWeapon>());
   const extractedLabel = useRef('');
   const lastReinforceAt = useRef(0);    // sim-time of the last reinforcement drop
   const hostageRef = useRef<THREE.Group>(null);
@@ -1930,12 +1931,10 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
           if (ev.killed) {
             addXp(xpForKill(ev.part)); // earn loop: XP per kill
             spawnDeathPool(ev.enemyId);
-            // Some guards drop a spare magazine where they fall: walk over and take it.
-            if (FINITE_AMMO && ev.enemyId % 3 !== 1) {
-              const en = sim.getEnemies().find((x) => x.id === ev.enemyId);
-              const cls = ev.enemyId % 2 === 0 ? ammoClassOf(LOADOUT[0]) : ammoClassOf(LOADOUT[1] ?? LOADOUT[0]);
-              if (en) FIELD.dropPouch(en.x + 0.4, en.z + 0.3, cls, cls === 'rifle' ? 24 : 18);
-            }
+            // The guard's own weapon falls where they do: the gun the economy armed
+            // them with (a rifle, or a sidearm when the faction was short of ammo),
+            // with what was left in it. Temporary battlefield equipment.
+            if (FINITE_AMMO) dropEnemyWeapon(ev.enemyId);
           }
         } else if (ev.kind === 'wall') {
           audio.impact('wall', ev.point);
@@ -2072,6 +2071,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
     if (!minimal) impactFx.ambient(dt, [pos.current.x, pos.current.y, pos.current.z]);
     impactFx.update(dt);
     stepDroppedWeapon(dt);
+    stepEnemyDrops(dt);
 
     // Second wind: stand back up where you fell. Runs before either death path
     // below, both of which are gated on there being no revive pending.
@@ -2778,6 +2778,14 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       case 'refused':
         toast(fe.why, '#ffb454');
         break;
+      case 'weapon':
+        audio.reloadDone();
+        if (fe.ammoOnly) toast(`+${fe.reserve} ROUNDS FROM THE ${getGun(fe.gun).name.toUpperCase()}`, '#e6c766');
+        else {
+          swapRaise.current = 1;
+          toast(`${getGun(fe.gun).name.toUpperCase()} · ${fe.mag}/${fe.reserve}${fe.swapped ? ` · ${getGun(fe.swapped).name.toUpperCase()} LEFT ON THE GROUND` : ''} · BATTLEFIELD PICKUP`, '#e9edf2');
+        }
+        break;
       case 'dropped':
         break;
     }
@@ -2893,6 +2901,33 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
     const fwd = new THREE.Vector3();
     cam.getWorldDirection(fwd);
     dropPhysics.current.throwFrom(cam.position, fwd, cam.quaternion);
+  }
+
+  /** A guard's weapon leaves their hands as they fall, tumbles and comes to rest. */
+  function dropEnemyWeapon(enemyId: number) {
+    const en = sim.getEnemies().find((x) => x.id === enemyId);
+    if (!en) return;
+    const gun: GunId = (en.dmgMult ?? 1) < 1 ? 'sidearm' : 'assault_rifle';
+    const mag = getGun(gun).magazine;
+    // What they hadn't fired yet, and one spare magazine (deterministic per guard).
+    const left = Math.max(2, Math.round(mag * (0.35 + ((enemyId * 37) % 50) / 100)));
+    const item = FIELD.dropWeapon(en.x, en.z, gun, left, mag, 'enemy');
+    if (enemyDrops.current.size >= 8) return; // a burst of kills: the rest just lie where they fell
+    const d = new DroppedWeapon({ restY: DROP_REST_Y });
+    const a = (enemyId * 2.399) % (Math.PI * 2);
+    d.throwFrom(new THREE.Vector3(en.x, 1.25, en.z), new THREE.Vector3(Math.cos(a), -0.2, Math.sin(a)).normalize(), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, a, 0)));
+    enemyDrops.current.set(item.id, d);
+  }
+
+  function stepEnemyDrops(dt: number) {
+    for (const [id, d] of enemyDrops.current) {
+      const item = FIELD.items.get(id);
+      if (!item || item.state !== 'idle') { enemyDrops.current.delete(id); continue; }
+      d.step(dt, (x, z, nx, nz) => slideMove(x, z, nx, nz, 0.12, COLLIDERS), (x, y, z) => audio.impact('wall', [x, y, z]));
+      item.pos = [d.position.x, d.position.z];
+      item.pose = { y: d.position.y, q: [d.quaternion.x, d.quaternion.y, d.quaternion.z, d.quaternion.w] };
+      if (!d.active || d.landed) enemyDrops.current.delete(id);
+    }
   }
 
   /** Put the weapon back in your hands (a restart, a new wave, a new op). */
@@ -3133,10 +3168,12 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       const t = FIELD.target;
       let prompt = '';
       if (t && snap.playerAlive && completeAt.current < 0) {
-        const verb = t.kind === 'cargo_case' ? 'SECURE' : t.kind === 'seized_case' ? 'RETRIEVE' : t.kind === 'charge' ? '' : t.kind === 'exfil' ? '' : 'TAKE';
-        const extra = t.kind === 'ammo_crate' || t.kind === 'pouch' ? ` · ${t.rounds} RDS` : t.kind === 'med_case' ? ` · ${t.medkits} LEFT` : '';
+        const sameGun = t.kind === 'weapon' && !!t.gun && sim.loadout.includes(t.gun);
+        const verb = t.kind === 'cargo_case' ? 'SECURE' : t.kind === 'seized_case' ? 'RETRIEVE' : t.kind === 'charge' ? '' : t.kind === 'exfil' ? '' : t.kind === 'weapon' ? (sameGun ? 'TAKE ROUNDS ·' : `SWAP ${getGun(sim.loadout[sim.slotFor(t.gun!)]).name.toUpperCase()} FOR`) : 'TAKE';
+        const extra = t.kind === 'ammo_crate' || t.kind === 'pouch' ? ` · ${t.rounds} RDS` : t.kind === 'med_case' ? ` · ${t.medkits} LEFT` : t.kind === 'weapon' ? ` · ${t.mag}/${t.reserve}` : '';
         const p = t.holdSecs > 0 ? Math.round(Math.min(1, FIELD.hold / t.holdSecs) * 20) * 5 : 0;
-        prompt = `<div style="font-size:15px;letter-spacing:2px;color:#e9edf2"><span style="display:inline-block;min-width:22px;padding:1px 6px;margin-right:8px;border:1px solid #e9edf2;border-radius:4px;font-weight:800">E</span>${verb ? verb + ' ' : ''}${t.label}${extra}</div>`
+        const label = t.kind === 'weapon' ? getGun(t.gun!).name.toUpperCase() : t.label;
+        prompt = `<div style="font-size:15px;letter-spacing:2px;color:#e9edf2"><span style="display:inline-block;min-width:22px;padding:1px 6px;margin-right:8px;border:1px solid #e9edf2;border-radius:4px;font-weight:800">E</span>${verb ? verb + ' ' : ''}${label}${extra}</div>`
           + `<div style="margin:6px auto 0;width:180px;height:4px;background:#ffffff22;border-radius:2px;overflow:hidden"><div style="height:100%;width:${p}%;background:#5fe0a8"></div></div>`;
       }
       const ft = fieldToast.current;
@@ -3426,7 +3463,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       {!minimal && <SetDressing props={DRESSING} mats={propMaterials} />}
 
       {/* the op's physical objects: supplies, cargo, charges, the extraction zone */}
-      <FieldProps field={FIELD} lowSpec={lowSpec || minimal} />
+      <FieldProps field={FIELD} lowSpec={lowSpec || minimal} guns={gunProtos} />
 
       {/* waypoint beacon at the current objective */}
       <group ref={waypointRef}>

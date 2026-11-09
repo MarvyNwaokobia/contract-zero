@@ -158,6 +158,10 @@ Recovery settles through the same `settle_operation`, with an extra faction → 
 - **The ledger's storage.** The ledger itself (`assets`) then ran out of storage too. A second faucet helper (`cz-fund2-1794237513.testnet`) sent it 8 NEAR ([`E3xvUX5g…`](https://testnet.nearblocks.io/txns/E3xvUX5gzSw24qPEvmSXp1BN8SmYMvTtphfvmTds7ZQa)). One order's refund (`o1890`, Ashen, 524 credits) had failed during that outage. It was retried with `retry_refund` ([`tXjtdHMC…`](https://testnet.nearblocks.io/txns/tXjtdHMC61u1ZwPacapxiSR1EUF1KBAk7PS62LJDsVZ)), and reconciliation returned to exact. The worker now retries a stuck refund after any close, expiry or fill.
 - **Halcyon's gas.** Halcyon was also topped up for gas ([`FkFvYKw4…`](https://testnet.nearblocks.io/txns/FkFvYKw4ZQwNPJwbMxfcrc1TXcUf5XMmsYtrMACiwhpz)).
 
+**Without `wee_alloc` (RUSTSEC-2022-0054).** Both contracts were rebuilt with `near-sdk` `default-features = false` and redeployed in place, with state unchanged. A net-zero order smoke test passed on the new code (place, propose, cancel; escrow 150 in and returned exactly).
+- **`assets`:** code `FMXGm9CwdXANTxdxgA67ewsiFLU2aq95xtkRvhN8VHoT`, deployed in [`2Y2Gkwov…`](https://testnet.nearblocks.io/txns/2Y2GkwovQFHFrGkyctkuQF97BqE8Piz6jZ5pmYffnLZx).
+- **`world2`:** code `BLTKXSVCDpvovMdwK26c63WKxWjeeVy7PbF5LZ39B2YG`, deployed in [`GzsxuK8c…`](https://testnet.nearblocks.io/txns/GzsxuK8cVhoB8kiJt4MqNdRd68YKRbAGKQDmLVb73t1f).
+
 ## Repairing an out-of-order mirror
 
 A long RPC outage left 129 flow batches failed. The old worker then skipped past them, so later batches applied first and an earlier one became impossible ("insufficient balance").

@@ -68,6 +68,7 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         .route("/intents", web::get().to(intents::overview))
         .route("/intents/quote", web::post().to(intents::quote))
         .route("/intents/status/{deposit}", web::get().to(intents::status))
+        .route("/intents/deposit", web::post().to(intents::deposit))
         .route("/market", web::get().to(orders::market))
         .route("/market/orders/prepare", web::post().to(orders::prepare))
         .route("/market/orders/confirm", web::post().to(orders::confirm))

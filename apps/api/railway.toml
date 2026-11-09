@@ -3,7 +3,10 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "./contract-zero-api"
+# The image's CMD runs the API; no start command override.
 healthcheckPath = "/health"
-healthcheckTimeout = 30
+# The first boot runs every migration before it binds.
+healthcheckTimeout = 120
 restartPolicyType = "ON_FAILURE"
+# One world, one writer (an advisory lock refuses a second instance).
+numReplicas = 1

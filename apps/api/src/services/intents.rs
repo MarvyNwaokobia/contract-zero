@@ -51,6 +51,10 @@ pub enum IntentsError {
     BadAmount,
     #[error("swap execution is disabled: it settles on NEAR mainnet with real funds and needs explicit approval")]
     ExecutionDisabled,
+    #[error("a live swap needs a recipient account (and it receives the output and any refund)")]
+    MissingRecipient,
+    #[error("quote worth ${usd} is over the approved cap of ${cap}")]
+    OverCap { usd: String, cap: String },
     #[error("1Click refused the request ({status}): {message}")]
     Refused { status: u16, message: String },
     #[error("could not reach 1Click: {0}")]
@@ -72,6 +76,13 @@ pub struct QuoteAsk {
     /// Expected chain of the destination asset ("near", "eth", …), checked.
     #[serde(default)]
     pub destination_chain: Option<String>,
+    /// Where the deposit is made and the output delivered: "INTENTS" (balances inside
+    /// the Verifier; the default for dry quotes) or "ORIGIN_CHAIN" / "DESTINATION_CHAIN"
+    /// (plain token transfers on the asset's own chain).
+    #[serde(default)]
+    pub deposit_type: Option<String>,
+    #[serde(default)]
+    pub recipient_type: Option<String>,
 }
 
 fn default_slippage() -> u32 {
@@ -128,11 +139,15 @@ pub fn validate(ask: &QuoteAsk, tokens: &[Token]) -> Result<(), IntentsError> {
 pub fn quote_request(ask: &QuoteAsk, dry: bool, deadline: chrono::DateTime<chrono::Utc>) -> Value {
     // Dry quotes need no real recipient; a placeholder never receives anything.
     let who = ask.recipient.clone().unwrap_or_else(|| "contract-zero-quote.near".into());
+    let deposit = ask.deposit_type.clone().filter(|t| t == "ORIGIN_CHAIN" || t == "INTENTS").unwrap_or_else(|| "INTENTS".into());
+    let recipient = ask.recipient_type.clone().filter(|t| t == "DESTINATION_CHAIN" || t == "INTENTS").unwrap_or_else(|| "INTENTS".into());
+    // Refunds go back the way the deposit came.
+    let refund = if deposit == "ORIGIN_CHAIN" { "ORIGIN_CHAIN" } else { "INTENTS" };
     json!({
         "dry": dry, "swapType": "EXACT_INPUT", "slippageTolerance": ask.slippage_bps.min(1_000),
-        "originAsset": ask.origin_asset, "depositType": "INTENTS",
+        "originAsset": ask.origin_asset, "depositType": deposit,
         "destinationAsset": ask.destination_asset, "amount": ask.amount,
-        "refundTo": who, "refundType": "INTENTS", "recipient": who, "recipientType": "INTENTS",
+        "refundTo": who, "refundType": refund, "recipient": who, "recipientType": recipient,
         "deadline": deadline.to_rfc3339_opts(chrono::SecondsFormat::Millis, true), "quoteWaitingTimeMs": 3_000,
     })
 }
@@ -185,6 +200,8 @@ pub struct IntentsClient {
     base: String,
     api_key: Option<String>,
     execution_allowed: bool,
+    /// Most a live swap may be worth, in USD (from the quote's own amountInUsd).
+    max_usd: f64,
     cache: Arc<Mutex<Option<(Instant, Vec<Token>)>>>,
 }
 
@@ -196,6 +213,7 @@ impl IntentsClient {
             // Optional partner key (without one 1Click adds 25 bps). Never logged.
             api_key: std::env::var("ONECLICK_API_KEY").ok().filter(|k| !k.is_empty()),
             execution_allowed: std::env::var("NEAR_INTENTS_EXECUTION").as_deref() == Ok("mainnet-approved"),
+            max_usd: std::env::var("NEAR_INTENTS_MAX_USD").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0),
             cache: Arc::new(Mutex::new(None)),
         }
     }
@@ -204,7 +222,7 @@ impl IntentsClient {
         json!({
             "service": self.base, "verifier": VERIFIER, "network": "near-mainnet",
             "testnet_verifier": false, "authenticated": self.api_key.is_some(),
-            "execution": if self.execution_allowed { "enabled (mainnet, approved by configuration)" } else { "disabled" },
+            "execution": if self.execution_allowed { format!("enabled (mainnet, approved by configuration, at most ${} per swap)", self.max_usd) } else { "disabled".into() },
             "quotes": "dry: prices and fees only, no deposit address",
         })
     }
@@ -239,6 +257,9 @@ impl IntentsClient {
         if execute && !self.execution_allowed {
             return Err(IntentsError::ExecutionDisabled);
         }
+        if execute && ask.recipient.is_none() {
+            return Err(IntentsError::MissingRecipient);
+        }
         let tokens = self.tokens().await?;
         validate(ask, &tokens)?;
         let body = quote_request(ask, !execute, chrono::Utc::now() + chrono::Duration::minutes(30));
@@ -249,7 +270,28 @@ impl IntentsClient {
             return Err(IntentsError::Refused { status, message: v["message"].as_str().unwrap_or("no message").to_string() });
         }
         let view = parse_quote(&v).ok_or_else(|| IntentsError::Refused { status, message: "unexpected quote shape".into() })?;
+        if execute {
+            let usd: f64 = v["quote"]["amountInUsd"].as_str().and_then(|x| x.parse().ok()).unwrap_or(f64::MAX);
+            if usd > self.max_usd {
+                return Err(IntentsError::OverCap { usd: format!("{usd:.2}"), cap: format!("{:.2}", self.max_usd) });
+            }
+        }
         Ok((view, body, v))
+    }
+
+    /// Tell 1Click a deposit was sent (optional; speeds detection).
+    pub async fn submit_deposit(&self, tx_hash: &str, deposit_address: &str, near_sender: Option<&str>) -> Result<Value, IntentsError> {
+        let mut body = json!({ "txHash": tx_hash, "depositAddress": deposit_address });
+        if let Some(s) = near_sender {
+            body["nearSenderAccount"] = json!(s);
+        }
+        let r = self.req(self.http.post(format!("{}/v0/deposit/submit", self.base)).json(&body)).send().await.map_err(|e| IntentsError::Unreachable(e.to_string()))?;
+        let status = r.status().as_u16();
+        let v: Value = r.json().await.unwrap_or(Value::Null);
+        if !(200..300).contains(&status) {
+            return Err(IntentsError::Refused { status, message: v["message"].as_str().unwrap_or("no message").to_string() });
+        }
+        Ok(v)
     }
 
     /// Execution status of a (real) quote's deposit address.
@@ -278,7 +320,7 @@ mod tests {
     }
 
     fn ask(o: &str, d: &str, amount: &str) -> QuoteAsk {
-        QuoteAsk { origin_asset: o.into(), destination_asset: d.into(), amount: amount.into(), recipient: None, slippage_bps: 100, destination_chain: None }
+        QuoteAsk { origin_asset: o.into(), destination_asset: d.into(), amount: amount.into(), recipient: None, slippage_bps: 100, destination_chain: None, deposit_type: None, recipient_type: None }
     }
 
     #[test]
@@ -335,16 +377,28 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_live_swap_is_a_plain_chain_transfer_with_refunds_the_same_way() {
+        let mut a = ask("nep141:wrap.near", "nep141:usdc.example", "1");
+        a.deposit_type = Some("ORIGIN_CHAIN".into());
+        a.recipient_type = Some("DESTINATION_CHAIN".into());
+        a.recipient = Some("me.near".into());
+        let r = quote_request(&a, false, chrono::Utc::now());
+        assert_eq!((r["depositType"].as_str(), r["refundType"].as_str(), r["recipientType"].as_str(), r["dry"].as_bool()), (Some("ORIGIN_CHAIN"), Some("ORIGIN_CHAIN"), Some("DESTINATION_CHAIN"), Some(false)));
+        a.deposit_type = Some("SOMEWHERE".into());
+        assert_eq!(quote_request(&a, false, chrono::Utc::now())["depositType"], "INTENTS", "unknown types fall back to the safe default");
+    }
+
     #[tokio::test]
     async fn execution_is_refused_without_explicit_approval() {
-        let c = IntentsClient { http: reqwest::Client::new(), base: "http://127.0.0.1:9".into(), api_key: None, execution_allowed: false, cache: Arc::new(Mutex::new(None)) };
+        let c = IntentsClient { http: reqwest::Client::new(), base: "http://127.0.0.1:9".into(), api_key: None, execution_allowed: false, max_usd: 1.0, cache: Arc::new(Mutex::new(None)) };
         let r = c.quote(&ask("nep141:wrap.near", "nep141:usdc.example", "1"), true).await;
         assert_eq!(r.unwrap_err(), IntentsError::ExecutionDisabled);
     }
 
     #[tokio::test]
     async fn an_unreachable_service_is_reported_not_invented() {
-        let c = IntentsClient { http: reqwest::Client::new(), base: "http://127.0.0.1:9".into(), api_key: None, execution_allowed: false, cache: Arc::new(Mutex::new(None)) };
+        let c = IntentsClient { http: reqwest::Client::new(), base: "http://127.0.0.1:9".into(), api_key: None, execution_allowed: false, max_usd: 1.0, cache: Arc::new(Mutex::new(None)) };
         assert!(matches!(c.tokens().await, Err(IntentsError::Unreachable(_))));
     }
 }

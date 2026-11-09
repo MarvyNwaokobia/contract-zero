@@ -11,7 +11,8 @@ fn err(e: IntentsError) -> HttpResponse {
     let body = json!({ "error": e.to_string() });
     match e {
         IntentsError::GameAsset(_) | IntentsError::Unsupported(_) | IntentsError::WrongChain { .. } | IntentsError::BadAmount => HttpResponse::UnprocessableEntity().json(body),
-        IntentsError::ExecutionDisabled => HttpResponse::Forbidden().json(body),
+        IntentsError::ExecutionDisabled | IntentsError::OverCap { .. } => HttpResponse::Forbidden().json(body),
+        IntentsError::MissingRecipient => HttpResponse::UnprocessableEntity().json(body),
         IntentsError::Refused { .. } | IntentsError::Unreachable(_) => HttpResponse::BadGateway().json(body),
     }
 }
@@ -44,12 +45,30 @@ pub async fn overview(state: web::Data<AppState>) -> HttpResponse {
     }))
 }
 
-/// A dry quote from the live service (prices, fees, minimum received; no deposit
-/// address). Persisted with the protocol's correlation id and signature.
-pub async fn quote(state: web::Data<AppState>, req: HttpRequest, body: web::Json<QuoteAsk>) -> HttpResponse {
+fn is_operator(req: &HttpRequest) -> bool {
+    let Ok(token) = std::env::var("ADMIN_TOKEN") else { return false };
+    !token.is_empty() && req.headers().get("x-admin-token").and_then(|v| v.to_str().ok()) == Some(token.as_str())
+}
+
+#[derive(serde::Deserialize)]
+pub struct QuoteBody {
+    #[serde(flatten)]
+    pub ask: QuoteAsk,
+    /// A real (non-dry) quote with a deposit address. Operator only, and only with
+    /// execution approved in configuration; still capped in value.
+    #[serde(default)]
+    pub execute: bool,
+}
+
+/// A quote from the live service, persisted with the protocol's correlation id and
+/// signature. Dry by default: prices, fees and minimum received, no deposit address.
+pub async fn quote(state: web::Data<AppState>, req: HttpRequest, body: web::Json<QuoteBody>) -> HttpResponse {
     let who = crate::handlers::auth::player(&state, &req).await.ok().map(|s| s.account);
-    let ask = body.into_inner();
-    let (view, request, response) = match state.intents.quote(&ask, false).await {
+    let QuoteBody { ask, execute } = body.into_inner();
+    if execute && !is_operator(&req) {
+        return HttpResponse::Forbidden().json(json!({ "error": "live swaps are operator-only" }));
+    }
+    let (view, request, response) = match state.intents.quote(&ask, execute).await {
         Ok(x) => x,
         Err(e) => return err(e),
     };
@@ -59,15 +78,52 @@ pub async fn quote(state: web::Data<AppState>, req: HttpRequest, body: web::Json
         .bind(&view.min_amount_out).bind(deadline).bind(&view.signature).bind(&view.deposit_address).bind(&request).bind(&response).bind(&who)
         .execute(state.world.db()).await
         .map_err(|e| tracing::error!("intents: could not store quote {}: {e}", view.correlation_id));
+    if let (true, Some(dep)) = (execute, view.deposit_address.as_ref()) {
+        let _ = sqlx::query("INSERT INTO intents_executions (correlation_id, deposit_address, origin_asset, destination_asset, amount_in, min_amount_out, recipient, history, last_response) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (deposit_address) DO NOTHING")
+            .bind(&view.correlation_id).bind(dep).bind(&ask.origin_asset).bind(&ask.destination_asset).bind(&view.amount_in).bind(&view.min_amount_out)
+            .bind(ask.recipient.as_deref().unwrap_or_default()).bind(json!([{ "status": "QUOTED", "at": chrono::Utc::now() }])).bind(&response)
+            .execute(state.world.db()).await
+            .map_err(|e| tracing::error!("intents: could not record execution {dep}: {e}"));
+    }
     let is_expired = expired(&view, chrono::Utc::now());
-    HttpResponse::Ok().json(json!({ "quote": view, "expired": is_expired, "execution": "not available: dry quote (no deposit address); swaps settle on NEAR mainnet" }))
+    let note = if view.dry { "not available: dry quote (no deposit address); swaps settle on NEAR mainnet" } else { "live quote: send exactly amount_in to deposit_address before the deadline" };
+    HttpResponse::Ok().json(json!({ "quote": view, "expired": is_expired, "execution": note }))
+}
+
+#[derive(serde::Deserialize)]
+pub struct DepositBody {
+    pub deposit_address: String,
+    pub tx_hash: String,
+    pub near_sender: Option<String>,
+}
+
+/// Record the deposit transaction for a live quote and tell 1Click about it.
+pub async fn deposit(state: web::Data<AppState>, req: HttpRequest, body: web::Json<DepositBody>) -> HttpResponse {
+    if !is_operator(&req) {
+        return HttpResponse::Forbidden().json(json!({ "error": "operator only" }));
+    }
+    let b = body.into_inner();
+    let r = state.intents.submit_deposit(&b.tx_hash, &b.deposit_address, b.near_sender.as_deref()).await;
+    let status = r.as_ref().ok().and_then(|v| v["status"].as_str()).unwrap_or("DEPOSIT_SENT").to_string();
+    let _ = sqlx::query("UPDATE intents_executions SET deposit_tx = $2, status = $3, history = history || $4, updated_at = now() WHERE deposit_address = $1")
+        .bind(&b.deposit_address).bind(&b.tx_hash).bind(&status).bind(json!([{ "status": status, "at": chrono::Utc::now(), "deposit_tx": b.tx_hash }]))
+        .execute(state.world.db()).await;
+    match r {
+        Ok(v) => HttpResponse::Ok().json(json!({ "status": status, "raw": v })),
+        Err(e) => err(e),
+    }
 }
 
 /// Execution status for a deposit address from a real quote.
 pub async fn status(state: web::Data<AppState>, path: web::Path<String>) -> HttpResponse {
-    match state.intents.execution_status(&path.into_inner()).await {
+    let dep = path.into_inner();
+    match state.intents.execution_status(&dep).await {
         Ok(v) => {
             let s = v["status"].as_str().unwrap_or("").to_string();
+            // Keep every change of state, in order (an executed swap's audit trail).
+            let _ = sqlx::query("UPDATE intents_executions SET history = CASE WHEN status = $2 THEN history ELSE history || $3 END, status = $2, last_response = $4, updated_at = now() WHERE deposit_address = $1")
+                .bind(&dep).bind(&s).bind(json!([{ "status": s, "at": chrono::Utc::now() }])).bind(&v)
+                .execute(state.world.db()).await;
             HttpResponse::Ok().json(json!({ "status": s, "meaning": status_meaning(&s), "raw": v }))
         }
         Err(e) => err(e),

@@ -72,6 +72,24 @@ mod origin_tests {
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
 
+    // A host with no key files passes every signing key in CZ_KEYS_JSON (one secret);
+    // write them to a private directory before anything reads CZ_KEYS_DIR.
+    if let Ok(json) = std::env::var("CZ_KEYS_JSON") {
+        let dir = std::env::temp_dir().join(format!("cz-keys-{}", std::process::id()));
+        let (dir, accounts) = services::keys::materialize(&json, dir).map_err(anyhow::Error::msg)?;
+        // SAFETY: first thing at startup, before any other code reads the environment.
+        unsafe {
+            std::env::set_var("CZ_KEYS_DIR", &dir);
+            if let (Ok(relayer), Err(_)) = (std::env::var("CZ_RELAYER_ACCOUNT"), std::env::var("CZ_RELAYER_KEY_FILE")) {
+                if accounts.contains(&relayer) {
+                    std::env::set_var("CZ_RELAYER_KEY_FILE", dir.join(format!("{relayer}.json")));
+                }
+            }
+            std::env::remove_var("CZ_KEYS_JSON");
+        }
+        tracing::info!("signing keys loaded from CZ_KEYS_JSON for {} account(s)", accounts.len());
+    }
+
     let _sentry_guard = std::env::var("SENTRY_DSN").ok().map(|dsn| {
         sentry::init((
             dsn,
@@ -147,7 +165,8 @@ async fn main() -> anyhow::Result<()> {
         .filter(|s| !s.is_empty())
         .collect();
 
-    let bind_addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".into());
+    // BIND_ADDR, else the platform's PORT (Railway, Render, Fly), else 8080.
+    let bind_addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| format!("0.0.0.0:{}", std::env::var("PORT").unwrap_or_else(|_| "8080".into())));
     tracing::info!("Starting CONTRACT ZERO API on {}", bind_addr);
 
     HttpServer::new(move || {

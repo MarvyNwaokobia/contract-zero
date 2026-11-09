@@ -1,29 +1,20 @@
-# ── Stage 1: Build ────────────────────────────────────────────────────────────
-FROM rust:1.88-slim AS builder
-
-RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /app
+# CONTRACT ZERO API (Rust, Actix). Build context: apps/api.
+# Migrations and level layouts are compiled into the binary; signing keys come from the
+# environment (CZ_KEYS_JSON), never from the image.
+FROM rust:1-slim-bookworm AS build
+RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
-# Cache dependency build layer
-RUN mkdir src && echo 'fn main(){}' > src/main.rs && cargo build --release && rm -rf src
+COPY crates crates
+COPY src src
+COPY migrations migrations
+RUN cargo build --release --bin contract-zero-api
 
-COPY src ./src
-# migrate.rs embeds migrations/*.sql into the binary via include_str! — the folder
-# MUST be in the build context or every include_str! fails to compile (this is what
-# broke the build after auto-migrate shipped: src was copied, migrations/ was not).
-COPY migrations ./migrations
-# Touch main.rs so cargo rebuilds the binary (not just deps)
-RUN touch src/main.rs && cargo build --release
-
-# ── Stage 2: Runtime ──────────────────────────────────────────────────────────
 FROM debian:bookworm-slim
-
-RUN apt-get update && apt-get install -y ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /app
-COPY --from=builder /app/target/release/contract-zero-api ./contract-zero-api
-
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 && rm -rf /var/lib/apt/lists/* \
+ && useradd --system --uid 10001 cz
+COPY --from=build /src/target/release/contract-zero-api /usr/local/bin/contract-zero-api
+USER cz
+ENV RUST_LOG=info
 EXPOSE 8080
-
-CMD ["./contract-zero-api"]
+CMD ["contract-zero-api"]

@@ -30,6 +30,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("0014_player_preferences.sql", include_str!("../migrations/0014_player_preferences.sql")),
     ("0015_order_settlements.sql", include_str!("../migrations/0015_order_settlements.sql")),
     ("0016_intents_quotes.sql", include_str!("../migrations/0016_intents_quotes.sql")),
+    ("0017_intents_executions.sql", include_str!("../migrations/0017_intents_executions.sql")),
 ];
 
 /// Apply every migration not yet recorded, in order, each in its own transaction. Called

@@ -303,9 +303,12 @@ pub async fn run(state: &AppState, planner: &Planner) {
                                 if let Some(near) = &near {
                                     for e in &ev {
                                         if let cz_economy::Event::Traded(t) = e {
-                                            super::settlement::queue_trade(w, &mut *db, near, t).await?;
+                                            if t.order.is_none() {
+                                                super::settlement::queue_trade(w, &mut *db, near, t).await?;
+                                            }
                                         }
                                     }
+                                    super::settlement::queue_order_steps(w, &mut *db, near, &ev).await?;
                                 }
                                 ("accepted", None, summarize(&ev).into_iter().cloned().collect::<Vec<_>>(), Some(act.clone()))
                             }

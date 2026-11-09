@@ -2,7 +2,9 @@ use actix_web::{web, HttpResponse};
 
 pub mod auth;
 pub mod exchange;
+pub mod intents;
 pub mod missions;
+pub mod orders;
 pub mod preferences;
 pub mod profile;
 pub mod settlement;
@@ -36,6 +38,7 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         .route("/players/{player}", web::get().to(world::get_player))
         .route("/warroom", web::get().to(warroom::overview))
         .route("/warroom/timeline", web::get().to(warroom::timeline))
+        .route("/warroom/procurement", web::get().to(warroom::procurement))
         .route("/observer/simulate", web::post().to(world::simulate))
         .route("/missions/start", web::post().to(missions::start))
         .route("/missions/{session}/story", web::get().to(missions::story))
@@ -62,6 +65,14 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         .route("/auth/logout", web::post().to(auth::logout))
         .route("/relay/delegate", web::post().to(auth::relay))
         .route("/relay/near-auth-sign", web::post().to(auth::near_auth_sign))
+        .route("/intents", web::get().to(intents::overview))
+        .route("/intents/quote", web::post().to(intents::quote))
+        .route("/intents/status/{deposit}", web::get().to(intents::status))
+        .route("/market", web::get().to(orders::market))
+        .route("/market/orders/prepare", web::post().to(orders::prepare))
+        .route("/market/orders/confirm", web::post().to(orders::confirm))
+        .route("/market/orders/{id}/accept", web::post().to(orders::accept))
+        .route("/market/orders/{id}/cancel", web::post().to(orders::cancel))
         .route("/exchange", web::get().to(exchange::overview))
         .route("/exchange/quotes", web::post().to(exchange::create))
         .route("/exchange/quotes/{id}", web::get().to(exchange::get))

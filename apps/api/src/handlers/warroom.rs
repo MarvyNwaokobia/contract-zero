@@ -260,3 +260,115 @@ pub async fn timeline(state: web::Data<AppState>, q: web::Query<TimelineQuery>) 
     }).collect();
     HttpResponse::Ok().json(json!({ "chains": chains, "gameplay_rule": "The gameplay line is a fixed rule per event type, not model output." }))
 }
+
+#[derive(Deserialize)]
+pub struct ProcurementQuery {
+    pub limit: Option<i64>,
+}
+
+/// GET /warroom/procurement: one causal chain per supply order, newest first.
+///
+/// raid on the requester → shortage → supply order → each merchant's proposal or
+/// refusal (with its reasoning) → the requester's choice and why → settlement steps on
+/// NEAR → supplies delivered → the next mission against it.
+///
+/// Every element is read from what was recorded (decisions, events, the settlement
+/// queue, the world); nothing is composed for display.
+pub async fn procurement(state: web::Data<AppState>, q: web::Query<ProcurementQuery>) -> HttpResponse {
+    let limit = q.limit.unwrap_or(12).clamp(1, 50) as usize;
+    let db = state.world.db();
+    let (orders, names, plans) = state
+        .world
+        .read(|w| {
+            let mut v: Vec<cz_economy::SupplyOrder> = w.orders.values().filter(|o| w.actors.contains_key(&o.requester)).cloned().collect();
+            v.sort_by_key(|o| std::cmp::Reverse(o.id));
+            v.truncate(limit);
+            let names: HashMap<String, String> = w.actors.values().map(|a| (a.id.clone(), a.name.clone())).collect();
+            // What the next mission against each requester would face now.
+            let plans: HashMap<String, Value> = v
+                .iter()
+                .map(|o| (o.requester.clone(), o.resource))
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .filter_map(|(f, r)| {
+                    let depot = if r == Resource::Ammo { Resource::Fuel } else { Resource::Ammo };
+                    let p = cz_economy::mission::raid_plan(w, &f, depot)?;
+                    let a = w.actors.get(&f)?;
+                    Some((format!("{f}:{}", r.name()), json!({
+                        "depot": depot.name(), "guards": p.guards.deployed(), "planned": p.guards.planned,
+                        "rifles": p.guards.hall.rifles + p.guards.yard.rifles, "sidearms": p.guards.hall.sidearms + p.guards.yard.sidearms,
+                        "defense": p.defense, "stock_now": w.balance(&a.account, Asset::Res(r)),
+                    })))
+                })
+                .collect();
+            (v, names, plans)
+        })
+        .await;
+    let name = |id: &str| names.get(id).cloned().unwrap_or_else(|| id.to_string());
+    if orders.is_empty() {
+        return HttpResponse::Ok().json(json!({ "chains": [] }));
+    }
+    // Decisions about these orders (merchant answers and requester choices) and the
+    // placements themselves, in one query.
+    let triggers: Vec<String> = orders.iter().flat_map(|o| [format!("supply order #{}", o.id), format!("order #{}", o.id)]).collect();
+    let min_tick = orders.iter().map(|o| o.placed_at).min().unwrap_or(0) as i64;
+    let rows: Vec<(i64, String, Value)> = sqlx::query_as(
+        "SELECT tick, source, payload FROM world_events WHERE kind = 'agent_decision' AND tick >= $2
+           AND (payload->>'trigger' = ANY($1) OR payload->'action'->>'action' = 'place_order')
+         ORDER BY seq",
+    )
+    .bind(&triggers).bind(min_tick).fetch_all(db).await.unwrap_or_default();
+    let chain_ids: Vec<String> = orders.iter().map(|o| o.chain_order_id()).collect();
+    let patterns: Vec<String> = chain_ids.iter().flat_map(|c| [format!("order:{c}"), format!("propose:{c}|%"), format!("fill:{c}|%"), format!("close:{c}"), format!("expire:{c}")]).collect();
+    let settled: Vec<(String, String, String, Vec<String>, Option<String>)> = sqlx::query_as("SELECT op_id, kind, status, tx_hashes, error FROM settlements WHERE op_id LIKE ANY($1) ORDER BY id")
+        .bind(&patterns).fetch_all(db).await.unwrap_or_default();
+    // The most recent player operation against each requester before its order.
+    let raids: Vec<(i64, String, Value)> = sqlx::query_as("SELECT tick, source, payload FROM world_events WHERE kind = 'mission' AND payload->>'phase' = 'complete' AND tick >= $1 - 96 ORDER BY seq DESC LIMIT 200")
+        .bind(min_tick).fetch_all(db).await.unwrap_or_default();
+
+    let chains: Vec<Value> = orders
+        .iter()
+        .map(|o| {
+            let placed = rows.iter().find(|(_, src, p)| src == &o.requester && p["events"].as_array().into_iter().flatten().any(|e| e["event"] == "order_placed" && e["id"] == o.id));
+            // One answer per merchant: its proposal if it made one, else its latest refusal
+            // (a merchant reconsiders an open order every hour and declines again).
+            let mut latest: BTreeMap<String, &(i64, String, Value)> = BTreeMap::new();
+            for r in rows.iter().filter(|(_, _, p)| p["trigger"] == format!("supply order #{}", o.id)) {
+                let keep = latest.get(&r.1).is_some_and(|prev| !prev.2["action"].is_null() && r.2["action"].is_null());
+                if !keep {
+                    latest.insert(r.1.clone(), r);
+                }
+            }
+            let answers: Vec<Value> = latest.values().map(|(t, src, p)| json!({
+                "tick": t, "merchant": src, "merchant_name": name(src), "proposed": !p["action"].is_null(), "validation": p["validation"],
+                "rationale": p["rationale"], "context": p["context"], "planner": p["planner"],
+            })).collect();
+            let choices: Vec<Value> = rows.iter().filter(|(_, src, p)| src == &o.requester && p["trigger"] == format!("order #{}", o.id)).map(|(t, _, p)| json!({
+                "tick": t, "action": p["action"], "rationale": p["rationale"], "validation": p["validation"], "error": p["error"], "planner": p["planner"],
+            })).collect();
+            let c = o.chain_order_id();
+            let steps: Vec<Value> = settled.iter().filter(|(op, ..)| op == &format!("order:{c}") || op.starts_with(&format!("propose:{c}|")) || op.starts_with(&format!("fill:{c}|")) || op == &format!("close:{c}") || op == &format!("expire:{c}"))
+                .map(|(op, k, s, h, e)| settlement_json(op, k, s, h, e)).collect();
+            let raid = raids.iter().find(|(t, _, p)| (*t as u64) <= o.placed_at && p["result"]["target"] == o.requester.as_str()).map(|(t, src, p)| json!({
+                "tick": t, "player": src.trim_start_matches("player:"), "kind": p["result"]["kind"], "resource": p["result"]["resource"],
+                "outcome": p["result"]["outcome"], "units": p["result"]["extracted_units"],
+            }));
+            let delivered: i64 = o.fills.iter().map(|f| f.qty).sum();
+            json!({
+                "order": o.id, "chain_id": c, "requester": o.requester, "requester_name": name(&o.requester),
+                "side": o.side, "resource": o.resource, "qty": o.qty, "limit_total": o.limit_total, "urgency": o.urgency,
+                "placed_at": o.placed_at, "expires_at": o.expires_at, "status": o.status, "purpose": o.purpose,
+                "raid": raid,
+                "shortage": placed.map(|(t, _, p)| json!({ "tick": t, "trigger": p["trigger"], "context": p["context"], "rationale": p["rationale"], "planner": p["planner"] })),
+                "answers": answers,
+                "choices": choices,
+                "fills": o.fills.iter().map(|f| json!({ "merchant": f.merchant, "merchant_name": name(&f.merchant), "qty": f.qty, "total": f.total, "tick": f.tick })).collect::<Vec<_>>(),
+                "settlement": steps,
+                "delivered": delivered, "paid": o.settled_total,
+                "next_mission": plans.get(&format!("{}:{}", o.requester, o.resource.name())),
+                "execution_path": { "kind": "native", "label": "CONTRACT ZERO supply order, settled by world2 on NEAR testnet", "official_near_intents": false },
+            })
+        })
+        .collect();
+    HttpResponse::Ok().json(json!({ "chains": chains }))
+}

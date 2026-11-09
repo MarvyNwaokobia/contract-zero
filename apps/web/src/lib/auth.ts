@@ -211,7 +211,8 @@ export async function enableQuickTrade(session: Session, limits: QuickTradeLimit
   if (!world) throw new Error('trading is off-chain here; quick trade is not needed')
   const key = KeyPair.fromRandom('ed25519')
   const pk = key.getPublicKey()
-  const addKey = actions.addFunctionCallAccessKey(pk, world, ['accept_offer', 'accept_bid', 'revoke_session'], 250_000_000_000_000_000_000_000n)
+  // Quotes, supply orders (place, accept a proposal, cancel) and signing itself out.
+  const addKey = actions.addFunctionCallAccessKey(pk, world, ['accept_offer', 'accept_bid', 'place_order', 'accept_proposal', 'cancel_order', 'revoke_session'], 250_000_000_000_000_000_000_000n)
   const register = actions.functionCall('register_session', { public_key: pk.toString(), credit_budget: String(limits.credits), unit_budget: String(limits.units), ttl_secs: Math.round(limits.hours * 3600) }, 30_000_000_000_000n, 1_000_000_000_000_000_000_000n)
   if (session.method === 'wallet') {
     const { signTransactions } = await import('@/lib/wallet')
@@ -266,7 +267,8 @@ export async function acceptQuote(session: Session, call_: { receiver_id: string
     const acct = new Account(session.account, provider(), new KeyPairSigner(key))
     const r = await acct.signAndSendTransaction({ receiverId: call_.receiver_id, actions: [action], waitUntil: 'FINAL', throwOnFailure: false })
     const fail = (r.status as { Failure?: unknown }).Failure ?? r.receipts_outcome.map((x) => (x.outcome.status as { Failure?: unknown }).Failure).find(Boolean)
-    if (fail) throw new Error(/session/.test(JSON.stringify(fail)) ? 'Quick trade limit reached or expired. Confirm this trade yourself, or renew quick trade.' : `trade refused: ${JSON.stringify(fail)}`)
+    const why = JSON.stringify(fail)
+    if (fail) throw new Error(/MethodNameMismatch/.test(why) ? 'Your quick-trade key predates supply orders. Turn quick trade off and on again in the Exchange.' : /session/.test(why) ? 'Quick trade limit reached or expired. Confirm this trade yourself, or renew quick trade.' : `trade refused: ${why}`)
     return { hash: r.transaction.hash, via: 'quick' }
   }
   if (session.method === 'near_auth') return { hash: await socialSendTx(session, call_.receiver_id, action), via: 'social' }

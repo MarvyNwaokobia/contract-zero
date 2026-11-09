@@ -9,6 +9,8 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Panel, Shell, Stat } from '@/components/ui/Shell'
+import { Procurement } from '@/components/market/Procurement'
+import { TradingPartners, useMarket } from '@/components/market/SupplyOrders'
 import { api, RESOURCE_LABEL, type CausalChain, type ChainTx, type ResourceName, type SimulationView, type WarActor, type WarConvoy, type WarContract, type WarRoomView } from '@/lib/api'
 
 const RES: ResourceName[] = ['ammo', 'med', 'fuel']
@@ -324,6 +326,7 @@ export default function WarRoom() {
   const chains = useMemo(() => (t.data ?? []).filter((c) => filter === 'all' || (filter === 'strategic' ? !routine(c) : filter === 'llm' ? c.proposal.planner.startsWith('llm:') : c.kind === 'operation')), [t.data, filter])
   const hidden = filter === 'strategic' ? (t.data ?? []).filter(routine).length : 0
   const d = v.data
+  const market = useMarket()
 
   return (
     <Shell title="War Room" back={{ href: '/', label: 'Hub' }} wide>
@@ -362,6 +365,9 @@ export default function WarRoom() {
           <div className="grid gap-4 md:grid-cols-3">
             {[...d.world.actors].sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'faction' ? -1 : 1)).map((a) => <ActorCard key={a.id} a={a} v={d} />)}
           </div>
+
+          <Procurement />
+          {market.data && <TradingPartners m={market.data} />}
 
           <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
             <section>

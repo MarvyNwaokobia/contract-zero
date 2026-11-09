@@ -38,29 +38,40 @@ fn the_full_raid_to_replan_loop() {
     // 2. The player receives the extracted inventory.
     assert_eq!(ammo(&w, &player_account(PLAYER)), 60);
 
-    // 3–6. The commander sees the shortage, quotes the merchant, and buys within policy.
+    // 3–6. The commander sees the shortage and places a bounded supply order.
     let decisions = policy::commander(&w, VANGUARD);
     let buy = decisions.iter().find(|d| d.trigger == "ammo below target").expect("commander notices the shortage");
-    let Some(Action::Trade { resource: Resource::Ammo, side: Side::Buy, qty, limit_total }) = buy.action.clone() else {
-        panic!("commander should buy ammo: {buy:?}")
+    let Some(Action::PlaceOrder { resource: Resource::Ammo, side: Side::Buy, qty, limit_total, .. }) = buy.action.clone() else {
+        panic!("commander should request ammo: {buy:?}")
     };
-    let quote = w.quote(Resource::Ammo, Side::Buy, qty).unwrap();
-    assert_eq!(quote.total, limit_total, "the price it acted on is the merchant's valid quote");
     let vg_reserve = w.actor(VANGUARD).unwrap().credit_reserve;
-    assert!(limit_total <= 1_000 - vg_reserve, "within the spending policy");
+    assert!(limit_total <= 1_000 - vg_reserve, "the order's budget is within the spending policy");
     assert!(qty <= ammo_target(w.actor(VANGUARD).unwrap()) - 40);
-
-    // 7. The purchase executes.
     w.execute(&Caller::Agent(VANGUARD.into()), buy.action.as_ref().unwrap()).unwrap();
+    assert_eq!(w.balance(VG, Asset::Credits), 1_000 - limit_total, "the budget is escrowed, not spent");
 
-    // 8. Both sides reconcile exactly.
-    assert_eq!(ammo(&w, VG), 40 + qty);
-    assert_eq!(w.balance(VG, Asset::Credits), 1_000 - limit_total);
-    assert_eq!(ammo(&w, VEX_ACC), 100 - qty);
-    assert_eq!(w.balance(VEX_ACC, Asset::Credits), 500 + limit_total);
+    // The merchant answers from its own shelf; the commander takes the proposal.
+    for d in policy::merchant_proposals(&w, MERCHANT) {
+        w.execute(&Caller::Agent(MERCHANT.into()), d.action.as_ref().expect("Vex proposes")).unwrap();
+    }
+    let choice = policy::commander_choices(&w, VANGUARD);
+    let Some(Action::AcceptProposal { proposal, .. }) = choice[0].action.clone() else { panic!("{choice:?}") };
+    let p = w.proposals[&proposal].clone();
+    // 7. The purchase executes.
+    w.execute(&Caller::Agent(VANGUARD.into()), choice[0].action.as_ref().unwrap()).unwrap();
+
+    // 8. Both sides reconcile exactly; unused escrow came back.
+    let (got, paid) = (p.qty, p.total);
+    assert_eq!(ammo(&w, VG), 40 + got);
+    assert_eq!(ammo(&w, VEX_ACC), 100 - got);
+    assert_eq!(w.balance(VEX_ACC, Asset::Credits), 500 + paid);
+    if got == qty {
+        assert_eq!(w.balance(VG, Asset::Credits), 1_000 - paid, "the unused budget was refunded");
+    }
     for asset in [Asset::Credits, Asset::Res(Resource::Ammo)] {
         assert_eq!(w.total(asset), 0);
     }
+    let qty = got;
 
     // 10. The next mission reflects it. Right after the raid Vanguard could arm 5 rifle
     // guards (40 ammo); having bought ammunition it arms more.
@@ -79,7 +90,7 @@ fn the_commander_cannot_buy_what_the_merchant_does_not_have() {
     let d = policy::commander(&w, VANGUARD);
     let ammo_d = d.iter().find(|d| d.trigger == "ammo below target").unwrap();
     assert_eq!(ammo_d.action, None);
-    assert!(ammo_d.rationale.contains("has none"), "{}", ammo_d.rationale);
+    assert!(ammo_d.rationale.contains("no merchant has any"), "{}", ammo_d.rationale);
 }
 
 #[test]
@@ -89,8 +100,14 @@ fn the_commander_buys_only_what_the_merchant_has() {
     // Scarce stock prices high; Vanguard pays it only when critically short.
     w.apply(&[Transfer { from: VG.into(), to: WORLD.into(), asset: Asset::Res(Resource::Ammo), qty: 30, reason: Reason::Consumption }]).unwrap();
     let d = policy::commander(&w, VANGUARD);
-    let a = d.iter().find(|d| d.trigger == "ammo below target").and_then(|d| d.action.clone());
-    assert!(matches!(a, Some(Action::Trade { qty: 3, .. })), "{a:?}");
+    let a = d.iter().find(|d| d.trigger == "ammo below target").and_then(|d| d.action.clone()).expect("critical: it asks");
+    w.execute(&Caller::Agent(VANGUARD.into()), &a).unwrap();
+    // Vex has 3 and commits at most its per-order share; it never promises more.
+    let props = policy::merchant_proposals(&w, MERCHANT);
+    let Some(Action::Propose { qty, .. }) = props[0].action.clone() else { panic!("{props:?}") };
+    assert!(qty <= 3 && qty > 0, "{qty}");
+    w.execute(&Caller::Agent(MERCHANT.into()), props[0].action.as_ref().unwrap()).unwrap();
+    assert_eq!(ammo(&w, VEX_ACC), 3 - qty, "the proposal reserved exactly what it promised");
 }
 
 #[test]
@@ -104,7 +121,7 @@ fn the_commander_does_not_spend_what_it_cannot_afford() {
     let log = policy::run_fallback_agents(&mut w);
     let ammo_d = log.iter().find(|(d, _)| d.actor == VANGUARD && d.trigger == "ammo below target").unwrap();
     assert_eq!(ammo_d.0.action, None);
-    assert!(ammo_d.0.rationale.contains("over the spending policy"), "{}", ammo_d.0.rationale);
+    assert!(ammo_d.0.rationale.contains("can't cover even one unit"), "{}", ammo_d.0.rationale);
     assert_eq!(ammo(&w, VG), ammo(&before, VG), "no purchase happened");
 }
 
@@ -129,11 +146,11 @@ fn the_commander_waits_out_a_price_spike_unless_critically_short() {
     let d = policy::commander(&w, VANGUARD);
     let a = d.iter().find(|d| d.trigger == "ammo below target").unwrap();
     assert_eq!(a.action, None, "{}", a.rationale);
-    assert!(a.rationale.contains("waiting"));
+    assert!(a.rationale.contains("holding off"), "{}", a.rationale);
     // Critically short (below a quarter of target): it pays up.
     w.apply(&[Transfer { from: VG.into(), to: WORLD.into(), asset: Asset::Res(Resource::Ammo), qty: 30, reason: Reason::Consumption }]).unwrap();
     let d = policy::commander(&w, VANGUARD);
-    assert!(matches!(d.iter().find(|d| d.trigger == "ammo below target").and_then(|d| d.action.clone()), Some(Action::Trade { .. })));
+    assert!(matches!(d.iter().find(|d| d.trigger == "ammo below target").and_then(|d| d.action.clone()), Some(Action::PlaceOrder { urgency: 3, .. })));
 }
 
 #[test]
@@ -151,13 +168,19 @@ fn the_commander_sells_surplus_ammo_within_what_the_merchant_can_pay() {
     w.grant("faction:vanguard", Asset::Res(Resource::Ammo), 400);
     let d = policy::commander(&w, VANGUARD);
     let sell = d.iter().find(|d| d.trigger == "ammo surplus").expect("commander sells surplus");
-    let Some(Action::Trade { side: Side::Sell, qty, limit_total, .. }) = sell.action.clone() else { panic!("{sell:?}") };
-    let vex = w.actor(MERCHANT).unwrap();
-    assert!(limit_total <= w.balance(VEX_ACC, Asset::Credits) - vex.credit_reserve, "never more than the merchant can pay");
-    let before = (ammo(&w, VG), w.balance(VG, Asset::Credits));
+    assert!(matches!(sell.action, Some(Action::PlaceOrder { side: Side::Sell, .. })), "{sell:?}");
     w.execute(&Caller::Agent(VANGUARD.into()), sell.action.as_ref().unwrap()).unwrap();
-    assert_eq!(ammo(&w, VG), before.0 - qty);
-    assert_eq!(w.balance(VG, Asset::Credits), before.1 + limit_total);
+    let vex = w.actor(MERCHANT).unwrap().clone();
+    let room = w.balance(VEX_ACC, Asset::Credits) - vex.credit_reserve;
+    let bids = policy::merchant_proposals(&w, MERCHANT);
+    let Some(Action::Propose { qty, total, .. }) = bids[0].action.clone() else { panic!("{bids:?}") };
+    assert!(total <= room, "never more than the merchant can pay");
+    w.execute(&Caller::Agent(MERCHANT.into()), bids[0].action.as_ref().unwrap()).unwrap();
+    let before = w.balance(VG, Asset::Credits);
+    let take = policy::commander_choices(&w, VANGUARD);
+    w.execute(&Caller::Agent(VANGUARD.into()), take[0].action.as_ref().unwrap()).unwrap();
+    assert_eq!(w.balance(VG, Asset::Credits), before + total);
+    assert_eq!(ammo(&w, VEX_ACC), 100 + qty);
 }
 
 #[test]
@@ -166,5 +189,8 @@ fn the_commander_does_not_sell_to_an_insolvent_merchant() {
     w.grant("faction:vanguard", Asset::Res(Resource::Ammo), 400);
     let c = w.balance(VEX_ACC, Asset::Credits);
     w.apply(&[Transfer { from: VEX_ACC.into(), to: WORLD.into(), asset: Asset::Credits, qty: c - 10, reason: Reason::ImportCost { convoy: 0 } }]).unwrap();
-    assert!(policy::commander(&w, VANGUARD).iter().all(|d| d.trigger != "ammo surplus"));
+    let log = policy::run_fallback_agents(&mut w);
+    // It may offer the surplus, but the insolvent merchant doesn't bid, so nothing sells.
+    assert!(log.iter().all(|(d, _)| !matches!(d.action, Some(Action::Propose { .. }))), "an insolvent merchant bids");
+    assert_eq!(w.balance(VEX_ACC, Asset::Credits), 10);
 }

@@ -21,6 +21,8 @@ pub struct AppState {
     pub auth: std::sync::Arc<services::auth::AuthService>,
     /// This process's id for settlement leases (host, pid and a random suffix).
     pub worker_id: String,
+    /// The official NEAR Intents (1Click) adapter: read-only unless approved.
+    pub intents: services::intents::IntentsClient,
 }
 
 /// `CZ_ENV=production` turns on the strict deployment rules: credentialed CORS only
@@ -128,6 +130,7 @@ async fn main() -> anyhow::Result<()> {
         mission_limiter: std::sync::Arc::new(services::rate_limiter::RateLimiter::new(20, 60)),
         auth: std::sync::Arc::new(auth),
         worker_id: format!("{}-{}-{}", std::env::var("HOSTNAME").unwrap_or_else(|_| "api".into()), std::process::id(), &uuid::Uuid::new_v4().to_string()[..8]),
+        intents: services::intents::IntentsClient::from_env(),
     };
 
     services::scheduler::spawn(app_state.clone());

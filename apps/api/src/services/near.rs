@@ -26,6 +26,8 @@ pub enum Role {
     Vanguard,
     Vex,
     Ashen,
+    /// Halcyon Logistics, the second merchant (optional, like Ashen).
+    Halcyon,
 }
 
 impl Role {
@@ -35,6 +37,7 @@ impl Role {
             Role::Vanguard => "CZ_VANGUARD_ACCOUNT",
             Role::Vex => "CZ_VEX_ACCOUNT",
             Role::Ashen => "CZ_ASHEN_ACCOUNT",
+            Role::Halcyon => "CZ_HALCYON_ACCOUNT",
         }
     }
     pub fn for_actor(actor: &str) -> Option<Role> {
@@ -42,8 +45,20 @@ impl Role {
             "vanguard" => Some(Role::Vanguard),
             "vex" => Some(Role::Vex),
             "ashen" => Some(Role::Ashen),
+            "halcyon" => Some(Role::Halcyon),
             _ => None,
         }
+    }
+}
+
+/// Gas to attach per method. The prepaid gas is charged up front (and mostly refunded),
+/// so an account must hold enough to cover it: attach what each call needs, not the max.
+pub fn gas_for(method: &str) -> u64 {
+    match method {
+        // A fill's callback may chain the order's refund (a settle plus its callback).
+        "accept_proposal" => 200,
+        "propose" | "post_offer" | "post_bid" | "cancel_quote" => 30,
+        _ => 100,
     }
 }
 
@@ -115,21 +130,23 @@ impl NearClient {
             signers.insert(role, signer);
             locks.insert(role, Arc::new(Mutex::new(())));
         }
-        // The rival faction: CZ_ASHEN_ACCOUNT, or derived from Vanguard's account
-        // (ashen.<same parent>). Optional: without its key file the world runs without it.
-        let ashen: Option<AccountId> = std::env::var(Role::Ashen.env_key())
-            .ok()
-            .or_else(|| accounts.get(&Role::Vanguard).and_then(|v: &AccountId| v.as_str().split_once('.')).map(|(_, parent)| format!("ashen.{parent}")))
-            .and_then(|a| a.parse().ok());
-        if let Some(id) = ashen {
+        // Optional actors (the rival faction and the second merchant): their account from
+        // the environment, or derived from Vanguard's parent (ashen.<parent>,
+        // halcyon.<parent>). Without a key file the world runs without them.
+        for (role, name) in [(Role::Ashen, "ashen"), (Role::Halcyon, "halcyon")] {
+            let id: Option<AccountId> = std::env::var(role.env_key())
+                .ok()
+                .or_else(|| accounts.get(&Role::Vanguard).and_then(|v: &AccountId| v.as_str().split_once('.')).map(|(_, parent)| format!("{name}.{parent}")))
+                .and_then(|a| a.parse().ok());
+            let Some(id) = id else { continue };
             let file = keys_dir.join(format!("{id}.json"));
             match Signer::from_access_keyfile(file.clone()) {
                 Ok(signer) => {
-                    accounts.insert(Role::Ashen, id);
-                    signers.insert(Role::Ashen, signer);
-                    locks.insert(Role::Ashen, Arc::new(Mutex::new(())));
+                    accounts.insert(role, id);
+                    signers.insert(role, signer);
+                    locks.insert(role, Arc::new(Mutex::new(())));
                 }
-                Err(e) => tracing::warn!("ashen faction has no signing key ({}): {e}", file.display()),
+                Err(e) => tracing::warn!("{name} has no signing key ({}): {e}", file.display()),
             }
         }
         let rpc_url = std::env::var("NEAR_RPC_URL").unwrap_or_else(|_| "https://rpc.testnet.fastnear.com".into());
@@ -153,7 +170,7 @@ impl NearClient {
         let result = Contract(self.contract.clone())
             .call_function(method, args)
             .transaction()
-            .gas(NearGas::from_tgas(100))
+            .gas(NearGas::from_tgas(gas_for(method)))
             .deposit(NearToken::from_yoctonear(deposit_yocto))
             .with_signer(signer_id.clone(), self.signers[&role].clone())
             .send_to(&self.network)

@@ -272,6 +272,55 @@ export interface SimulationView {
   simulated_raids: { id: number; resource: ResourceName; manifest: number; extracted: boolean }[]
 }
 
+
+// ── Supply Orders (native CONTRACT ZERO intents, settled by world2) ──────────
+export interface MarketShelf { stock: number; target: number; reserved: number; ask: number | null; bid: number | null }
+export interface MarketMerchant {
+  id: string; name: string; account: string | null; credits: number; credit_reserve: number
+  margin_bp: number; spread_bp: number; min_margin_bp: number; max_commit_bp: number; instant_market: boolean
+  record: { proposals: number; wins: number; losses: number; declined: number; streak: number; units_sold: number; units_bought: number; revenue: number }
+  shelves: Record<ResourceName, MarketShelf>
+}
+export interface OrderProposal { id: number; merchant: string; merchant_name: string | null; qty: number; total: number; posted_at: number; expires_at: number; status: 'pending' | 'accepted' | 'released'; note: string; chain_proposal_id: string }
+export interface OrderStep { op_id: string; kind: string; status: string; tx_hashes: string[]; error: string | null }
+export interface MarketOrder {
+  id: number; chain_id: string; requester: string; requester_name: string; requester_kind: 'faction' | 'player'
+  side: 'buy' | 'sell'; resource: ResourceName; qty: number; limit_total: number; allow_partial: boolean
+  placed_at: number; expires_at: number; urgency: number; filled: number; settled_total: number
+  status: { status: 'open' | 'filled' | 'cancelled' | 'expired' }; purpose: string
+  fills: { proposal: number; merchant: string; qty: number; total: number; tick: number }[]
+  proposals: OrderProposal[]; settlement: OrderStep[]
+}
+export interface MarketView { tick: number; tick_secs: number; settlement: 'near' | 'off_chain'; controller: string | null; merchants: MarketMerchant[]; orders: MarketOrder[] }
+export interface PreparedOrder { order_id: string; nonce: number; call: { receiver_id: string; method: string; args: Record<string, unknown>; gas: string } }
+
+export interface ProcurementChain {
+  order: number; chain_id: string; requester: string; requester_name: string; side: 'buy' | 'sell'; resource: ResourceName
+  qty: number; limit_total: number; urgency: number; placed_at: number; expires_at: number; status: { status: string }; purpose: string
+  raid: { tick: number; player: string; kind: string; resource: string; outcome: string; units: number | null } | null
+  shortage: { tick: number; trigger: string; context: [string, number][]; rationale: string; planner: string } | null
+  answers: { tick: number; merchant: string; merchant_name: string; proposed: boolean; validation: string; rationale: string; planner: string }[]
+  choices: { tick: number; action: Record<string, unknown> | null; rationale: string; validation: string; error: string | null }[]
+  fills: { merchant: string; merchant_name: string; qty: number; total: number; tick: number }[]
+  settlement: { op_id: string; kind: string; status: string; settled_on_chain: boolean; tx_hashes: string[]; explorer: string[]; error: string | null }[]
+  delivered: number; paid: number
+  next_mission: { depot: string; guards: number; planned: number; rifles: number; sidearms: number; defense: number; stock_now: number } | null
+  execution_path: { kind: 'native'; label: string; official_near_intents: false }
+}
+
+// ── Official NEAR Intents (1Click; mainnet; read-only here) ──────────────────
+export interface IntentsOverview {
+  adapter: { service: string; verifier: string; network: string; testnet_verifier: boolean; authenticated: boolean; execution: string; quotes: string }
+  reachable: boolean; error: string | null; supported_assets: number; chains: string[]
+  near_assets: { asset_id: string; symbol: string; decimals: number; price_usd: number | null }[]
+  contract_zero_assets_supported: boolean
+  recent_quotes: { id: number; correlation_id: string; dry: boolean; origin: string; destination: string; amount_in: string; amount_out: string | null; min_amount_out: string | null; at: string }[]
+}
+export interface IntentsQuote {
+  quote: { dry: boolean; correlation_id: string; signature: string | null; timestamp: string | null; amount_in: string; amount_in_formatted: string | null; amount_out: string; amount_out_formatted: string | null; min_amount_out: string | null; amount_out_usd: string | null; time_estimate_secs: number | null; app_fees: { recipient: string; fee: number }[] | null; deadline: string; deposit_address: string | null }
+  expired: boolean; execution: string
+}
+
 /** Account-level preferences (the portable part of Settings). */
 export interface StoredPreferences { version: number | null; prefs: Record<string, unknown> | null; updated_at: string | null }
 
@@ -286,6 +335,14 @@ export const api = {
   quoteGear: (gear: string) => req<QuoteCreated>('/exchange/quotes', { method: 'POST', body: JSON.stringify({ gear, side: 'buy', qty: 1 }) }),
   career: () => req<Career>('/me/career'),
   preferences: () => req<StoredPreferences>('/me/preferences'),
+  market: () => req<MarketView>('/market'),
+  prepareOrder: (b: { side: 'buy' | 'sell'; resource: ResourceName; qty: number; limit_total: number; allow_partial: boolean; ttl_ticks: number }) => req<PreparedOrder>('/market/orders/prepare', { method: 'POST', body: JSON.stringify(b) }),
+  confirmOrder: (order_id: string, tx_hash?: string) => req<{ order: number }>('/market/orders/confirm', { method: 'POST', body: JSON.stringify({ order_id, tx_hash }) }),
+  acceptOrderProposal: (order: number, proposal: number, tx_hash?: string) => req<{ ok: boolean }>(`/market/orders/${order}/accept`, { method: 'POST', body: JSON.stringify({ proposal, tx_hash }) }),
+  cancelOrder: (order: number, tx_hash?: string) => req<{ ok: boolean }>(`/market/orders/${order}/cancel`, { method: 'POST', body: JSON.stringify({ tx_hash }) }),
+  procurement: (limit = 12) => req<{ chains: ProcurementChain[] }>(`/warroom/procurement?limit=${limit}`).then((r) => r.chains),
+  intents: () => req<IntentsOverview>('/intents'),
+  intentsQuote: (b: { origin_asset: string; destination_asset: string; amount: string }) => req<IntentsQuote>('/intents/quote', { method: 'POST', body: JSON.stringify(b) }),
   savePreferences: (version: number, prefs: Record<string, unknown>) => req<StoredPreferences>('/me/preferences', { method: 'PUT', body: JSON.stringify({ version, prefs }) }),
   missionStory: (session: string) => req<{ story: MissionStory }>(`/missions/${session}/story`).then((r) => r.story),
   settlement: (opId: string) => req<SettlementView>(`/settlements/${encodeURIComponent(opId)}`),

@@ -80,7 +80,7 @@ fn surplus_of_any_resource_is_sold() {
     let mut w = genesis(1);
     w.grant(ASH, Asset::Res(Resource::Fuel), 300);
     let ash = commander(&w, ASHEN);
-    assert!(ash.iter().any(|d| matches!(d.action, Some(Action::Trade { resource: Resource::Fuel, side: Side::Sell, .. }))), "{ash:#?}");
+    assert!(ash.iter().any(|d| matches!(d.action, Some(Action::PlaceOrder { resource: Resource::Fuel, side: Side::Sell, .. }))), "{ash:#?}");
 }
 
 #[test]

@@ -12,6 +12,42 @@ use crate::{Actor, ActorKind, Asset, Doctrine, Market, Resource, ShipmentPlan, W
 pub const VANGUARD: &str = "vanguard";
 pub const ASHEN: &str = "ashen";
 pub const MERCHANT: &str = "vex";
+pub const HALCYON: &str = "halcyon";
+
+/// Halcyon Logistics: the second merchant, competing with Vex for every supply order.
+fn halcyon() -> Actor {
+    Actor {
+        id: HALCYON.into(),
+        name: "Halcyon Logistics".into(),
+        kind: ActorKind::Merchant,
+        account: "merchant:halcyon".into(),
+        income_per_day: 0,
+        production: [0, 0, 0],
+        consumption: [0, 0, 0],
+        reserve_days: 0,
+        credit_reserve: 400,
+        defense: 1,
+        shipment: None,
+        disrupted_until: [0; 3],
+        doctrine: Doctrine::default(),
+    }
+}
+
+/// Bring Halcyon into a world that predates it (genesis grants, mirrored on chain by the
+/// next flow sync). No-op if it's already there.
+pub fn add_halcyon(w: &mut World) -> bool {
+    if w.actors.contains_key(HALCYON) {
+        return false;
+    }
+    let a = halcyon();
+    let acct = a.account.clone();
+    w.actors.insert(HALCYON.into(), a);
+    w.merchants.insert(HALCYON.into(), crate::orders::halcyon_profile());
+    for (asset, qty) in [(Asset::Credits, 2_500), (Asset::Res(Resource::Ammo), 80), (Asset::Res(Resource::Med), 30), (Asset::Res(Resource::Fuel), 50)] {
+        w.grant(&acct, asset, qty);
+    }
+    true
+}
 
 fn vanguard(credit_reserve: i64, shipment: Option<ShipmentPlan>) -> Actor {
     Actor {
@@ -121,6 +157,7 @@ pub fn genesis(seed: u64) -> World {
     );
     w.market.living = true;
     add_rival(&mut w);
+    add_halcyon(&mut w);
     w
 }
 

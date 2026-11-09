@@ -4,6 +4,8 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Panel, Shell, Stat } from '@/components/ui/Shell'
+import { NewSupplyOrder, OrderBoard, TradingPartners, useMarket } from '@/components/market/SupplyOrders'
+import { IntentsPanel } from '@/components/market/IntentsPanel'
 import dynamic from 'next/dynamic'
 import { api, RESOURCE_LABEL, type ArmoryItem, type ExchangePrice, type PlayerQuote, type ResourceName, type Standing } from '@/lib/api'
 import type { GunId } from '@/engine/combat/GunStats'
@@ -170,6 +172,8 @@ export default function Exchange() {
   const [error, setError] = useState<string | null>(null)
   const [now, setNow] = useState(Date.now())
   const [quick, setQuick] = useState(false)
+  const market = useMarket()
+  const [orderMsg, setOrderMsg] = useState<string | null>(null)
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000)
@@ -338,6 +342,12 @@ export default function Exchange() {
           {!canTrade && <p className="mt-2 text-xs text-muted">Sign in to trade.</p>}
         </Panel>
       )}
+
+      {market.data && <TradingPartners m={market.data} />}
+      {market.data && <NewSupplyOrder m={market.data} session={session} onDone={(m) => { setOrderMsg(m); market.refetch() }} />}
+      {orderMsg && <p className="mt-2 text-sm text-friendly" role="status" data-testid="order-msg">{orderMsg}</p>}
+      {market.data && <OrderBoard m={market.data} session={session} onDone={(m) => { setOrderMsg(m); market.refetch() }} />}
+      <IntentsPanel />
 
       {ex.data?.armory && (
         <Panel title="ARMORY · OWNED GEAR" className="mt-4">

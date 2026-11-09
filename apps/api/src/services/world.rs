@@ -67,6 +67,12 @@ impl WorldService {
             persist(&mut *db.acquire().await?, &world).await?;
             tracing::info!("world: the Ashen Compact joined at tick {}", world.tick);
         }
+        // Likewise the second merchant, Halcyon Logistics.
+        let can_sign = near.as_ref().is_none_or(|n| n.actor_account("halcyon").is_some());
+        if world.market.living && can_sign && cz_economy::add_halcyon(&mut world) {
+            persist(&mut *db.acquire().await?, &world).await?;
+            tracing::info!("world: Halcyon Logistics joined at tick {}", world.tick);
+        }
         tracing::info!("world: loaded at tick {} (version {})", world.tick, world.version);
         Ok(Self { world: Arc::new(Mutex::new(world)), db, near })
     }
@@ -146,7 +152,11 @@ impl WorldService {
             let mut notable = Vec::new();
             for _ in 0..ticks {
                 record_history(w, &mut *db).await?;
-                for e in w.tick() {
+                let tick_events = w.tick();
+                if let Some(near) = &near {
+                    super::settlement::queue_order_steps(w, &mut *db, near, &tick_events).await?;
+                }
+                for e in tick_events {
                     match e {
                         Event::Shortage { .. } => shortages += 1,
                         Event::Transfer(_) => {}
@@ -162,9 +172,13 @@ impl WorldService {
                         if let (Some(near), Some(Ok(events))) = (&near, &result) {
                             for e in events {
                                 if let Event::Traded(t) = e {
-                                    super::settlement::queue_trade(w, &mut *db, near, t).await?;
+                                    // Order fills settle as order steps, not instant trades.
+                                    if t.order.is_none() {
+                                        super::settlement::queue_trade(w, &mut *db, near, t).await?;
+                                    }
                                 }
                             }
+                            super::settlement::queue_order_steps(w, &mut *db, near, events).await?;
                         }
                     }
                 }

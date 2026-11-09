@@ -33,6 +33,9 @@ use super::near::{NearClient, Role, Verified};
 use super::world::log_event;
 use crate::AppState;
 
+/// The reconciliation row for supply-order escrow (the controller's own balance).
+const ORDER_ESCROW: &str = "order-escrow";
+
 /// Contract limits (contracts-near/cz-world): entries per batch, amount per entry.
 const MAX_FLOWS: usize = 32;
 const MAX_AMOUNT: i64 = 100_000;
@@ -157,6 +160,74 @@ pub async fn queue_trade(w: &World, db: &mut PgConnection, near: &NearClient, t:
     enqueue(&mut *db, near, kind, &base, w.tick, &payload).await.map(|_| ())
 }
 
+/// The controller's id for an engine order, and for one of its proposals.
+pub fn chain_order_id(w: &World, order: u64) -> String {
+    w.orders.get(&order).map(|o| o.chain_order_id()).unwrap_or_else(|| format!("o{order}"))
+}
+pub fn chain_proposal_id(proposal: u64) -> String {
+    format!("p{proposal}")
+}
+
+/// Mirror supply-order events on NEAR, in the order they happened. Faction orders are
+/// engine-first: placing, accepting and cancelling are signed with the faction's key.
+/// Player orders are chain-first (the player signs those steps in their own wallet,
+/// and the API applies them to the engine only after verifying the chain), so only
+/// the merchants' proposals are queued for them. A fully filled order refunds its
+/// unused escrow on chain by itself.
+pub async fn queue_order_steps(w: &World, db: &mut PgConnection, near: &NearClient, events: &[cz_economy::Event]) -> Result<(), sqlx::Error> {
+    use cz_economy::{Event, OrderStatus};
+    let mut synced = false;
+    for e in events {
+        let (kind, op, payload) = match e {
+            Event::OrderPlaced(o) => {
+                let Some(party) = faction_party(w, near, &o.requester) else { continue };
+                let p = json!({
+                    "order_id": o.chain_order_id(), "party": party, "side": if o.side == cz_economy::Side::Buy { "Buy" } else { "Sell" },
+                    "token_id": o.resource.name(), "quantity": o.qty.to_string(), "limit_credits": o.limit_total.to_string(), "allow_partial": o.allow_partial,
+                    "engine_order": o.id,
+                });
+                ("order_place", format!("order:{}", o.chain_order_id()), p)
+            }
+            Event::ProposalPosted(p) => {
+                let Some(merchant) = w.actors.get(&p.merchant).and_then(|m| chain_account(near, &m.account)) else { continue };
+                let k = format!("{}|{}", chain_order_id(w, p.order), chain_proposal_id(p.id));
+                ("order_propose", format!("propose:{k}"), json!({ "order_id": chain_order_id(w, p.order), "proposal_id": chain_proposal_id(p.id), "merchant": merchant, "merchant_id": p.merchant, "quantity": p.qty.to_string(), "total_credits": p.total.to_string() }))
+            }
+            Event::OrderFilled { order, proposal, .. } => {
+                let Some(o) = w.orders.get(order) else { continue };
+                let Some(party) = faction_party(w, near, &o.requester) else { continue };
+                let k = format!("{}|{}", chain_order_id(w, *order), chain_proposal_id(*proposal));
+                ("order_fill", format!("fill:{k}"), json!({ "order_id": chain_order_id(w, *order), "proposal_id": chain_proposal_id(*proposal), "party": party }))
+            }
+            Event::OrderClosed { order, status, .. } if *status != OrderStatus::Filled => {
+                let Some(o) = w.orders.get(order) else { continue };
+                match faction_party(w, near, &o.requester) {
+                    Some(party) => ("order_close", format!("close:{}", o.chain_order_id()), json!({ "order_id": o.chain_order_id(), "party": party })),
+                    // A player's order the engine let lapse: expire it on chain too (any
+                    // registered key may; the escrow goes back to the player). A player's
+                    // own cancel is chain-first, so there is nothing to mirror.
+                    None if *status == OrderStatus::Expired && o.chain_id.is_some() => ("order_expire", format!("expire:{}", o.chain_order_id()), json!({ "order_id": o.chain_order_id() })),
+                    None => continue,
+                }
+            }
+            _ => continue,
+        };
+        if !synced {
+            // Placing an order spends balances the economy issued: mirror them first.
+            sync_flows(w, &mut *db, near).await?;
+            synced = true;
+        }
+        enqueue(&mut *db, near, kind, &op, w.tick, &payload).await?;
+    }
+    Ok(())
+}
+
+/// The chain account of a faction requester that the server can sign for.
+fn faction_party(w: &World, near: &NearClient, requester: &str) -> Option<String> {
+    let a = w.actors.get(requester).filter(|a| a.kind == cz_economy::ActorKind::Faction)?;
+    chain_account(near, &a.account)
+}
+
 /// Queue a validated raid's settlement (after the flows that put the cargo there).
 pub async fn queue_raid(w: &World, db: &mut PgConnection, near: &NearClient, raid: u64) -> Result<Option<String>, sqlx::Error> {
     let r = &w.raids[&raid];
@@ -243,10 +314,10 @@ pub async fn align(state: &AppState, force: bool, full: bool) -> Result<Value, S
     // alignment runs first) the chain ends exactly at the economy.
     let mut pending: BTreeMap<(String, String), i64> = BTreeMap::new();
     if force {
-        let (busy,): (i64,) = sqlx::query_as("SELECT count(*) FROM settlements WHERE contract = $1 AND status IN ('pending', 'submitted') AND kind IN ('raid', 'operation')")
+        let (busy,): (i64,) = sqlx::query_as("SELECT count(*) FROM settlements WHERE contract = $1 AND status IN ('pending', 'submitted') AND kind IN ('raid', 'operation', 'order_place', 'order_propose', 'order_fill', 'order_close', 'order_expire')")
             .bind(&contract).fetch_one(db).await.map_err(|e| e.to_string())?;
         if busy > 0 {
-            return Err(format!("{busy} raid/operation settlement(s) still open; retry when they land"));
+            return Err(format!("{busy} raid/operation/order settlement(s) still open; retry when they land"));
         }
         if full {
             sqlx::query("UPDATE settlements SET status = 'superseded', error = 'replaced by a full realignment' WHERE contract = $1 AND status IN ('pending', 'submitted', 'failed') AND kind IN ('trade', 'sell')")
@@ -270,8 +341,8 @@ pub async fn align(state: &AppState, force: bool, full: bool) -> Result<Value, S
     }
     // Read the chain first (no lock held across RPC), then align under the lock.
     let mut chain: BTreeMap<String, BTreeMap<String, i64>> = BTreeMap::new();
-    for role in [Role::Vanguard, Role::Vex, Role::Ashen] {
-        let Some(acct) = near.actor_account(match role { Role::Vanguard => "vanguard", Role::Vex => "vex", _ => "ashen" }).map(|a| a.to_string()) else { continue };
+    for actor in ["vanguard", "vex", "ashen", "halcyon"] {
+        let Some(acct) = near.actor_account(actor).map(|a| a.to_string()) else { continue };
         chain.insert(acct.clone(), near.balances(&acct).await?.into_iter().collect());
     }
     state
@@ -293,6 +364,10 @@ pub async fn align(state: &AppState, force: bool, full: bool) -> Result<Value, S
                     }
                     if a.id == w.market.merchant {
                         engine += w.held_for_quotes(asset);
+                    }
+                    // Proposal reservations are the merchant's own tokens on chain.
+                    if a.kind == cz_economy::ActorKind::Merchant {
+                        engine += w.reserved_by(&a.account, asset);
                     }
                     engine -= pending.get(&(acct.clone(), asset.name().to_string())).copied().unwrap_or(0);
                     let on_chain = chain.get(&acct).and_then(|m| m.get(asset.name())).copied().unwrap_or(0);
@@ -469,7 +544,13 @@ pub async fn process_next(state: &AppState) -> Result<bool, String> {
     };
     let mut already = false;
     let mut checked = true;
-    for op in &ledger_ops {
+    if kind.starts_with("order_") {
+        match order_step_done(&near, &kind, &payload).await {
+            Ok(done) => already = done,
+            Err(_) => checked = false,
+        }
+    }
+    for op in ledger_ops.iter().filter(|_| !kind.starts_with("order_")) {
         match near.view_assets("is_used", json!({ "op_id": op })).await.map(|v| v.as_bool()) {
             Ok(Some(true)) => already = true,
             Ok(_) => {}
@@ -499,6 +580,7 @@ pub async fn process_next(state: &AppState) -> Result<bool, String> {
                 .await
                 .map(|v| vec![v]),
             "trade" => settle_quote(&near, &payload, attempt, false).await,
+            "order_place" | "order_propose" | "order_fill" | "order_close" | "order_expire" => order_step(&near, &kind, &payload).await,
             "sell" => settle_quote(&near, &payload, attempt, true).await,
             other => Err(format!("unknown settlement kind {other}")),
         }
@@ -506,7 +588,13 @@ pub async fn process_next(state: &AppState) -> Result<bool, String> {
 
     let now = chrono::Utc::now();
     match result {
-        Ok(verified) => {
+        Ok(mut verified) => {
+            if kind == "order_fill" {
+                // The fill landed; if its chained refund didn't, send the refund now.
+                if let Ok(v) = finish_refund(&near, &payload).await {
+                    verified.extend(v);
+                }
+            }
             let hashes: Vec<String> = verified.iter().map(|v| v.tx_hash.clone()).collect();
             history.push(json!({ "n": attempt, "at": now.timestamp(), "outcome": if already { "already_applied" } else { "confirmed" }, "tx": hashes }));
             let evidence = json!({ "already_applied": already, "transactions": verified, "attempts": history });
@@ -534,6 +622,10 @@ pub async fn process_next(state: &AppState) -> Result<bool, String> {
             // the final balances.
             let (defer, until) = if e.contains("epoch issuance budget exceeded") {
                 (Some("issuance_budget"), budget_reset(&near, &payload).await.or(Some(now + chrono::Duration::minutes(10))))
+            } else if e.contains("the order has not expired") || e.contains("order funding still in flight") || (kind.starts_with("order_") && e.contains("no such order")) {
+                // The chain's deadline (or the order's funding) is a moment behind the
+                // engine: wait for it without holding up the rest of the queue.
+                (Some("balance"), Some(now + chrono::Duration::seconds(30)))
             } else if balance && !give_up {
                 (Some("balance"), Some(now + chrono::Duration::seconds(BALANCE_RETRY_SECS)))
             } else {
@@ -584,6 +676,62 @@ async fn settle_quote(near: &NearClient, p: &Value, attempt: i32, sale: bool) ->
     }
 }
 
+/// Has this order step already happened on chain? (Crash after submit, unknown outcome.)
+async fn order_step_done(near: &NearClient, kind: &str, p: &Value) -> Result<bool, String> {
+    let order = p["order_id"].as_str().unwrap_or_default();
+    let state = near.view("get_order", json!({ "order_id": order })).await?;
+    match kind {
+        // Funding is in flight while "Funding": not done yet, and not safe to resend.
+        "order_place" => match state["state"].as_str() {
+            None => Ok(false),
+            Some("Funding") => Err("order funding still in flight".into()),
+            Some(_) => Ok(true),
+        },
+        "order_propose" => {
+            let k = format!("{order}|{}", p["proposal_id"].as_str().unwrap_or_default());
+            let exists = !near.view("get_proposal", json!({ "order_id": order, "proposal_id": p["proposal_id"] })).await?.is_null();
+            Ok(exists || near.view("is_used", json!({ "op_id": format!("fill:{k}") })).await?.as_bool() == Some(true))
+        }
+        "order_fill" => {
+            let k = format!("{order}|{}", p["proposal_id"].as_str().unwrap_or_default());
+            Ok(near.view("is_used", json!({ "op_id": format!("fill:{k}") })).await?.as_bool() == Some(true))
+        }
+        "order_close" | "order_expire" => Ok(matches!(state["state"].as_str(), Some("Refunding") | Some("Closed")) || state.is_null()),
+        _ => Ok(false),
+    }
+}
+
+/// Sign one order step with the right actor's key.
+async fn order_step(near: &NearClient, kind: &str, p: &Value) -> Result<Vec<Verified>, String> {
+    let actor_role = |acct: &str| Role::for_actor(acct.split('.').next().unwrap_or_default()).ok_or_else(|| format!("{acct} has no signing key"));
+    let v = match kind {
+        "order_place" => near.call(actor_role(p["party"].as_str().unwrap_or_default())?, "place_order", json!({
+            "order_id": p["order_id"], "side": p["side"], "token_id": p["token_id"], "quantity": p["quantity"], "limit_credits": p["limit_credits"],
+            "allow_partial": p["allow_partial"], "ttl_secs": 3_600,
+        }), 0).await?,
+        "order_propose" => near.call(actor_role(p["merchant"].as_str().unwrap_or_default())?, "propose", json!({
+            "order_id": p["order_id"], "proposal_id": p["proposal_id"], "quantity": p["quantity"], "total_credits": p["total_credits"], "ttl_secs": 3_600,
+        }), 0).await?,
+        "order_fill" => near.call(actor_role(p["party"].as_str().unwrap_or_default())?, "accept_proposal", json!({ "order_id": p["order_id"], "proposal_id": p["proposal_id"] }), 0).await?,
+        "order_close" => near.call(actor_role(p["party"].as_str().unwrap_or_default())?, "cancel_order", json!({ "order_id": p["order_id"] }), 0).await?,
+        "order_expire" => near.call(Role::Vex, "expire_order", json!({ "order_id": p["order_id"] }), 0).await?,
+        other => return Err(format!("unknown order step {other}")),
+    };
+    Ok(vec![v])
+}
+
+/// If an order is stuck refunding (its refund settlement failed), retry it.
+async fn finish_refund(near: &NearClient, p: &Value) -> Result<Vec<Verified>, String> {
+    let order = p["order_id"].as_str().unwrap_or_default();
+    let state = near.view("get_order", json!({ "order_id": order })).await?;
+    let pending = near.view("is_pending", json!({ "op_id": format!("refund:{order}") })).await?.as_bool() == Some(true);
+    if state["state"].as_str() != Some("Refunding") || pending {
+        return Ok(vec![]);
+    }
+    let role = Role::for_actor(p["party"].as_str().unwrap_or_default().split('.').next().unwrap_or_default()).ok_or("no signing key")?;
+    Ok(vec![near.call(role, "retry_refund", json!({ "order_id": order }), 0).await?])
+}
+
 /// The trade could not settle on chain: reverse it in the economy.
 async fn compensate_trade(state: &AppState, id: i64, p: &Value) {
     let Some(trade) = p["trade"].as_u64() else { return };
@@ -628,10 +776,22 @@ pub async fn reconcile(state: &AppState) -> Result<Value, String> {
                     if a.id == w.market.merchant {
                         v += w.held_for_quotes(asset);
                     }
+                    // A merchant's reservations for its open proposals are still its own
+                    // tokens on chain (the controller moves them only at a fill).
+                    if a.kind == cz_economy::ActorKind::Merchant {
+                        v += w.reserved_by(&a.account, asset);
+                    }
                     h.insert(asset.name().to_string(), v);
                 }
                 m.insert(a.account.clone(), h);
             }
+            // Open supply orders' escrow: held by the controller account on chain.
+            let mut esc = BTreeMap::new();
+            for asset in cz_economy::ALL_ASSETS {
+                let v: i64 = w.open_orders().filter(|o| o.escrowed().0 == asset).map(|o| o.escrowed().1).sum();
+                esc.insert(asset.name().to_string(), v);
+            }
+            m.insert(ORDER_ESCROW.to_string(), esc);
             (m, w.ledger.len(), unsynced)
         })
         .await;
@@ -639,7 +799,8 @@ pub async fn reconcile(state: &AppState) -> Result<Value, String> {
     let mut actors = Vec::new();
     let mut in_sync = open.is_empty() && cursor as usize == ledger_len;
     for (acct, eng) in &engine {
-        let Some(chain_acct) = chain_account(&near, acct) else { continue };
+        let chain_acct = if acct == ORDER_ESCROW { Some(near.contract.to_string()) } else { chain_account(&near, acct) };
+        let Some(chain_acct) = chain_acct else { continue };
         let chain = near.balances(&chain_acct).await?;
         let diff: BTreeMap<_, _> = eng.iter().map(|(t, v)| (t.clone(), v - chain.get(t).copied().unwrap_or(0))).filter(|(_, d)| *d != 0).collect();
         in_sync &= diff.is_empty();

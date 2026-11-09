@@ -64,25 +64,14 @@ pub fn ammo_target(a: &Actor) -> i64 {
     a.requirement(Resource::Ammo) + AMMO_PER_RIFLE * planned_guards(a.defense) / 2
 }
 
-/// Largest buy of `r` up to `want` units whose quote fits `budget`.
-fn affordable_buy(w: &World, r: Resource, want: i64, budget: i64) -> Option<Quote> {
-    let mut qty = want.min(w.merchant_stock(r));
-    while qty > 0 {
-        if let Ok(q) = w.quote(r, Side::Buy, qty) {
-            if q.total <= budget {
-                return Some(q);
-            }
-        }
-        qty = if qty > 4 { qty * 3 / 4 } else { qty - 1 };
-    }
-    None
-}
-
 pub fn commander(w: &World, id: &str) -> Vec<Decision> {
     let Ok(a) = w.actor(id) else { return vec![] };
     let mut out = Vec::new();
     let mut budget = spendable(w, a);
 
+    // Supply: a shortage becomes a bounded supply order that every merchant may answer,
+    // never a purchase from one predetermined merchant. A surplus becomes a sell order.
+    let mut nonce = w.order_nonces.get(id).copied().unwrap_or(0);
     for r in Resource::ALL {
         let target = if r == Resource::Ammo { ammo_target(a) } else { a.requirement(r) };
         let have = w.balance(&a.account, Asset::Res(r));
@@ -91,67 +80,71 @@ pub fn commander(w: &World, id: &str) -> Vec<Decision> {
         if target == 0 || have * 4 >= target * 3 {
             continue;
         }
+        if w.open_orders().any(|o| o.requester == id && o.resource == r && o.side == Side::Buy) {
+            continue; // already asked; the choice happens when proposals arrive
+        }
         let want = target - have;
-        let stock = w.merchant_stock(r);
         let trigger = format!("{} below target", r.name());
+        let inbound = w.inbound(id, r);
+        let critical = have * 4 < target;
+        let urgency: u8 = if critical { 3 } else if have * 2 < target { 2 } else { 1 };
+        // What the market is asking: the cheapest merchant's next unit.
+        let best_ask = w.merchant_ids().iter().filter_map(|m| w.merchant_quote(m, r, Side::Buy, 1)).min();
+        let cost = pricing::production_cost(r);
+        let ceiling = cost * a.doctrine.max_price_mult;
+        // Willing to pay up to the doctrine ceiling, or up to the market's hard ceiling
+        // when critically short.
+        let walk_away = if critical { cost * pricing::PRICE_CEIL_MULT } else { ceiling };
         let ctx = |extra: &[(&'static str, i64)]| {
-            let mut v = vec![("have", have), ("target", target), ("budget", budget), ("merchant_stock", stock)];
+            let mut v = vec![("have", have), ("target", target), ("inbound", inbound), ("budget", budget), ("urgency", urgency as i64)];
             v.extend_from_slice(extra);
             v
         };
-        if stock == 0 {
-            out.push(decision(id, &trigger, &ctx(&[]), None, format!("Short {want} {}, but the merchant has none to sell.", r.name())));
+        let Some(ask) = best_ask else {
+            out.push(decision(id, &trigger, &ctx(&[]), None, format!("Short {want} {}, but no merchant has any to sell.", r.name())));
+            continue;
+        };
+        if ask > ceiling && !critical {
+            out.push(decision(id, &trigger, &ctx(&[("best_ask", ask), ("price_ceiling", ceiling)]), None, format!("Short {want} {}, but the best ask is {ask} cr (ceiling {ceiling}); holding off while stock lasts.", r.name())));
             continue;
         }
-        // Price discipline: above twice production cost, wait unless critically low.
-        let ask = w.price(r).ask;
-        let ceiling = pricing::production_cost(r) * a.doctrine.max_price_mult;
-        if ask > ceiling && have * 4 >= target {
-            out.push(decision(id, &trigger, &ctx(&[("unit_ask", ask), ("price_ceiling", ceiling)]), None, format!("Short {want} {}, but the merchant asks {ask} cr (ceiling {ceiling}); waiting while stock lasts.", r.name())));
+        if inbound >= want && !critical {
+            out.push(decision(id, &trigger, &ctx(&[]), None, format!("Short {want} {}, but {inbound} are already on the road; not buying.", r.name())));
             continue;
         }
-        match affordable_buy(w, r, want, budget) {
-            Some(q) => {
-                let partial = if q.qty < want { format!(" ({} of the {want} short; that is all the budget or stock allows)", q.qty) } else { String::new() };
-                out.push(decision(
-                    id,
-                    &trigger,
-                    &ctx(&[("quote_qty", q.qty), ("quote_total", q.total), ("unit_ask", q.unit_now.ask)]),
-                    Some(Action::Trade { resource: r, side: Side::Buy, qty: q.qty, limit_total: q.total }),
-                    format!("Buy {} {} for {} credits{partial}.", q.qty, r.name(), q.total),
-                ));
-                budget -= q.total;
-            }
-            None => {
-                let one = w.quote(r, Side::Buy, 1).map(|q| q.total).unwrap_or(0);
-                out.push(decision(id, &trigger, &ctx(&[("unit_ask", one)]), None, format!("Short {want} {}, but even one unit ({one} cr) is over the spending policy.", r.name())));
-            }
+        let qty = want.min(budget / walk_away.max(1));
+        if qty <= 0 {
+            out.push(decision(id, &trigger, &ctx(&[("walk_away_unit", walk_away)]), None, format!("Short {want} {}, but the treasury can't cover even one unit at {walk_away} cr.", r.name())));
+            continue;
         }
+        let limit_total = qty * walk_away;
+        nonce += 1;
+        let partial = if qty < want { format!(" ({qty} of the {want} short; that is what the budget covers)") } else { String::new() };
+        let purpose = format!("{} at {have}/{target}{}", r.name(), if critical { ": critical" } else { "" });
+        out.push(decision(
+            id,
+            &trigger,
+            &ctx(&[("order_qty", qty), ("limit_total", limit_total), ("walk_away_unit", walk_away), ("best_ask", ask)]),
+            Some(Action::PlaceOrder { side: Side::Buy, resource: r, qty, limit_total, allow_partial: true, ttl_ticks: ORDER_TTL_TICKS, nonce, urgency, purpose, chain_id: None }),
+            format!("Request {qty} {} for at most {limit_total} cr ({walk_away}/unit){partial}; open to every merchant.", r.name()),
+        ));
+        budget -= limit_total;
     }
 
-    // Sell anything held beyond twice its target to the merchant's bid (Vanguard's
-    // ammunition, Ashen's fuel), sized to what the merchant can pay above its reserve.
-    // On chain this settles as a merchant bid the commander accepts.
+    // Sell anything held beyond twice its target (Vanguard's ammunition, Ashen's fuel)
+    // through a sell order: merchants bid, the best bid wins.
     for r in Resource::ALL {
         let have = w.balance(&a.account, Asset::Res(r));
         let keep = 2 * if r == Resource::Ammo { ammo_target(a) } else { a.requirement(r) };
-        // Only in lots worth a trade: every sale settles on chain, and dribbling out
-        // one or two units at a time just clogs the settlement queue.
-        if keep == 0 || have - keep < MIN_SURPLUS_LOT || w.merchant_insolvent() {
+        // Only in lots worth a trade: every sale settles on chain.
+        if keep == 0 || have - keep < MIN_SURPLUS_LOT || w.open_orders().any(|o| o.requester == id && o.resource == r && o.side == Side::Sell) {
             continue;
         }
-        let m = w.merchant();
-        let merchant_budget = (w.balance(&m.account, Asset::Credits) - m.credit_reserve).max(0);
-        let mut qty = have - keep;
-        while qty >= MIN_SURPLUS_LOT {
-            match w.quote(r, Side::Sell, qty) {
-                Ok(q) if q.total <= merchant_budget => {
-                    out.push(decision(id, &format!("{} surplus", r.name()), &[("have", have), ("keep", keep), ("quote_qty", q.qty), ("quote_total", q.total), ("merchant_budget", merchant_budget)], Some(Action::Trade { resource: r, side: Side::Sell, qty: q.qty, limit_total: q.total }), format!("Sell {} surplus {} to the merchant for {} credits.", q.qty, r.name(), q.total)));
-                    break;
-                }
-                _ => qty = if qty > 4 { qty * 3 / 4 } else { qty - 1 },
-            }
-        }
+        let qty = have - keep;
+        // Won't sell below production cost.
+        let floor = qty * pricing::production_cost(r);
+        nonce += 1;
+        out.push(decision(id, &format!("{} surplus", r.name()), &[("have", have), ("keep", keep), ("order_qty", qty), ("min_total", floor)], Some(Action::PlaceOrder { side: Side::Sell, resource: r, qty, limit_total: floor, allow_partial: true, ttl_ticks: ORDER_TTL_TICKS, nonce, urgency: 0, purpose: format!("{} surplus beyond {keep}", r.name()), chain_id: None }), format!("Offer {qty} surplus {} for at least {floor} cr; best bid wins.", r.name())));
     }
 
     out.extend(rivalry(w, a));
@@ -199,6 +192,8 @@ pub fn commander(w: &World, id: &str) -> Vec<Decision> {
     out
 }
 
+/// How long a commander's supply order stays open, in ticks.
+pub const ORDER_TTL_TICKS: u64 = 6;
 /// How long a faction holds a grudge against a rival that paid for raids on it.
 /// The smallest surplus a faction bothers to sell.
 pub const MIN_SURPLUS_LOT: i64 = 10;
@@ -318,25 +313,182 @@ pub fn merchant(w: &World) -> Vec<Decision> {
     out
 }
 
-/// Every agent's decisions for the current state.
-pub fn decide_all(w: &World) -> Vec<Decision> {
+/// A merchant answering open supply orders: price each from its own shelf, strategy
+/// and limits; propose, or decline with the reason.
+pub fn merchant_proposals(w: &World, id: &str) -> Vec<Decision> {
+    let (Ok(m), Some(prof)) = (w.actor(id), w.profile(id)) else { return vec![] };
     let mut out = Vec::new();
-    for id in w.actors.keys() {
-        if *id == w.market.merchant { out.extend(merchant(w)) } else { out.extend(commander(w, id)) }
+    let credits = w.balance(&m.account, Asset::Credits);
+    for o in w.open_orders() {
+        if o.requester == id || o.expires_at <= w.tick || w.pending_proposals(o.id).any(|p| p.merchant == id) || w.proposals.values().any(|p| p.order == o.id && p.merchant == id && p.status == ProposalStatus::Accepted) {
+            continue;
+        }
+        let r = o.resource;
+        let stock = w.balance(&m.account, Asset::Res(r));
+        let trigger = format!("supply order #{}", o.id);
+        let base = [("order", o.id as i64), ("wants", o.remaining()), ("limit_total", o.limit_total), ("my_stock", stock), ("credits", credits)];
+        let decline = |why: String| decision(id, &trigger, &base, None, why);
+        match o.side {
+            Side::Buy => {
+                // I sell: commit at most my per-order share of the shelf.
+                let commit = stock * prof.max_commit_bp / BP;
+                let mut qty = o.remaining().min(commit);
+                if qty <= 0 {
+                    out.push(decline(format!("No {} to spare for #{} ({stock} on the shelf).", r.name(), o.id)));
+                    continue;
+                }
+                if !o.allow_partial && qty < o.remaining() {
+                    out.push(decline(format!("#{} wants all {} at once; I'll commit only {qty}.", o.id, o.remaining())));
+                    continue;
+                }
+                // My price, never under my floor; shrink the lot if the order's limit
+                // can't bear my price for all of it.
+                let priced = |q: i64| w.merchant_quote(id, r, Side::Buy, q).map(|t| t.max(orders::production_floor(r, q, prof.min_margin_bp)));
+                let mut total = priced(qty);
+                while let Some(t) = total {
+                    if orders::within_limit(o, qty, t) || !o.allow_partial || qty <= 1 {
+                        break;
+                    }
+                    qty = if qty > 4 { qty * 3 / 4 } else { qty - 1 };
+                    total = priced(qty);
+                }
+                match total {
+                    Some(t) if orders::within_limit(o, qty, t) => out.push(decision(id, &trigger, &[("order", o.id as i64), ("qty", qty), ("total", t), ("my_stock", stock), ("margin_bp", prof.strategy.margin_bp)], Some(Action::Propose { order: o.id, qty, total: t, note: format!("{qty} of {stock} on my shelf at {} cr/unit", t / qty) }), format!("Offer {qty} {} for {t} cr on #{} ({} cr/unit, {}% margin).", r.name(), o.id, t / qty, prof.strategy.margin_bp / 100))),
+                    Some(t) => out.push(decline(format!("#{} pays at most {} cr/unit; my floor is {} cr/unit. Declining.", o.id, o.limit_total / o.qty.max(1), t / qty.max(1)))),
+                    None => out.push(decline(format!("Can't price {qty} {}.", r.name()))),
+                }
+            }
+            Side::Sell => {
+                // I buy: only with credits above my reserve, and only shelf room up to
+                // twice my target.
+                let room = (prof.target[r.idx()] * 2 - stock).max(0);
+                let budget = (credits - m.credit_reserve).max(0);
+                let mut qty = o.remaining().min(room);
+                if qty <= 0 {
+                    out.push(decline(format!("My {} shelf is full; not bidding on #{}.", r.name(), o.id)));
+                    continue;
+                }
+                let mut total = w.merchant_quote(id, r, Side::Sell, qty);
+                while let Some(t) = total {
+                    if (t <= budget && orders::within_limit(o, qty, t)) || !o.allow_partial || qty <= 1 {
+                        break;
+                    }
+                    qty = if qty > 4 { qty * 3 / 4 } else { qty - 1 };
+                    total = w.merchant_quote(id, r, Side::Sell, qty);
+                }
+                match total {
+                    Some(t) if t <= budget && orders::within_limit(o, qty, t) && (o.allow_partial || qty == o.remaining()) => out.push(decision(id, &trigger, &[("order", o.id as i64), ("qty", qty), ("total", t), ("budget", budget)], Some(Action::Propose { order: o.id, qty, total: t, note: format!("bid for {qty} at {} cr/unit", t / qty) }), format!("Bid {t} cr for {qty} {} on #{}.", r.name(), o.id))),
+                    Some(t) if t > budget => out.push(decline(format!("A fair bid ({t} cr) is over what I can spend ({budget}).", ))),
+                    _ => out.push(decline(format!("#{} wants at least {} cr/unit; above my bid.", o.id, o.limit_total / o.qty.max(1)))),
+                }
+            }
+        }
     }
     out
 }
 
-/// Decide, then execute each proposed action in order. Each decision is paired with
-/// its execution result (`None` when it proposed nothing). A rejected action changes
-/// nothing; later decisions see the effect of earlier accepted ones.
+/// Compare unit prices exactly: is a (total_a for qty_a) cheaper than b?
+fn cheaper(ta: i64, qa: i64, tb: i64, qb: i64) -> std::cmp::Ordering {
+    (ta as i128 * qb as i128).cmp(&(tb as i128 * qa as i128))
+}
+
+/// A commander choosing among the proposals on its open orders: urgent needs favour
+/// coverage, routine ones price; a need that has passed is cancelled to free credits.
+pub fn commander_choices(w: &World, id: &str) -> Vec<Decision> {
+    let Ok(a) = w.actor(id) else { return vec![] };
+    let mut out = Vec::new();
+    for o in w.open_orders().filter(|o| o.requester == id) {
+        let r = o.resource;
+        let have = w.balance(&a.account, Asset::Res(r));
+        let target = if r == Resource::Ammo { ammo_target(a) } else { a.requirement(r) };
+        if o.side == Side::Buy && have * 4 >= target * 3 && o.filled == 0 {
+            out.push(decision(id, &format!("order #{}", o.id), &[("have", have), ("target", target)], Some(Action::CancelOrder { order: o.id }), format!("No longer short of {} ({have}/{target}): withdrawing #{} and keeping the credits.", r.name(), o.id)));
+            continue;
+        }
+        let mut props: Vec<&Proposal> = w.pending_proposals(o.id).filter(|p| p.expires_at > w.tick).collect();
+        if props.is_empty() {
+            continue;
+        }
+        let urgent = o.urgency >= 2;
+        props.sort_by(|x, y| match o.side {
+            Side::Buy if urgent => y.qty.cmp(&x.qty).then(cheaper(x.total, x.qty, y.total, y.qty)),
+            Side::Buy => cheaper(x.total, x.qty, y.total, y.qty).then(y.qty.cmp(&x.qty)),
+            // Selling: the best price per unit, then the bigger lot.
+            Side::Sell => cheaper(y.total, y.qty, x.total, x.qty).then(y.qty.cmp(&x.qty)),
+        });
+        let field: Vec<String> = props.iter().map(|p| format!("{} {}×{}cr", w.actors.get(&p.merchant).map(|m| m.name.as_str()).unwrap_or(&p.merchant), p.qty, p.total / p.qty.max(1))).collect();
+        let mut remaining = o.remaining();
+        for (i, p) in props.iter().enumerate() {
+            if p.qty > remaining {
+                continue;
+            }
+            let why = if i == 0 {
+                match (o.side, urgent) {
+                    (Side::Buy, true) => "urgent: most coverage first, then price",
+                    (Side::Buy, false) => "routine: cheapest per unit",
+                    (Side::Sell, _) => "best bid per unit",
+                }
+            } else {
+                "fills the rest of the order"
+            };
+            out.push(decision(id, &format!("order #{}", o.id), &[("order", o.id as i64), ("proposal", p.id as i64), ("qty", p.qty), ("total", p.total), ("competing", props.len() as i64)], Some(Action::AcceptProposal { order: o.id, proposal: p.id }), format!("Take {}'s {} {} for {} cr on #{} ({why}). On the table: {}.", w.actors.get(&p.merchant).map(|m| m.name.as_str()).unwrap_or(&p.merchant), p.qty, r.name(), p.total, o.id, field.join(", "))));
+            remaining -= p.qty;
+            if remaining == 0 || !o.allow_partial {
+                break;
+            }
+        }
+    }
+    out
+}
+
+/// Every agent's decisions for the current state.
+pub fn decide_all(w: &World) -> Vec<Decision> {
+    let mut out = Vec::new();
+    for (id, a) in &w.actors {
+        match a.kind {
+            ActorKind::Faction => {
+                out.extend(commander(w, id));
+                out.extend(commander_choices(w, id));
+            }
+            ActorKind::Merchant => {
+                if *id == w.market.merchant {
+                    out.extend(merchant(w));
+                }
+                out.extend(merchant_proposals(w, id));
+            }
+        }
+    }
+    out
+}
+
+/// Decide, then execute each proposed action in order, in three rounds: commanders
+/// and merchants act on the world (placing orders among other things), then every
+/// merchant answers the open orders, then each commander chooses. Each decision is
+/// paired with its execution result (`None` when it proposed nothing). A rejected
+/// action changes nothing; later decisions see the effect of earlier accepted ones.
 pub fn run_fallback_agents(w: &mut World) -> Vec<(Decision, Option<Result<Vec<Event>, EconError>>)> {
     let mut log = Vec::new();
-    for id in w.actors.keys().cloned().collect::<Vec<_>>() {
-        let decisions = if id == w.market.merchant { merchant(w) } else { commander(w, &id) };
+    let ids: Vec<(String, ActorKind)> = w.actors.iter().map(|(k, a)| (k.clone(), a.kind)).collect();
+    let run = |w: &mut World, id: &str, decisions: Vec<Decision>, log: &mut Vec<_>| {
         for d in decisions {
-            let r = d.action.as_ref().map(|act| w.execute(&Caller::Agent(id.clone()), act));
+            let r = d.action.as_ref().map(|act| w.execute(&Caller::Agent(id.to_string()), act));
             log.push((d, r));
+        }
+    };
+    for (id, kind) in &ids {
+        let d = match kind { ActorKind::Faction => commander(w, id), ActorKind::Merchant if *id == w.market.merchant => merchant(w), ActorKind::Merchant => vec![] };
+        run(w, id, d, &mut log);
+    }
+    for (id, kind) in &ids {
+        if *kind == ActorKind::Merchant {
+            let d = merchant_proposals(w, id);
+            run(w, id, d, &mut log);
+        }
+    }
+    for (id, kind) in &ids {
+        if *kind == ActorKind::Faction {
+            let d = commander_choices(w, id);
+            run(w, id, d, &mut log);
         }
     }
     log

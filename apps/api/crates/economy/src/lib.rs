@@ -15,6 +15,7 @@
 //! world on any machine. Time advances in ticks of one in-game hour.
 
 pub mod mission;
+pub mod orders;
 pub mod policy;
 pub mod pricing;
 pub mod scenario;
@@ -25,6 +26,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 pub use mission::{GuardPlan, RaidPlan};
+pub use orders::{Fill, MerchantProfile, MerchantRecord, OrderStatus, Proposal, ProposalStatus, SupplyOrder};
 pub use pricing::{PriceBreakdown, Side, Strategy};
 
 pub const WORLD: &str = "world";
@@ -255,6 +257,16 @@ pub enum Reason {
     ExportRevenue,
     /// Merchant profit paid out of the region (destroyed).
     Dividend,
+    /// A supply order's funding, held until it fills, is cancelled or expires…
+    OrderEscrow { order: u64 },
+    /// …and what it didn't use, returned.
+    OrderRefund { order: u64 },
+    /// A merchant's side of a proposal, reserved so it can't be promised twice…
+    ProposalHold { proposal: u64 },
+    /// …and released when the proposal loses or lapses.
+    ProposalRelease { proposal: u64 },
+    /// An accepted proposal: both escrows change hands.
+    OrderFill { order: u64, proposal: u64 },
     /// Faction treasury above its war chest, remitted to command (destroyed).
     Remittance,
     /// The merchant's side of a player quote, held so no one else can buy or spend it.
@@ -486,6 +498,12 @@ pub struct TradeRecord {
     /// resource market (prices, demand).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gear: Option<Gear>,
+    /// The merchant on the other side (absent: Vex's instant market).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merchant: Option<String>,
+    /// The supply order this trade filled, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<u64>,
 }
 
 /// Who is issuing a command. Authorization is decided from this alone.
@@ -520,6 +538,15 @@ pub enum Action {
     PostContract { kind: OpKind, target: String, resource: Resource, amount: i64, convoy: Option<u64> },
     /// A faction takes a merchant caravan on the road.
     SeizeConvoy { convoy: u64 },
+    /// Place a supply order (factions and players). `nonce` must exceed the
+    /// requester's last; `limit_total` is the most it pays (buy) or least it takes (sell).
+    PlaceOrder { side: Side, resource: Resource, qty: i64, limit_total: i64, allow_partial: bool, ttl_ticks: u64, nonce: u64, #[serde(default)] urgency: u8, #[serde(default)] purpose: String, #[serde(default)] chain_id: Option<String> },
+    /// A merchant answers an open order.
+    Propose { order: u64, qty: i64, total: i64, #[serde(default)] note: String },
+    /// The requester takes one proposal.
+    AcceptProposal { order: u64, proposal: u64 },
+    /// The requester withdraws an open order.
+    CancelOrder { order: u64 },
 }
 
 impl Action {
@@ -536,6 +563,10 @@ impl Action {
             Action::StartOperation { .. } => "start_operation",
             Action::PostContract { .. } => "post_contract",
             Action::SeizeConvoy { .. } => "seize_convoy",
+            Action::PlaceOrder { .. } => "place_order",
+            Action::Propose { .. } => "propose",
+            Action::AcceptProposal { .. } => "accept_proposal",
+            Action::CancelOrder { .. } => "cancel_order",
         }
     }
 }
@@ -565,6 +596,12 @@ pub enum Event {
     QuoteSettled { quote: u64, trade: u64 },
     QuoteReleased { quote: u64 },
     HoldingSynced { account: AccountId, asset: Asset, from: i64, to: i64 },
+    OrderPlaced(SupplyOrder),
+    ProposalPosted(Proposal),
+    OrderFilled { order: u64, proposal: u64, merchant: String, qty: i64, total: i64, remaining: i64 },
+    ProposalReleased { proposal: u64, order: u64, merchant: String },
+    OrderClosed { order: u64, status: OrderStatus, filled: i64, settled_total: i64, refunded: i64 },
+    MerchantAdapted { merchant: String, margin_bp: i64, why: String },
     ArmoryRestocked { gear: Gear },
 }
 
@@ -675,6 +712,8 @@ pub enum EconError {
     RaidInProgress,
     #[error("defense level must be {DEFENSE_MIN}…{DEFENSE_MAX}")]
     BadDefense,
+    #[error("order refused: {why}")]
+    OrderRejected { why: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -696,6 +735,17 @@ pub struct World {
     /// Per faction: what it remembers about players and rivals.
     #[serde(default)]
     pub memory: BTreeMap<String, FactionMemory>,
+    /// Supply orders and the merchant proposals answering them.
+    #[serde(default)]
+    pub orders: BTreeMap<u64, SupplyOrder>,
+    #[serde(default)]
+    pub proposals: BTreeMap<u64, Proposal>,
+    /// Merchant profiles and records (Vex's strategy and targets live in `market`).
+    #[serde(default)]
+    pub merchants: BTreeMap<String, MerchantProfile>,
+    /// Per requester: the highest order nonce used.
+    #[serde(default)]
+    pub order_nonces: BTreeMap<String, u64>,
     next_id: u64,
 }
 
@@ -726,6 +776,10 @@ impl World {
             ledger: Vec::new(),
             quotes: BTreeMap::new(),
             memory: BTreeMap::new(),
+            orders: BTreeMap::new(),
+            proposals: BTreeMap::new(),
+            merchants: BTreeMap::new(),
+            order_nonces: BTreeMap::new(),
             next_id: 0,
         }
     }
@@ -896,6 +950,12 @@ impl World {
             Action::StartOperation { kind, target, resource } => self.start_operation(caller_player(caller), *kind, target, *resource),
             Action::PostContract { kind, target, resource, amount, convoy } => self.post_contract(caller_actor(caller), *kind, target, *resource, *amount, *convoy),
             Action::SeizeConvoy { convoy } => self.seize_convoy(caller_actor(caller), *convoy),
+            Action::PlaceOrder { side, resource, qty, limit_total, allow_partial, ttl_ticks, nonce, urgency, purpose, chain_id } => {
+                self.place_order(&requester_id(caller), &account, *side, *resource, *qty, *limit_total, *allow_partial, *ttl_ticks, *nonce, *urgency, purpose, chain_id.as_deref())
+            }
+            Action::Propose { order, qty, total, note } => self.propose(caller_actor(caller), *order, *qty, *total, note),
+            Action::AcceptProposal { order, proposal } => self.accept_proposal(&requester_id(caller), *order, *proposal),
+            Action::CancelOrder { order } => self.cancel_order(&requester_id(caller), *order),
         }
     }
 
@@ -921,7 +981,21 @@ impl World {
             (Caller::Agent(id), Action::SetStrategy { .. }) => {
                 if *id == self.market.merchant { Ok(self.actor(id)?.account.clone()) } else { Err(deny()) }
             }
-            (Caller::Player(p), Action::Trade { .. } | Action::StartRaid { .. } | Action::StartOperation { .. }) => Ok(player_account(p)),
+            (Caller::Agent(id), Action::PlaceOrder { .. } | Action::AcceptProposal { .. } | Action::CancelOrder { .. }) => {
+                let a = self.actor(id)?;
+                if a.kind != ActorKind::Faction {
+                    return Err(deny()); // merchants answer orders; they don't place them
+                }
+                Ok(a.account.clone())
+            }
+            (Caller::Agent(id), Action::Propose { .. }) => {
+                let a = self.actor(id)?;
+                if a.kind != ActorKind::Merchant {
+                    return Err(deny());
+                }
+                Ok(a.account.clone())
+            }
+            (Caller::Player(p), Action::Trade { .. } | Action::StartRaid { .. } | Action::StartOperation { .. } | Action::PlaceOrder { .. } | Action::AcceptProposal { .. } | Action::CancelOrder { .. }) => Ok(player_account(p)),
             (Caller::System, Action::SettleRaid { .. } | Action::SettleSecured { .. } | Action::FailRaid { .. }) => Ok(WORLD.into()),
             _ => Err(deny()),
         }
@@ -947,7 +1021,7 @@ impl World {
             Transfer { from: giver, to: taker, asset: Asset::Res(r), qty, reason: Reason::Trade { trade: id } },
         ])?;
         self.commit_id(id);
-        let rec = TradeRecord { id, tick: self.tick, party: party.to_string(), resource: r, side, qty, total: q.total, gear: None };
+        let rec = TradeRecord { id, tick: self.tick, party: party.to_string(), resource: r, side, qty, total: q.total, gear: None, merchant: None, order: None };
         self.trades.push(rec.clone());
         ev.push(Event::Traded(rec));
         Ok(ev)
@@ -1205,7 +1279,9 @@ impl World {
         }
 
         if self.market.living && t % MERCHANT_RESTOCK_TICKS == 3 {
-            ev.extend(self.merchant_logistics());
+            for m in self.merchant_ids() {
+                ev.extend(self.merchant_logistics(&m));
+            }
             ev.extend(self.armory_restock());
         }
 
@@ -1228,6 +1304,9 @@ impl World {
 
         self.tick += 1;
         self.version += 1;
+        // Orders and proposals lapse at their deadline: from this tick on they can't be
+        // accepted, so their escrow goes back now.
+        ev.extend(self.expire_orders());
         ev
     }
 
@@ -1243,15 +1322,16 @@ impl World {
     /// The merchant's shelf review (live world): a caravan for each shelf below target
     /// (counting what is already inbound), paid at import cost and sized to what it can
     /// afford above its reserve; surplus beyond twice target is exported at half cost.
-    fn merchant_logistics(&mut self) -> Vec<Event> {
-        let m = self.merchant().clone();
-        if self.merchant_insolvent() {
-            return vec![Event::MerchantSuspended { reason: "insolvent: restocking paused".into() }];
+    fn merchant_logistics(&mut self, merchant: &str) -> Vec<Event> {
+        let m = self.actors[merchant].clone();
+        let Some(prof) = self.profile(merchant) else { return vec![] };
+        if self.balance(&m.account, Asset::Credits) < m.credit_reserve {
+            return vec![Event::MerchantSuspended { reason: format!("{}: insolvent, restocking paused", m.name) }];
         }
         let mut ev = Vec::new();
         for r in Resource::ALL {
             let stock = self.balance(&m.account, Asset::Res(r));
-            let target = self.market.target[r.idx()];
+            let target = prof.target[r.idx()];
             let inbound = self.inbound(&m.id, r);
             if stock + inbound < target {
                 let unit = pricing::production_cost(r) * MERCHANT_IMPORT_BP / pricing::BP;
@@ -1285,7 +1365,7 @@ impl World {
                 ev.push(Event::MerchantExported { resource: r, units, revenue });
             }
         }
-        let excess = self.balance(&m.account, Asset::Credits) - MERCHANT_CAPITAL;
+        let excess = self.balance(&m.account, Asset::Credits) - prof.capital;
         if excess > 0 {
             ev.extend(self.apply(&[Transfer { from: m.account.clone(), to: WORLD.into(), asset: Asset::Credits, qty: excess, reason: Reason::Dividend }]).expect("checked"));
         }
@@ -1514,7 +1594,7 @@ impl World {
         }
         let mut ev = self.apply(&legs)?;
         self.commit_id(trade);
-        let rec = TradeRecord { id: trade, tick: self.tick, party: player, resource: q.resource, side: q.side, qty: q.qty, total: q.total, gear: q.gear };
+        let rec = TradeRecord { id: trade, tick: self.tick, party: player, resource: q.resource, side: q.side, qty: q.qty, total: q.total, gear: q.gear, merchant: None, order: None };
         self.trades.push(rec.clone());
         self.quotes.get_mut(&id).unwrap().status = QuoteStatus::Settled { trade };
         ev.push(Event::Traded(rec));
@@ -1564,6 +1644,15 @@ pub fn player_account(player: &str) -> AccountId {
     format!("player:{player}")
 }
 
+/// Who an order belongs to: the actor id for an agent, the account for a player.
+fn requester_id(c: &Caller) -> String {
+    match c {
+        Caller::Agent(id) => id.clone(),
+        Caller::Player(p) => player_account(p),
+        Caller::System => WORLD.into(),
+    }
+}
+
 fn caller_actor(c: &Caller) -> &str {
     match c { Caller::Agent(id) => id, _ => "" }
 }
@@ -1591,4 +1680,4 @@ pub fn splitmix(mut x: u64) -> u64 {
     x ^ (x >> 31)
 }
 
-pub use scenario::{acceptance, add_rival, genesis, ASHEN, MERCHANT, VANGUARD};
+pub use scenario::{acceptance, add_halcyon, add_rival, genesis, ASHEN, HALCYON, MERCHANT, VANGUARD};

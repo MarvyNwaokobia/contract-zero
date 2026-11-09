@@ -34,6 +34,7 @@ import { ItemInspector } from '@/components/inspect/ItemInspector';
 import type { InspectItem } from '@/components/inspect/itemInfo';
 import { useSettings, updateSettings, renderPlan, PALETTES, type RenderPlan, type Settings } from '@/lib/settings';
 import { PauseSettings } from '@/components/settings/PauseSettings';
+import { markTipSeen, tipSeen, type Tip } from '@/lib/tutorial';
 import { DEFAULT_BINDS, actionsByCode, bindLabel, type Action, type Binds } from '@/lib/keybinds';
 import { FieldRuntime, trainingField, BLAST_RADIUS, CARRY_MAX, type FieldEvent, type FieldRecord, type ProtoEvent } from '../fps/field';
 import { CAMPAIGN, CAMPAIGN_KEY, PROGRESS_KEY, ZONE_THEMES, themeForMission, SURVIVAL_MISSION, GAUNTLET_MISSION, ENDLESS_MISSION, SEASONAL_MISSION, survivalWaveCount, survivalWaveHp, gauntletWaveCount, gauntletWaveHp, type Mission } from '../fps/campaign';
@@ -502,6 +503,8 @@ interface Hud {
   ch: { t: HTMLDivElement | null; b: HTMLDivElement | null; l: HTMLDivElement | null; r: HTMLDivElement | null };
   chDot: HTMLDivElement | null;
   chRing: HTMLDivElement | null;
+  /** First-time tip line (lib/tutorial): never blocks the fight, fades on its own. */
+  tip: HTMLDivElement | null;
   lock: HTMLDivElement | null;
   kills: HTMLDivElement | null;
   healthFill: HTMLDivElement | null;
@@ -3204,6 +3207,18 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
     window.setTimeout(() => { if (el) el.style.opacity = '0'; }, killed ? 220 : crit ? 180 : 130);
   }
 
+  /** First-time tips: shown once each (and only with tips on), for 7 s. */
+  const tipNow = useRef<{ until: number; shown: Set<Tip>; medkits: number }>({ until: 0, shown: new Set(), medkits: -1 });
+  function showTip(t: Tip, text: string) {
+    const el = hud.current.tip;
+    if (!el || settingsRef?.current.interface.tips === false || tipNow.current.shown.has(t) || tipSeen(t)) return;
+    tipNow.current.shown.add(t);
+    markTipSeen(t);
+    el.textContent = text;
+    el.style.opacity = '1';
+    tipNow.current.until = performance.now() + 7000;
+  }
+
   /** The colour set in force (Settings → Accessibility → colour palette). */
   function palette() { return PALETTES[settingsRef?.current.access.palette ?? 'standard']; }
 
@@ -3351,6 +3366,21 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       }
     }
     if (h.briefing) h.briefing.style.opacity = String(Math.max(0, Math.min(1, briefingUntil.current - sim.time)));
+    // First-time tips, at the moments they matter (never over the fight's own HUD).
+    if (sim.time > briefingUntil.current && completeAt.current < 0) {
+      const k = (a: Action) => bindLabel(binds, a);
+      showTip('controls', lowSpec
+        ? 'Stick moves · drag to aim · fire pad shoots · hold USE on objects · pause top left'
+        : `${k('moveForward')}${k('moveLeft')}${k('moveBack')}${k('moveRight')} move · mouse aims · click or ${k('fire')} fires · hold ${k('interact')} to use · ${k('reload')} reloads · Esc pauses`);
+      const t = FIELD.target;
+      if (t && (t.kind === 'ammo_crate' || t.kind === 'med_case' || t.kind === 'pouch')) showTip('loot', `Hold ${lowSpec ? 'USE' : k('interact')} until the bar fills. Rounds go straight to your reserve.`);
+      // The first time you gain field dressings (a medical case, not the issued ones).
+      if (tipNow.current.medkits >= 0 && snap.medkits > tipNow.current.medkits) showTip('heal', `Field dressing: ${lowSpec ? 'tap MED' : `press ${k('heal')}`} to heal. It takes a moment and lowers your weapon, so get into cover first.`);
+      tipNow.current.medkits = snap.medkits;
+      if (FIELD.carried.length > 0) showTip('cargo', `Cargo: carry up to ${CARRY_MAX}; each case slows you. Only what you carry out through extraction counts.`);
+      if (FIELD.exfilPhase === 'counting' || t?.kind === 'exfil') showTip('extract', 'Extraction: stay in the zone for 8 seconds. Leaving bleeds the countdown; going down drops your cargo.');
+    }
+    if (h.tip && tipNow.current.until && performance.now() > tipNow.current.until) { h.tip.style.opacity = '0'; tipNow.current.until = 0; }
 
     // ── Field HUD ──
     {
@@ -4090,7 +4120,7 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
     ? Math.min(resumeLevel, CAMPAIGN.length - 1) : -1;
   const hud = useRef<Hud>({
     root: null, ammo: null, fireMode: null, weapon: null, loadout: null, attachments: null, nvgTint: null, scope: null, reload: null, reloadBar: null, reloadHint: null, hit: null,
-    ch: { t: null, b: null, l: null, r: null }, chDot: null, chRing: null, lock: null, kills: null,
+    ch: { t: null, b: null, l: null, r: null }, chDot: null, chRing: null, tip: null, lock: null, kills: null,
     healthFill: null, refills: null, vignette: null, hitDir: null, down: null, arrows: [],
     field: null, fieldPrompt: null, fieldExfil: null, objText: null, survEnd: null, survEndText: null, waveHud: null, waveLabel: null, waveRooms: null, waveDone: null, waveDoneText: null, waveDoneSub: null, objArrow: null, briefing: null, complete: null, perf: null,
     lockReticle: null,
@@ -4824,6 +4854,9 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
             <div ref={(r) => { hud.current.bossFill = r; }} style={{ width: '100%', height: '100%', background: 'linear-gradient(90deg,#ff4d3d,#e0455a)' }} />
           </div>
         </div>
+
+        {/* first-time tip (lib/tutorial): small, below the objective and countdown, fades */}
+        <div ref={(r) => { hud.current.tip = r; }} data-testid="tip" role="status" aria-live="polite" style={{ position: 'absolute', left: '50%', top: isTouch ? 132 : 150, transform: 'translateX(-50%)', maxWidth: isTouch ? 'min(70vw, 560px)' : 'min(92vw, 640px)', textAlign: 'center', fontSize: isTouch ? 12 : 13, letterSpacing: 1, color: '#e9edf2', background: 'rgba(6,10,14,.6)', padding: '6px 12px', borderRadius: 6, opacity: 0, transition: 'opacity .4s', pointerEvents: 'none' }} />
 
         {/* objective off-screen arrow (cyan) */}
         <div ref={(r) => { hud.current.objArrow = r; }} style={{ position: 'absolute', opacity: 0, color: pal.objective, fontSize: 24, pointerEvents: 'none', textShadow: '0 0 6px #000', transition: 'opacity .12s' }}>▲</div>

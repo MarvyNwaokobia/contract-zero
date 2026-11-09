@@ -15,6 +15,7 @@ import { useMemo, useState } from 'react';
 import { Rajdhani } from 'next/font/google';
 import { retryImport } from '@/lib/retryImport';
 import { Shell } from '@/components/ui/Shell';
+import { HowToPlayButton } from '@/components/help/HowToPlay';
 import { useSettings } from '@/lib/settings';
 import { bindLabel, type Action } from '@/lib/keybinds';
 import { OperationIntel } from '@/components/world/OperationIntel';
@@ -132,6 +133,7 @@ export default function TrainingPage() {
 
   return (
     <Shell title="Training" back={{ href: '/', label: 'Hub' }} wide>
+      <div className="-mt-3 mb-4 flex justify-end"><HowToPlayButton /></div>
       {result && (
         <section className="cz-panel mb-5 p-5" data-testid="practice-result">
           <div className={`font-display text-2xl font-bold uppercase ${result.outcome === 'extracted' ? 'text-friendly' : 'text-hostile'}`}>

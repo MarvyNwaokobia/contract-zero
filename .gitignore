@@ -48,3 +48,5 @@ apps/web/public/models/characters/
 apps/web/public/models/environments/rpg_environment/
 apps/web/public/models/**/*.zip
 apps/web/assets/
+
+artifacts/

@@ -3,7 +3,10 @@
 import { Suspense, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { buildOperationMission, conditionsFor, PRACTICE_SITES, ZONE_PHASE, type OpKind, type Phase } from '@/engine/fps/convoy';
-import { ContractZeroScene } from '@/engine/scene/ContractZeroScene';
+import dynamic from 'next/dynamic';
+// Client-only, like the player routes: the scene reads the device (touch, saved
+// settings) on its first render, which a server render can't know.
+const ContractZeroScene = dynamic(() => import('@/engine/scene/ContractZeroScene').then((m) => m.ContractZeroScene), { ssr: false });
 import type { GunId } from '@/engine/combat/GunStats';
 
 /** Dev only: drop into an operation on a site without the server. Nothing is scored.

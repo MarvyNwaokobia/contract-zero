@@ -10,6 +10,7 @@ import { buildOperationMission, conditionsFor, RESOURCE_LABEL as CARGO, type Con
 import { CARRY_MAX, EXTRACT_SECS } from '@/engine/fps/field'
 import { SiteMap } from './SiteMap'
 import { useSettings } from '@/lib/settings'
+import { HowToPlayButton } from '@/components/help/HowToPlay'
 import { bindLabel } from '@/lib/keybinds'
 
 const PHASE_LABEL = { day: 'Day', dusk: 'Dusk', night: 'Night' } as const
@@ -68,8 +69,9 @@ export function OperationIntel({ contract, kind, reward, practice = false }: {
             {kind === 'raid' && `${contract.cargo.units} units packed in ${cases} case${cases === 1 ? '' : 's'}. ${hold} ${use} on a case to take it; you can carry ${CARRY_MAX}, and each one slows you. Only cases you carry through a completed extraction count.`}
             {kind === 'sabotage' && `${hold} ${use} for five seconds on each target to set a charge. The fuse is short once both are set. Extraction opens after the second charge.`}
             {kind === 'recovery' && `One sealed case, heavy enough to slow you. ${hold} ${use} to free it, then carry it to the handover.`}
-            {` At the zone, press ${use} to call it in, then stay inside for ${EXTRACT_SECS} seconds. Leaving pauses the countdown; going down drops what you carry.`}
+            {` At the zone, press ${use} to call it in, then stay inside for ${EXTRACT_SECS} seconds. Leaving the zone bleeds the countdown back; going down drops what you carry.`}
           </p>
+          <HowToPlayButton label="Controls and field rules" className="mt-2 text-xs text-steel underline hover:text-fog" />
         </section>
 
         <section className="grid gap-4 sm:grid-cols-2">

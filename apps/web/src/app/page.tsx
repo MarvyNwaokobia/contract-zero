@@ -1,6 +1,8 @@
 'use client'
 
 import dynamic from 'next/dynamic'
+import { HowToPlayButton } from '@/components/help/HowToPlay'
+import { Welcome } from '@/components/help/Welcome'
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -62,6 +64,7 @@ function NextOperation({ e, others, signedIn }: { e: BoardEntry; others: BoardEn
           <Link href="/signin" className="cz-btn cz-btn-primary px-6 py-2.5 text-sm">Sign in to deploy</Link>
         )}
         <Link href="/contracts" className="cz-btn cz-btn-ghost px-5 py-2.5 text-sm">All contracts{others.length ? ` (${others.length + 1})` : ''}</Link>
+        <HowToPlayButton className="cz-btn cz-btn-ghost px-5 py-2.5 text-sm" />
       </div>
     </section>
   )
@@ -94,6 +97,7 @@ export default function Hub() {
 
       <div className={`relative z-10 flex h-full flex-col ${clean ? 'hidden' : ''}`}>
         <TopBar />
+        <Welcome />
         <div className="grid flex-1 grid-cols-1 gap-6 overflow-y-auto p-4 sm:p-8 lg:grid-cols-[minmax(280px,360px)_1fr_minmax(340px,440px)]">
           {/* operator */}
           <div className="flex flex-col justify-end gap-4">

@@ -60,6 +60,8 @@ export interface Interface {
   promptHints: boolean
   /** The frame-rate readout in the corner. */
   perfOverlay: boolean
+  /** First-time tips (controls, pickups, cargo, extraction, consequences). */
+  tips: boolean
 }
 
 export interface Settings {
@@ -118,7 +120,7 @@ export const DEFAULT_GRAPHICS: Graphics = { renderScale: 1, fpsCap: 0, shadows: 
 export const DEFAULT_CONTROLS: Controls = { adsSens: 1, invertY: false, aim: 'hold', crouch: 'hold', binds: DEFAULT_BINDS }
 export const DEFAULT_INTERFACE: Interface = {
   crosshair: { style: 'cross', color: '#e9edf2', size: 1, opacity: 0.9, dynamic: true },
-  hudScale: 1, objectiveArrow: true, hitMarkers: true, damageDirection: true, threatArrows: true, promptHints: true, perfOverlay: false,
+  hudScale: 1, objectiveArrow: true, hitMarkers: true, damageDirection: true, threatArrows: true, promptHints: true, perfOverlay: false, tips: true,
 }
 export const DEFAULT_ACCESS: Settings['access'] = {
   reduceMotion: false, reduceFlashes: false, toggleInteract: false, palette: 'standard', highContrastPrompts: false, aimAssist: 'touch', targetLock: true,
@@ -198,6 +200,7 @@ export function normalize(raw: unknown, legacy: { quality?: string | null; sens?
       threatArrows: bool(ui.threatArrows, true),
       promptHints: bool(ui.promptHints, true),
       perfOverlay: bool(ui.perfOverlay, false),
+      tips: bool(ui.tips, true),
     },
     access: {
       reduceMotion: bool(acc.reduceMotion, false),

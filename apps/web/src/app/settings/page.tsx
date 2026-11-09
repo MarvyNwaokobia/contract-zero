@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent a
 import { TopBar } from '@/components/ui/Shell'
 import { Button, Group, Note, Row, Segmented, Slider, Switch } from '@/components/settings/controls'
 import { KeyBindings } from '@/components/settings/KeyBindings'
+import { HowToPlayButton } from '@/components/help/HowToPlay'
 import { AccountSecurity } from '@/components/settings/AccountSecurity'
 import {
   ADS_SENS_RANGE, CROSSHAIR_COLORS, CROSSHAIR_SIZE_RANGE, DEFAULTS, DEFAULT_ACCESS, DEFAULT_CONTROLS, DEFAULT_GRAPHICS, DEFAULT_INTERFACE, FOV_RANGE, FPS_CAPS,
@@ -18,6 +19,7 @@ import {
 } from '@/lib/settings'
 import { bindLabel } from '@/lib/keybinds'
 import { useSyncState } from '@/lib/preferencesSync'
+import { resetTips } from '@/lib/tutorial'
 import { FpsAudio } from '@/engine/audio'
 
 type Cat = 'display' | 'audio' | 'controls' | 'keys' | 'interface' | 'access' | 'account'
@@ -75,6 +77,7 @@ export default function SettingsPage() {
             <span className="border border-line-strong bg-ink-2 px-3 py-1 font-mono text-[11px] text-muted" data-testid="sync-chip">
               {sync.kind === 'local' ? 'STORED ON THIS DEVICE' : sync.kind === 'synced' ? 'SYNCED TO ACCOUNT' : sync.kind === 'syncing' ? 'SYNCING…' : 'SYNC FAILED · SAVED LOCALLY'}
             </span>
+            <HowToPlayButton />
             <Link href="/" className="cz-label hover:text-fog">← Hub</Link>
           </div>
         </header>
@@ -406,6 +409,7 @@ function Controls({ s, set }: { s: Settings; set: SetFn }) {
 
 function Interface({ s, set }: { s: Settings; set: SetFn }) {
   const ui = s.interface
+  const [tipsReset, setTipsReset] = useState(false)
   const ch = ui.crosshair
   const setUi = (patch: Partial<Settings['interface']>) => set((x) => ({ ...x, interface: { ...x.interface, ...patch } }))
   const setCh = (patch: Partial<Settings['interface']['crosshair']>) => set((x) => ({ ...x, interface: { ...x.interface, crosshair: { ...x.interface.crosshair, ...patch } } }))
@@ -442,6 +446,10 @@ function Interface({ s, set }: { s: Settings; set: SetFn }) {
         </Row>
         <Row label="Objective arrow" hint="The edge arrow toward the objective or extraction when it’s off screen. The objective line stays either way.">
           <Switch id="obj-arrow" checked={ui.objectiveArrow} onChange={(v) => setUi({ objectiveArrow: v })} label="Objective arrow" />
+        </Row>
+        <Row label="First-time tips" hint="One short line, the first time you fight, pick something up, carry cargo, extract and finish a contract. Never covers the fight; fades on its own.">
+          <Switch id="tips" checked={ui.tips} onChange={(v) => setUi({ tips: v })} label="First-time tips" />
+          <Button onClick={() => { resetTips(); setTipsReset(true) }} testid="tips-reset">{tipsReset ? 'Will show again' : 'Replay tips'}</Button>
         </Row>
         <Row label="Interaction hints" hint={`The second line under a prompt (“${bindLabel(s.controls.binds, 'inspect')} · INSPECT”).`}>
           <Switch id="prompt-hints" checked={ui.promptHints} onChange={(v) => setUi({ promptHints: v })} label="Interaction hints" />

@@ -5,6 +5,7 @@
 // Center in a new tab; changes there reach this fight through the storage event.
 
 import { useState, type CSSProperties, type ReactNode } from 'react'
+import { HowToPlayButton } from '@/components/help/HowToPlay'
 import { ADS_SENS_RANGE, FOV_RANGE, HUD_SCALE_RANGE, SENS_RANGE, updateSettings, type AudioMix, type Quality, type Settings } from '@/lib/settings'
 
 const C = { accent: '#37d0e0', dim: '#6f7d8c', text: '#e9edf2', line: 'rgba(255,255,255,.08)' }
@@ -72,7 +73,7 @@ export function PauseSettings({ s, onQuality, touch }: { s: Settings; onQuality:
         </>}
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 14px', borderTop: `1px solid ${C.line}`, fontSize: 10, letterSpacing: 1.5, color: C.dim }}>
-        <span>APPLIES AT ONCE · SAVED</span>
+        <HowToPlayButton label="HOW TO PLAY" className="font-bold tracking-[2px] text-[#37d0e0] underline" />
         <a href="/settings" target="_blank" rel="noopener" style={{ color: C.accent, letterSpacing: 2, fontWeight: 700 }} data-testid="pause-all-settings">ALL SETTINGS ↗</a>
       </div>
     </div>

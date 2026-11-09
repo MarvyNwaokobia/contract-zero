@@ -6,6 +6,7 @@ import { Rajdhani } from 'next/font/google'
 import { useSearchParams } from 'next/navigation'
 import { Suspense, useMemo, useState } from 'react'
 import { Briefing, Debrief } from '@/components/story/Briefing'
+import { ConsequenceTip } from '@/components/help/ConsequenceTip'
 import type { MissionStory } from '@/engine/story/presence'
 import { Panel, Shell, Stat } from '@/components/ui/Shell'
 import { buildOperationMission } from '@/engine/fps/convoy'
@@ -207,6 +208,7 @@ function Deploy() {
             <Stat label="You now hold" value={`${result.player_holdings.cargo} ${result.resource}`} hint={`${result.player_holdings.credits} credits`} />
           </div>
         </Panel>
+        {won && <ConsequenceTip target={vgAfter?.name ?? result.target} />}
         {result.debrief && result.debrief.length > 0 && (
           <Panel title={result.codename ? `DEBRIEF · ${result.codename}` : 'DEBRIEF'} className="mt-4">
             <Debrief lines={result.debrief} />

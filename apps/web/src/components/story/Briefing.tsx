@@ -6,6 +6,7 @@
 // vouch for); nothing here is invented on the client.
 
 import { useEffect, useRef, useState } from 'react'
+import { HowToPlayButton } from '@/components/help/HowToPlay'
 import { SPEAKER_META, type MissionStory, type Speaker } from '@/engine/story/presence'
 
 const CHAR_MS = 22
@@ -73,6 +74,7 @@ export function Briefing({ story, pending, onDeploy, actionLabel = 'Deploy' }: {
           </div>
           <div className="mt-10 flex flex-wrap items-center gap-4">
             <button className="cz-btn cz-btn-primary px-8 py-3 text-base" onClick={onDeploy} disabled={pending} autoFocus>{actionLabel}</button>
+            <HowToPlayButton label="Controls" initial="desktop" className="cz-btn cz-btn-ghost ml-3 px-5 py-3 text-sm" />
             {!done && !pending && <button className="cz-label hover:text-fog" onClick={() => setShown(lines.length)}>Skip ▸</button>}
             <span className="text-xs text-dim">Enter to continue · Space to skip</span>
           </div>

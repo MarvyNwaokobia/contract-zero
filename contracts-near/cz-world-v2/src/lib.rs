@@ -69,6 +69,9 @@ enum Key {
     /// Supply orders and merchant proposals (added in v2.3; created on demand).
     Orders,
     Proposals,
+    /// Per order: its proposal ids, so a closed order's leftovers can be deleted
+    /// (added in v2.4; created on demand).
+    OrderProposals,
 }
 
 /// Longest a trading session may last.
@@ -148,6 +151,24 @@ fn orders() -> LookupMap<String, Order> {
 
 fn proposals() -> LookupMap<String, Proposal> {
     LookupMap::new(Key::Proposals)
+}
+
+fn order_proposals() -> LookupMap<String, Vec<String>> {
+    LookupMap::new(Key::OrderProposals)
+}
+
+/// Delete every proposal still stored for a closed order (the losers), and the index.
+/// Their ids stay unusable: an order id is never reused, so neither is `fill:{order}|…`.
+fn forget_proposals(order_id: &str) {
+    let mut idx = order_proposals();
+    if let Some(ids) = idx.remove(order_id) {
+        let mut pm = proposals();
+        for p in ids {
+            pm.remove(&proposal_key(order_id, &p));
+        }
+        pm.flush();
+    }
+    idx.flush();
 }
 
 fn proposal_key(order_id: &str, proposal_id: &str) -> String {
@@ -515,6 +536,12 @@ impl WorldV2 {
         require!(map.get(&k).is_none() && !self.used.contains(&format!("fill:{k}")), "proposal id already used");
         map.insert(k, Proposal { merchant, quantity, total_credits, expires_at_ns: env::block_timestamp() + ttl_secs as u64 * 1_000_000_000 });
         map.flush();
+        let mut idx = order_proposals();
+        let mut ids = idx.get(&order_id).cloned().unwrap_or_default();
+        require!(ids.len() < 16, "too many proposals on this order");
+        ids.push(proposal_id);
+        idx.insert(order_id, ids);
+        idx.flush();
     }
 
     /// The requester accepts one proposal. Settles atomically: the merchant's goods
@@ -606,8 +633,9 @@ impl WorldV2 {
         if op_id.starts_with("refund:") {
             if ok {
                 o.state = OrderState::Closed;
-                map.insert(order_id, o);
+                map.insert(order_id.clone(), o);
                 map.flush();
+                forget_proposals(&order_id);
             }
             return PromiseOrValue::Value(ok);
         }
@@ -697,9 +725,10 @@ impl WorldV2 {
             let mut map = orders();
             let mut o = o;
             o.state = OrderState::Closed;
-            map.insert(order_id, o);
+            map.insert(order_id.clone(), o);
             map.flush();
             self.used.insert(op);
+            forget_proposals(&order_id);
             return PromiseOrValue::Value(true);
         }
         self.pending.insert(op.clone());

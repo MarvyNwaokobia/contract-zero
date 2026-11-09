@@ -112,7 +112,7 @@ Prices, standing and the next missions all carry over between sessions.
 | Vanguard: "Quartermaster" | low | keep 30% of credits in reserve | Restock early, escort heavily after raids |
 | Ashen: "Opportunist" | high | spend down to 10% | Buy medicine first; post contracts when Vanguard's stock is below target |
 | Vex: "Wholesaler" | medium | — | Widen margin when shelves are low; sponsor raids for scarce goods |
-| Halcyon: "Turnover" | medium | — | Tight spread; restock small and fast; never sponsor raids |
+| Halcyon Logistics (**Built**) | medium | credit reserve 400 | 12% margin with an 8% floor, smaller shelves, commits at most 60% of a shelf to one order; never sponsors raids. Competes with Vex for every supply order (§8a) |
 
 The deterministic policy is parameterized by the profile, and the LLM gets the profile as its standing orders.
 
@@ -202,6 +202,30 @@ A mission is a pure function of live state, so the server validates exactly the 
 **Acceptance:**
 - *(Passed on testnet, `scripts/exchange-e2e.mjs`.)* A player sells extracted ammo and buys medkits. Both trades settle on NEAR, each signed by the player's own key, and the player's engine balances equal their chain balances. A quote left unsigned is cancelled and released.
 - *(Proposed.)* A player-to-player listing transfers atomically, or not at all.
+
+## 8a. Supply Orders: an intent-driven war economy (Built)
+
+**The idea.** Nobody "buys from Vex" any more except at Vex's instant counter. A faction that runs short, or a player who wants a better price, states an intent and lets the market compete for it:
+- **what:** 30 ammunition;
+- **limit:** at most 600 credits;
+- **flexibility:** partial fills fine;
+- **deadline:** within 6 hours.
+
+Every merchant decides for itself whether to answer, and at what price, from its own shelves, treasury, margin, floor and risk limit. The requester picks.
+
+**Why it matters in play.**
+- **Raids reach the market.** Your raid empties a depot. The commander's order goes out, and the competition between Vex and Halcyon decides how fast and how dearly it restocks. That sets how many rifles the next defenders carry.
+- **Urgency costs.** A critically short faction takes the biggest lot, not the cheapest. A comfortable one shops around, waits out a price spike, or withdraws when a shipment arrives.
+- **Merchants learn.** One that keeps losing cuts its margin, and Vex's instant prices follow. One that keeps winning raises its.
+- **Players are in the same market.** You can sell your raid's haul to the best bidder, or buy below Vex's ask by letting both partners compete. Your orders move the same shelves and prices the factions trade against.
+
+**Guarantees** (the contract enforces them; the economy mirrors them):
+- **Escrow.** The requester's side is escrowed when the order is placed, so nothing unfunded can be promised. A merchant's proposal reserves its goods, so nothing is promised twice.
+- **Limits.** Every fill is held to the order's price limit pro rata, in exact integers.
+- **Control.** Only the requester accepts or cancels. Cancel and accept can't both happen. Unused escrow always returns.
+- **On chain.** Every step is on chain with its transaction. Faction steps are signed with each actor's scoped key. Player steps are signed by the player and verified before the economy applies them.
+
+Full design, the contract, the agents, settlement, the NEAR Intents adapter and the evidence: **[INTENTS.md](INTENTS.md)**.
 
 ## 9. On-chain architecture: `cz-assets` + `cz-world` v2
 

@@ -299,3 +299,23 @@ fn the_same_seed_gives_the_same_market() {
     };
     assert_eq!(run(), run());
 }
+
+#[test]
+fn an_unanswered_sell_order_is_not_reposted_for_a_day() {
+    let mut w = world();
+    w.grant(VG, Asset::Res(Resource::Fuel), 400);
+    // Bids sit below cost: nobody answers, and it lapses.
+    let place = policy::commander(&w, VANGUARD).into_iter().find(|d| d.trigger == "fuel surplus").and_then(|d| d.action).expect("offers its surplus");
+    w.execute(&Caller::Agent(VANGUARD.into()), &place).unwrap();
+    // Merchants decline; buy no fuel.
+    for m in w.merchant_ids() {
+        for d in merchant_proposals(&w, &m) {
+            if let Some(a) = &d.action { let _ = w.execute(&Caller::Agent(m.clone()), a); }
+        }
+    }
+    for _ in 0..policy::ORDER_TTL_TICKS { w.tick(); }
+    assert!(w.orders.values().any(|o| o.resource == Resource::Fuel && o.status == OrderStatus::Expired && o.filled == 0), "no merchant met the cost floor");
+    assert!(policy::commander(&w, VANGUARD).iter().all(|d| d.trigger != "fuel surplus"), "not reposted right away");
+    for _ in 0..policy::SELL_RETRY_TICKS { w.tick(); }
+    assert!(policy::commander(&w, VANGUARD).iter().any(|d| d.trigger == "fuel surplus"), "offered again a day later");
+}

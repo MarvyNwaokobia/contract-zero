@@ -500,7 +500,9 @@ fn two_merchants_compete_and_the_requester_picks_one() {
     assert!(step(&mut w, "o1", "refund:o1", None, true));
     assert_eq!(w.get_order("o1".into()).unwrap().state, OrderState::Closed);
     assert!(w.is_used("fill:o1|hal-1".into()) && w.is_used("refund:o1".into()));
-    // The losing proposal can't be accepted afterwards.
+    // The losing proposal is deleted from storage once the order closes…
+    assert!(w.get_proposal("o1".into(), "vex-1".into()).is_none(), "leftover proposals are cleaned up");
+    // …and can't be accepted afterwards.
     at(VANGUARD, 1_030);
     assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = w.accept_proposal("o1".into(), "vex-1".into()); })).is_err());
 }
@@ -724,4 +726,14 @@ fn the_price_check_is_exact_integer_arithmetic() {
     assert!(!within_limit(OrderSide::Buy, 3, 100, 1, 34));
     assert!(within_limit(OrderSide::Sell, 3, 100, 1, 34));
     assert!(!within_limit(OrderSide::Sell, 3, 100, 1, 33));
+}
+
+#[test]
+fn an_order_takes_a_bounded_number_of_proposals() {
+    let mut w = order_world();
+    open_order(&mut w, "o1", true);
+    for i in 0..16 {
+        propose(&mut w, if i % 2 == 0 { VEX } else { HALCYON }, "o1", &format!("p{i}"), 1, 20);
+    }
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| propose(&mut w, VEX, "o1", "p16", 1, 20))).is_err());
 }

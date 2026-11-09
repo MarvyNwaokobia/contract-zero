@@ -118,8 +118,13 @@ fn describe(e: &Value, name: &dyn Fn(&str) -> String) -> Option<String> {
     Some(match e["event"].as_str()? {
         "traded" => {
             let who = name(s("party").trim_start_matches("faction:").trim_start_matches("merchant:"));
-            if s("side") == "buy" { format!("{who} bought {} {} from Vex for {} cr", n("qty"), s("resource"), n("total")) } else { format!("{who} sold {} {} to Vex for {} cr", n("qty"), s("resource"), n("total")) }
+            let m = e["merchant"].as_str().map(|m| name(m)).unwrap_or_else(|| "Vex".into());
+            if s("side") == "buy" { format!("{who} bought {} {} from {m} for {} cr", n("qty"), s("resource"), n("total")) } else { format!("{who} sold {} {} to {m} for {} cr", n("qty"), s("resource"), n("total")) }
         }
+        "order_placed" => format!("{} placed supply order #{}: {} {} {}, limit {} cr", name(&s("requester")), n("id"), s("side"), n("qty"), s("resource"), n("limit_total")),
+        "proposal_posted" => format!("{} proposed {} for {} cr on order #{}", name(&s("merchant")), n("qty"), n("total"), n("order")),
+        "order_filled" => format!("Order #{} filled by {}: {} for {} cr ({} still wanted)", n("order"), name(&s("merchant")), n("qty"), n("total"), n("remaining")),
+        "order_closed" => format!("Order #{} closed ({}); {} unused returned", n("order"), e["status"]["status"].as_str().unwrap_or("?"), n("refunded")),
         "defense_changed" => format!("{} set depot defense to level {}", name(&s("actor")), n("level")),
         "bounty_posted" => format!("{} escrowed a {} cr bounty on {}'s {}", name(&s("sponsor")), n("amount"), name(&s("target")), s("resource")),
         "contract_posted" => format!("{} escrowed a {} cr {} contract against {}'s {}", name(&s("sponsor")), n("amount"), s("kind"), name(&s("target")), s("resource")),
@@ -155,11 +160,26 @@ fn gameplay(e: &Value, name: &dyn Fn(&str) -> String) -> Option<String> {
     })
 }
 
+/// The settlement op id an order event produced (chain ids from the world's orders).
+fn order_op(e: &Value, chain: &HashMap<u64, String>) -> Option<String> {
+    let c = |o: &Value| o.as_u64().map(|id| chain.get(&id).cloned().unwrap_or_else(|| format!("o{id}")));
+    match e["event"].as_str()? {
+        "order_placed" => Some(format!("order:{}", c(&e["id"])?)),
+        "proposal_posted" => Some(format!("propose:{}|p{}", c(&e["order"])?, e["id"])),
+        "order_filled" => Some(format!("fill:{}|p{}", c(&e["order"])?, e["proposal"])),
+        "order_closed" if e["status"]["status"] != "filled" => Some(format!("close:{}", c(&e["order"])?)),
+        _ => None,
+    }
+}
+
 /// The chain record for one action: a settlement row by op id, or the reason none exists.
-fn transaction(e: &Value, rows: &HashMap<String, Value>) -> Value {
+fn transaction(e: &Value, rows: &HashMap<String, Value>, chain: &HashMap<u64, String>) -> Value {
+    if e["event"] == "traded" && !e["order"].is_null() {
+        return json!({ "status": "off_chain", "note": "Settled by the supply order's fill (its own step)." });
+    }
     let op = match e["event"].as_str() {
         Some("traded") => Some(if e["side"] == "buy" { format!("trade-{}", e["id"]) } else { format!("sale-{}", e["id"]) }),
-        _ => None,
+        _ => order_op(e, chain),
     };
     if let Some(op) = op {
         return rows.get(&op).cloned().unwrap_or_else(|| json!({ "op_id": op, "status": "not_queued", "note": "No chain account for this party; recorded in the game ledger only." }));
@@ -201,6 +221,7 @@ pub async fn timeline(state: web::Data<AppState>, q: web::Query<TimelineQuery>) 
     };
 
     // Every op id these chains could have produced, fetched in one query.
+    let chain_ids: HashMap<u64, String> = state.world.read(|w| w.orders.values().map(|o| (o.id, o.chain_order_id())).collect()).await;
     let mut ops = Vec::new();
     for (_, _, _, kind, p) in &rows {
         if kind == "mission" {
@@ -209,6 +230,9 @@ pub async fn timeline(state: web::Data<AppState>, q: web::Query<TimelineQuery>) 
         for e in p["events"].as_array().into_iter().flatten() {
             if e["event"] == "traded" {
                 ops.push(if e["side"] == "buy" { format!("trade-{}", e["id"]) } else { format!("sale-{}", e["id"]) });
+            }
+            if let Some(op) = order_op(e, &chain_ids) {
+                ops.push(op);
             }
         }
     }
@@ -253,7 +277,7 @@ pub async fn timeline(state: web::Data<AppState>, q: web::Query<TimelineQuery>) 
                 "rationale": p["rationale"],
             },
             "validation": { "status": p["validation"], "error": p["error"], "by": if planner.starts_with("llm:") { "policy check, then the economy engine" } else { "the economy engine" } },
-            "transactions": events.iter().map(|e| transaction(e, &by_op)).collect::<Vec<_>>(),
+            "transactions": events.iter().map(|e| transaction(e, &by_op, &chain_ids)).collect::<Vec<_>>(),
             "world": events.iter().filter_map(|e| describe(e, &name)).collect::<Vec<_>>(),
             "gameplay": events.iter().filter_map(|e| gameplay(e, &name)).collect::<Vec<_>>(),
         })

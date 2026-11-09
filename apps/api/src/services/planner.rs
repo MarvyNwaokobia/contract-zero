@@ -88,7 +88,7 @@ pub fn schema() -> Value {
                 "items": {
                     "type": "object",
                     "properties": {
-                        "type": { "type": "string", "enum": ["trade", "post_bounty", "configure_defense", "seize_convoy", "set_margin", "post_sabotage", "none"] },
+                        "type": { "type": "string", "enum": ["request_supplies", "trade", "post_bounty", "configure_defense", "seize_convoy", "set_margin", "post_sabotage", "none"] },
                         "resource": { "type": "string", "enum": ["ammo", "med", "fuel"] },
                         "side": { "type": "string", "enum": ["buy", "sell"] },
                         "qty": { "type": "integer" },
@@ -97,6 +97,7 @@ pub fn schema() -> Value {
                         "level": { "type": "integer" },
                         "convoy": { "type": "integer" },
                         "margin_bp": { "type": "integer" },
+                        "limit_total": { "type": "integer", "description": "request_supplies: the most you pay (buy) or least you take (sell) for the whole quantity" },
                         "rationale": { "type": "string" }
                     },
                     "required": ["type", "rationale"]
@@ -128,6 +129,8 @@ pub struct Proposed {
     pub level: Option<u8>,
     pub convoy: Option<u64>,
     pub margin_bp: Option<i64>,
+    #[serde(default)]
+    pub limit_total: Option<i64>,
     #[serde(default)]
     pub rationale: String,
 }
@@ -176,6 +179,11 @@ pub fn observation(w: &World, actor: &str) -> Value {
         "factions": factions,
         "market": { "merchant": w.market.merchant, "insolvent": w.merchant_insolvent(), "margin_bp": w.market.strategy.margin_bp, "prices": prices },
         "open_contracts": contracts,
+        // The supply market: every merchant's own price, and your open orders with the
+        // proposals on them. request_supplies posts a bounded order every merchant may
+        // answer; the choice among proposals follows your doctrine.
+        "merchants": w.merchant_ids().iter().map(|m| json!({ "id": m, "ask": Resource::ALL.iter().map(|&r| (r.name(), w.merchant_quote(m, r, Side::Buy, 1))).collect::<std::collections::BTreeMap<_, _>>(), "bid": Resource::ALL.iter().map(|&r| (r.name(), w.merchant_quote(m, r, Side::Sell, 1))).collect::<std::collections::BTreeMap<_, _>>() })).collect::<Vec<_>>(),
+        "your_open_orders": w.open_orders().filter(|o| o.requester == actor).map(|o| json!({ "order": o.id, "side": o.side, "resource": o.resource.name(), "qty": o.qty, "filled": o.filled, "limit_total": o.limit_total, "expires_at": o.expires_at, "proposals": w.pending_proposals(o.id).map(|p| json!({ "merchant": p.merchant, "qty": p.qty, "total": p.total })).collect::<Vec<_>>() })).collect::<Vec<_>>(),
         "merchant_caravans_on_the_road": caravans,
         "routine_operations_this_tick": routine,
         "defense_cost_per_shipment": DEFENSE_COST,
@@ -208,6 +216,41 @@ pub fn validate(w: &World, actor: &str, p: &Proposed) -> Result<Option<Action>, 
     };
     match p.kind.as_str() {
         "none" => Ok(None),
+        // A supply order: bounded by the same rules as the deterministic commander
+        // (budget above reserve, doctrine ceiling unless critically short, cost floor
+        // when selling). The model never picks the merchant or signs anything.
+        "request_supplies" if !merchant => {
+            let r = resource(&p.resource)?;
+            let side = match p.side.as_deref() { Some("buy") => Side::Buy, Some("sell") => Side::Sell, s => return Err(format!("bad side {s:?}")) };
+            let qty = p.qty.filter(|q| (1..=200).contains(q)).ok_or("qty must be 1..200")?;
+            let limit_total = p.limit_total.filter(|l| *l > 0).ok_or("missing limit_total")?;
+            let cost = cz_economy::pricing::production_cost(r);
+            let have = w.balance(&a.account, Asset::Res(r));
+            let target = if r == Resource::Ammo { ammo_target(a) } else { a.requirement(r) };
+            let critical = have * 4 < target;
+            match side {
+                Side::Buy => {
+                    if limit_total > budget {
+                        return Err(format!("{limit_total} cr is over the spendable {budget}"));
+                    }
+                    let unit_cap = cost * if critical { cz_economy::pricing::PRICE_CEIL_MULT } else { a.doctrine.max_price_mult };
+                    if limit_total > unit_cap * qty {
+                        return Err(format!("{limit_total} cr for {qty} breaks price discipline (at most {unit_cap}/unit)"));
+                    }
+                }
+                Side::Sell => {
+                    if qty > have {
+                        return Err(format!("only {have} {} to sell", r.name()));
+                    }
+                    if limit_total < cost * qty {
+                        return Err(format!("{limit_total} cr for {qty} is below production cost"));
+                    }
+                }
+            }
+            let nonce = w.order_nonces.get(actor).copied().unwrap_or(0) + 1;
+            let urgency = if critical { 3 } else if have * 2 < target { 2 } else { 1 };
+            Ok(Some(Action::PlaceOrder { side, resource: r, qty, limit_total, allow_partial: true, ttl_ticks: policy::ORDER_TTL_TICKS, nonce, urgency, purpose: p.rationale.chars().take(120).collect(), chain_id: None }))
+        }
         "trade" if !merchant => {
             let r = resource(&p.resource)?;
             let side = match p.side.as_deref() { Some("buy") => Side::Buy, Some("sell") => Side::Sell, s => return Err(format!("bad side {s:?}")) };
@@ -380,6 +423,26 @@ mod tests {
         assert!(validate(&w, "vex", &prop(json!({ "type": "set_margin", "margin_bp": 90000, "rationale": "x" }))).is_err());
         assert!(validate(&w, "vanguard", &prop(json!({ "type": "mint_money", "rationale": "x" }))).is_err());
         assert!(validate(&w, "vanguard", &prop(json!({ "type": "none", "rationale": "quiet" }))).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_planner_supply_request_is_held_to_doctrine() {
+        let w = cz_economy::genesis(1);
+        let ok = validate(&w, "vanguard", &prop(json!({ "type": "request_supplies", "resource": "med", "side": "buy", "qty": 5, "limit_total": 250, "rationale": "medics are short" }))).unwrap().unwrap();
+        assert!(matches!(ok, Action::PlaceOrder { qty: 5, limit_total: 250, allow_partial: true, .. }), "{ok:?}");
+        // Over budget, over the price ceiling, selling below cost or more than held,
+        // or a merchant placing an order: all refused before the engine sees them.
+        for bad in [
+            json!({ "type": "request_supplies", "resource": "ammo", "side": "buy", "qty": 200, "limit_total": 999_999, "rationale": "x" }),
+            json!({ "type": "request_supplies", "resource": "med", "side": "buy", "qty": 5, "limit_total": 5 * 30 * 3, "rationale": "x" }),
+            json!({ "type": "request_supplies", "resource": "fuel", "side": "sell", "qty": 10, "limit_total": 10, "rationale": "x" }),
+            json!({ "type": "request_supplies", "resource": "fuel", "side": "sell", "qty": 200, "limit_total": 9_000, "rationale": "x" }),
+            json!({ "type": "request_supplies", "resource": "med", "side": "buy", "qty": 5, "rationale": "no limit" }),
+        ] {
+            assert!(validate(&w, "vanguard", &prop(bad.clone())).is_err(), "{bad}");
+        }
+        assert!(validate(&w, "vex", &prop(json!({ "type": "request_supplies", "resource": "med", "side": "buy", "qty": 5, "limit_total": 250, "rationale": "x" }))).is_err());
+        assert!(observation(&w, "vanguard")["merchants"].as_array().unwrap().len() >= 2, "the planner sees every merchant");
     }
 
     #[test]

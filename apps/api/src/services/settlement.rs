@@ -545,6 +545,22 @@ pub async fn process_next(state: &AppState) -> Result<bool, String> {
     let mut already = false;
     let mut checked = true;
     if kind.starts_with("order_") {
+        // A proposal for an order the chain has already closed (the requester took
+        // another offer first) can never land, and the economy released it when the
+        // order closed: retire the step instead of retrying it forever.
+        if kind == "order_propose" {
+            if let Ok(v) = near.view("get_order", json!({ "order_id": payload["order_id"] })).await {
+                let past_deadline = v["expires_at_ns"].as_u64().is_some_and(|ns| ns / 1_000_000_000 <= chrono::Utc::now().timestamp() as u64);
+                let moot = matches!(v["state"].as_str(), Some("Refunding") | Some("Closed")) || (v["state"].as_str() == Some("Open") && past_deadline);
+                if moot && !order_step_done(&near, &kind, &payload).await.unwrap_or(false) {
+                    sqlx::query("UPDATE settlements SET status = 'superseded', error = $2, lease_until = NULL WHERE id = $1 AND claimed_by = $3")
+                        .bind(id).bind(format!("order {} was {} on chain before this proposal reached it; released in the economy", payload["order_id"].as_str().unwrap_or("?"), v["close_reason"].as_str().unwrap_or("past its deadline")))
+                        .bind(&state.worker_id).execute(db).await.map_err(|e| e.to_string())?;
+                    tracing::info!("settlement {op_id} superseded: the order closed first");
+                    return Ok(true);
+                }
+            }
+        }
         match order_step_done(&near, &kind, &payload).await {
             Ok(done) => already = done,
             Err(_) => checked = false,

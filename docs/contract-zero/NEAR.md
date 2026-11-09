@@ -150,6 +150,13 @@ Recovery settles through the same `settle_operation`, with an extra faction → 
 2. Vex `propose` [`G2gqeypP…`](https://testnet.nearblocks.io/txns/G2gqeypP8xtbPJXmCjfRHJe9uwaFQPCN3CVso3yiai9b): 5 ammunition for 140 credits.
 3. Vanguard `cancel_order` [`9cpAJG3Z…`](https://testnet.nearblocks.io/txns/9cpAJG3Z3tVoVTn2TADJKEYXp8aFvkq6ujbsfQj9Tcvz): the order closed as `cancelled`, and both balances returned exactly (13,573 and 0).
 
+**v2.4 (same day).**
+- **Storage stop.** Live load showed that storage grows with every order. `world2` ran out of NEAR for its own state (`LackBalanceForState`), which halted every settlement, ledger batches included. The fix had three parts:
+  - **Funding:** a faucet-funded helper (`cz-fund-1794234663.testnet`, from the official testnet faucet) funded `world2` with 5 NEAR ([`BCWcTs1P…`](https://testnet.nearblocks.io/txns/BCWcTs1PziionetjjnHdckJN56SAeRYwXf6Qq6CiXFEh)) and each actor with 1 NEAR for gas ([`BHECjZ84…`](https://testnet.nearblocks.io/txns/BHECjZ84bx5affd3bTQbtpS23AQ2yveJpZn6QvySfZCj), [`AMDYQbnW…`](https://testnet.nearblocks.io/txns/AMDYQbnW26zCdDYsn2wRfAvmbpcy1rndDJuRtetkjY8p), [`B3gQM6zg…`](https://testnet.nearblocks.io/txns/B3gQM6zg8BJVugS2qwsrAJCjTzwti8AnpsBWd13Vvv1o), [`4bLKwzTH…`](https://testnet.nearblocks.io/txns/4bLKwzTHkeJTh9xUV1ogx5zGmzD8n8B8BkpCEYqsRvMS)).
+  - **Contract:** v2.4 deletes a closed order's leftover proposals and caps an order at 16 proposals. Code hash `GUnt4fZNVRSvMJ9AJK5UHc6V8D9BnQbSX9AVXrbXS4u5`, deploy [`4bnLK3Wn…`](https://testnet.nearblocks.io/txns/4bnLK3Wnzjsatgt7wDLuhJuhX9Wtc9cKqtuh2EPjkE79), state unchanged.
+  - **Commanders:** they stopped re-posting orders nobody answers (see [INTENTS.md](INTENTS.md)).
+- **Halcyon's gas.** Halcyon was also topped up for gas ([`FkFvYKw4…`](https://testnet.nearblocks.io/txns/FkFvYKw4ZQwNPJwbMxfcrc1TXcUf5XMmsYtrMACiwhpz)).
+
 ## Repairing an out-of-order mirror
 
 A long RPC outage left 129 flow batches failed. The old worker then skipped past them, so later batches applied first and an earlier one became impossible ("insufficient balance").
@@ -180,7 +187,7 @@ v1 was one contract that held balances and game logic together. Everything below
 
 ```bash
 cd contracts-near/cz-assets   && cargo test && cargo near build non-reproducible-wasm   # 28 tests
-cd contracts-near/cz-world-v2 && cargo test && RUSTUP_TOOLCHAIN=stable cargo near build non-reproducible-wasm   # 57 tests
+cd contracts-near/cz-world-v2 && cargo test && RUSTUP_TOOLCHAIN=stable cargo near build non-reproducible-wasm   # 58 tests
 cd contracts-near/cz-world    && cargo test                                            # v1, 51 tests
 ```
 

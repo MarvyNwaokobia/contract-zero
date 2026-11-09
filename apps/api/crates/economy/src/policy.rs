@@ -83,6 +83,11 @@ pub fn commander(w: &World, id: &str) -> Vec<Decision> {
         if w.open_orders().any(|o| o.requester == id && o.resource == r && o.side == Side::Buy) {
             continue; // already asked; the choice happens when proposals arrive
         }
+        // Nobody answered the last request: give the market time to move before asking
+        // again (every order costs the merchants and the chain something), unless critical.
+        if have * 4 >= target && unanswered_recently(w, id, r, Side::Buy, BUY_RETRY_TICKS) {
+            continue;
+        }
         let want = target - have;
         let trigger = format!("{} below target", r.name());
         let inbound = w.inbound(id, r);
@@ -140,6 +145,10 @@ pub fn commander(w: &World, id: &str) -> Vec<Decision> {
         if keep == 0 || have - keep < MIN_SURPLUS_LOT || w.open_orders().any(|o| o.requester == id && o.resource == r && o.side == Side::Sell) {
             continue;
         }
+        // No bid met the floor last time: wait a day before offering again.
+        if unanswered_recently(w, id, r, Side::Sell, SELL_RETRY_TICKS) {
+            continue;
+        }
         let qty = have - keep;
         // Won't sell below production cost.
         let floor = qty * pricing::production_cost(r);
@@ -194,6 +203,14 @@ pub fn commander(w: &World, id: &str) -> Vec<Decision> {
 
 /// How long a commander's supply order stays open, in ticks.
 pub const ORDER_TTL_TICKS: u64 = 6;
+/// After an order lapses with nothing filled, wait this long before the same request.
+pub const BUY_RETRY_TICKS: u64 = 6;
+pub const SELL_RETRY_TICKS: u64 = 24;
+
+/// Did an order like this lapse unfilled within the last `ticks`?
+fn unanswered_recently(w: &World, id: &str, r: Resource, side: Side, ticks: u64) -> bool {
+    w.orders.values().any(|o| o.requester == id && o.resource == r && o.side == side && o.status == OrderStatus::Expired && o.filled == 0 && o.expires_at + ticks > w.tick)
+}
 /// How long a faction holds a grudge against a rival that paid for raids on it.
 /// The smallest surplus a faction bothers to sell.
 pub const MIN_SURPLUS_LOT: i64 = 10;

@@ -14,6 +14,7 @@
 //! The engine is pure and integer-only: the same seed and commands produce the same
 //! world on any machine. Time advances in ticks of one in-game hour.
 
+pub mod consequence;
 pub mod mission;
 pub mod orders;
 pub mod policy;

@@ -11,6 +11,7 @@
 
 use actix_web::{web, HttpRequest, HttpResponse};
 use chrono::{DateTime, Utc};
+use cz_economy::consequence;
 use cz_economy::mission::{self as field, FieldManifest, FieldRecord};
 use cz_economy::{Action, Caller, Event, RaidStatus, Resource};
 use serde::Deserialize;
@@ -119,8 +120,8 @@ pub async fn start(state: web::Data<AppState>, req: HttpRequest, body: web::Json
             }
             let tale = story::authored(&facts);
             sqlx::query(
-                "INSERT INTO mission_sessions (id, player, raid_id, min_secs, expires_at, story, site, field, gun, protocol, layout, field_state)
-                 VALUES ($1, $2, $3, $4, now() + make_interval(secs => $5), $6, $7, $8, $9, 2, $10, $11)",
+                "INSERT INTO mission_sessions (id, player, raid_id, min_secs, expires_at, story, site, field, gun, protocol, layout, field_state, consequence)
+                 VALUES ($1, $2, $3, $4, now() + make_interval(secs => $5), $6, $7, $8, $9, 2, $10, $11, $12)",
             )
             .bind(session)
             .bind(&body.player)
@@ -133,6 +134,7 @@ pub async fn start(state: web::Data<AppState>, req: HttpRequest, body: web::Json
             .bind(&body.gun)
             .bind(plan.site().layout.name())
             .bind(json!(protocol::FieldState::default()))
+            .bind(consequence::begin(w, &plan).map(|c| json!(c)))
             .execute(&mut *db)
             .await?;
             log_event(&mut *db, w.tick, &format!("player:{}", body.player), "mission", &json!({ "phase": "start", "session": session, "raid": raid, "plan": plan, "gun": body.gun, "events": summarize(&ev) })).await?;
@@ -276,17 +278,24 @@ pub async fn complete(state: web::Data<AppState>, req: HttpRequest, path: web::P
                 "settlement": settlement,
             });
             let mut result = result;
+            // Close the recorded consequence from the world as it stands now: what the
+            // target holds, and what the next such operation would face. A session that
+            // began before consequences were recorded has none, and says so.
+            let recorded: Option<Value> = sqlx::query_scalar("SELECT consequence FROM mission_sessions WHERE id = $1").bind(session).fetch_one(&mut *db).await?;
+            let closed = recorded.and_then(|v| serde_json::from_value::<consequence::Consequence>(v).ok()).map(|c| json!(consequence::settle(c, w)));
+            result["consequence"] = closed.clone().unwrap_or(Value::Null);
             let stored_story: Option<Value> = sqlx::query_scalar("SELECT story FROM mission_sessions WHERE id = $1").bind(session).fetch_one(&mut *db).await?;
             if let Some(f) = stored_story.as_ref().and_then(|s| serde_json::from_value::<story::Facts>(s["facts"].clone()).ok()) {
                 let after = w.memory.get(&plan.target).and_then(|m| m.players.get(&player));
                 result["debrief"] = json!(story::debrief(&f, &result, after));
                 result["codename"] = stored_story.as_ref().map(|s| s["story"]["codename"].clone()).unwrap_or(Value::Null);
             }
-            sqlx::query("UPDATE mission_sessions SET completed_at = now(), outcome = $2, result = $3, record = $4 WHERE id = $1")
+            sqlx::query("UPDATE mission_sessions SET completed_at = now(), outcome = $2, result = $3, record = $4, consequence = COALESCE($5, consequence) WHERE id = $1")
                 .bind(session)
                 .bind(outcome)
                 .bind(&result)
                 .bind(body.record.as_ref().map(|r| json!(r)))
+                .bind(&closed)
                 .execute(&mut *db)
                 .await?;
             log_event(&mut *db, w.tick, &format!("player:{player}"), "mission", &json!({ "phase": "complete", "session": session, "result": result })).await?;
@@ -438,6 +447,54 @@ pub async fn story(state: web::Data<AppState>, req: HttpRequest, path: web::Path
         }
     }
     HttpResponse::Ok().json(json!({ "story": tale, "facts": facts }))
+}
+
+/// What the target faction decided after the operation settled: its own logged agent
+/// decisions from later ticks, exactly as the War Room records them. Empty until the
+/// commander's next turn; this never predicts one.
+pub async fn aftermath(state: web::Data<AppState>, req: HttpRequest, path: web::Path<Uuid>) -> HttpResponse {
+    let who = match crate::handlers::auth::player(&state, &req).await {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
+    let session = path.into_inner();
+    let db = state.world.db();
+    let row: Option<(String, Option<Value>, Option<DateTime<Utc>>)> = match sqlx::query_as("SELECT player, consequence, completed_at FROM mission_sessions WHERE id = $1").bind(session).fetch_optional(db).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("aftermath lookup failed: {e}");
+            return HttpResponse::InternalServerError().json(json!({ "error": "storage error" }));
+        }
+    };
+    let Some((player, c, completed)) = row else { return HttpResponse::NotFound().json(json!({ "error": "unknown session" })) };
+    if player != who.account {
+        return HttpResponse::Forbidden().json(json!({ "error": "session belongs to another player" }));
+    }
+    let Some(c) = c.and_then(|v| serde_json::from_value::<consequence::Consequence>(v).ok()) else {
+        return HttpResponse::Ok().json(json!({ "recorded": false, "decisions": [] }));
+    };
+    let Some(settled) = c.settled_tick.filter(|_| completed.is_some()) else {
+        return HttpResponse::Ok().json(json!({ "recorded": true, "settled": false, "decisions": [] }));
+    };
+    let rows: Result<Vec<(i64, i64, Value)>, sqlx::Error> = sqlx::query_as(
+        "SELECT seq, tick, payload FROM world_events
+         WHERE kind = 'agent_decision' AND source = $1 AND tick > $2
+         ORDER BY seq ASC LIMIT 12",
+    )
+    .bind(&c.target)
+    .bind(settled as i64)
+    .fetch_all(db)
+    .await;
+    match rows {
+        Ok(rows) => {
+            let decisions: Vec<Value> = rows.into_iter().map(|(seq, tick, p)| json!({ "seq": seq, "tick": tick, "payload": p })).collect();
+            HttpResponse::Ok().json(json!({ "recorded": true, "settled": true, "target": c.target, "settled_tick": settled, "decisions": decisions }))
+        }
+        Err(e) => {
+            tracing::error!("aftermath events failed: {e}");
+            HttpResponse::InternalServerError().json(json!({ "error": "storage error" }))
+        }
+    }
 }
 
 /// Fail raids whose session timed out, so the depot is not held forever.

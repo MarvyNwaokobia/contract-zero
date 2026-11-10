@@ -15,5 +15,8 @@
   "engines": {
     "node": ">=22.0.0"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "eslint": "^9.39.5",
+    "eslint-plugin-react-hooks": "^5.2.0"
+  }
 }

@@ -15,7 +15,7 @@ Baseline: 515 web tests passing; production build was **failing at HEAD** on a t
 | Armory | `components/armory/*`, `inspect/*` | Turntable and inspector exist. |
 | Exchange / Supply Orders | `app/exchange`, `components/market/*` | Functional; procurement is a numbered text list. |
 | War Room | `app/war-room/page.tsx` (411 lines) | Hard-coded SVG map (`SITES` coordinates, fixed `ROUTES`), actor cards with raw stock bars, causal timeline, simulation. Convoy dots animate from the server's real `progress`. |
-| Audio | `engine/audio/AudioDirector.ts`, `FpsAudio.ts`, `MusicLayers.ts`, `spatial.ts` | Director, layered music and spatial helpers already exist; channel set, per-site beds and radio are **not** audited yet. |
+| Audio | `engine/audio/FpsAudio.ts` (live), `MusicLayers.ts`, `spatial.ts`; `AudioDirector.ts` is dead code | Fully synthesised, six buses, adaptive 0-3 score. See the Audio audit below for gaps (ambience keyed to time of day not site, no voice budget, no recorded voice). |
 | Settings / a11y | `lib/settings.ts`, `app/settings`, `docs/contract-zero/ACCESSIBILITY.md` | Infrastructure exists, including key rebinding and toggles. |
 | NEAR settlement | `apps/api/src/services/settlement.rs`, `contracts-near/*` | Not touched by this work. |
 
@@ -38,6 +38,46 @@ Reviewed from `docs/media/*.jpg` and `docs/contract-zero/demo/report-2026-11-09.
 | Blacksite at night has good mood (NVG, corridor light) but rooms are boxes with little set dressing | `fight-blacksite-night.jpg` | Phase 6 |
 | In-fight HUD: control hints top-right are tiny and low contrast; weapon name overlaps the NVG/light chips bottom-right | both fight shots | Phase 5/10 |
 | The fallback radio line "Contract's live. The cargo is in the yard... Load it, walk it out" is shown on sabotage and recovery missions; `vanguard-*` lines name Vanguard regardless of the site's owner | `fight-*.jpg`; `engine/story/presence.ts:71` | Phase 7 (radio from real state) |
+
+### Audio audit
+
+Read in full: `engine/audio/{FpsAudio,AudioDirector,MusicLayers,spatial}.ts`, the call sites in `ContractZeroScene.tsx`, `lib/settings.ts`, `scripts/generate-{sfx,vo}.mjs`, `CREDITS.md`. Nothing was run or listened to; this is a code audit.
+
+**Architecture today.** `FpsAudio` is the only live audio system: one WebAudio graph created on first user gesture, six buses (gun, impact, ui, ambience, voice, music) into a master and a limiter. Almost everything is synthesised at runtime; the only files are 4 generated mp3s (3 rifle shots, 1 wall impact). `MusicLayers` is a synthesised 3-layer D-minor score (drone, pulse, plucked motif) driven by an intensity 0-3. `spatialize()` gives pan, distance gain and a "behind you" low-pass.
+
+**Brief vs reality**
+
+| Requirement | Today |
+|---|---|
+| Channels: master, music, environment, combat, radio, UI, interactions | Settings has 6 sliders: master, music, **effects** (gun and impacts together), voice, ambience, ui. No separate combat vs interactions; the radio static sits on the voice bus, but recorded voice does not (see below). |
+| Per-site soundscapes | **Wrong key.** Live contracts pick the ambience bed from `mission.zone = PHASE_THEME[phase]`, i.e. time of day (day=DUSTLINE, dusk=REDYARD, night=BLACKSITE), not the site. A night raid on Dustline plays the Blacksite 44 Hz drone; Cinder Yard by day plays the Dustline bed. Only the refinery machinery follows the site (`mission.level === 'cinder_yard'`). |
+| Positional ambient sources | None. The bed is one global brown-noise loop plus a drone; machinery is global, not placed at tanks. Steam vents pan randomly, not at vent positions. |
+| Occlusion and indoor/outdoor | None. `spatialize()` has distance and behind-you only. No reverb or indoor/outdoor difference for any weapon. |
+| Distinct weapon signatures | Partly: one rifle sample reshaped per gun (pitch, tone, sub) by `shotShape()`. |
+| Distant gunfire, ricochets, near-miss | Not present. Enemy shots are the same rifle sample spatialised and dropped below 0.001 gain; no distant variant. |
+| Impacts | Flesh (synth) and wall (sample) only. No per-material set. |
+| Reload, damage, heartbeat, explosions, alarm, extraction | Present as synth (`reloadStart/Done/End`, `hurt`, `heartbeat`, `explosion`, `alarm`). Alarm is a fixed pattern, not an escalation. Extraction beeps exist. |
+| Radio events from game state | `PRESENCE_LINES` (authored) plus per-mission lines from the server. Triggers cover start, breach, cargo, charge, detonation, extraction, low HP. Missing: low ammunition, reinforcements, faction shortage, merchant procurement, retaliation. Fallback lines are raid-worded and name Vanguard regardless of the site owner (see screenshot review). |
+| Recorded voice | **Not shipped.** `vo()` looks for `/vo/{id}.mp3` but `public/vo/` does not exist, so every line is radio static plus subtitle. `dyn-` lines are never recorded by design. `scripts/generate-vo.mjs` needs an ElevenLabs key and has no voice for Ashen or Halcyon. |
+| Subtitles | Present (speaker names, colours, held for the recording length when known). |
+| Radio over combat | The line ducks only the ambience bus (0.8 for 1.8 s). Music and gunfire are not ducked for radio. |
+| Adaptive music states | One state machine: intensity 0-3 from enemy AI state. No Hub, preparation, results, War Table or Exchange music: `FpsAudio` exists only in the fight scene and the Settings preview. Extraction and detection have no state of their own. One fixed loop, no per-site or per-faction variation. |
+| Priority, cooldowns, voice concurrency | **None.** Every call builds new nodes immediately; there is no cap on simultaneous voices. Radio is serialised by a queue in the scene. Heavy fire plus enemies can allocate many nodes per frame. |
+| Pause and resume | Muted when the tab is hidden if the player chose it (gain to 0); the context is never suspended. In-game pause menu does not suspend audio (to verify at runtime). |
+| Autoplay | Correct: the graph is created on the first gesture and the story is held until then. |
+| Disposal | `dispose()` stops music and closes the context. `stop()` of the ambience loop and drone nodes is not called explicitly (closing the context frees them). Machinery interval is cleared on unmount. |
+| Licensing | `CREDITS.md`: shots and impact are original, generated by `generate-sfx.mjs`; everything else is runtime synthesis. **Stale comment** in `FpsAudio.ts` still says the shots are Pixabay recordings. |
+
+**Dead code.** `AudioDirector.ts` (596 lines) is not used by anything but its own export. It is the earlier melee game's director (blade throw, catch, recall whistle, round clear). It also still describes itself as `CLONE_PLAN.md slice 2`. Candidates for deletion once its useful ideas (priority, bus hierarchy, `gap()` ducking) are folded into the new system.
+
+**Tests.** 5 tests on `FpsAudio` (shot shaping, zone config) and 11 on spatialisation math. Nothing exercises the graph, buses, mix or music.
+
+**What this means for Phase 7**
+1. Fix the zone key first: choose the bed from the site layout (`dustline_depot`, `blacksite`, `cinder_yard`) and let time of day only modulate it. Small and testable.
+2. Introduce a thin `AudioBus` / voice-budget layer (priority, per-sound cooldown, max concurrent voices, radio ducking of music and combat) inside `FpsAudio` rather than a second system; delete `AudioDirector`.
+3. Split the `effects` slider into combat and interactions only if the new buses need it; keep saved settings compatible (`lib/settings.ts` normalises on load).
+4. Radio: add triggers fed by real state (low ammo from the HUD count, reinforcement from the sim event, faction shortage from the presenter) and make fallbacks speak the real target and operation type.
+5. Music for non-fight screens needs a lightweight shared context (a provider mounted in the app layout), because audio currently lives only inside the scene.
 
 ### The authoritative rules the UI may speak about
 
@@ -76,7 +116,7 @@ Character names and portraits are **not yet created**. When added they must be r
 
 | Phase | Status |
 |---|---|
-| 0. Audit | Done (this document), except the audio engine deep-dive. |
+| 0. Audit | Done (this document). |
 | 1. Creative direction | Written (above). Faction insignia, tokens and portraits **not built**. |
 | 2A. Plain-language presenter | **Built**: `lib/presenter/{rules,economy}.ts`, 14 tests, vectors from the Rust tests. |
 | 2B. Faction readiness | **Built** in the War Room (`components/world/Readiness.tsx`): Operational / Under Pressure / Supply Critical / Rebuilding from real stock, with an "Exact figures" disclosure. "Rebuilding" requires a real open buy order or in-transit convoy. |

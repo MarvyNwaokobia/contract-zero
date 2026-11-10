@@ -23,7 +23,7 @@ import { linesFor, SPEAKER_META, type PresenceLine, type PresenceTrigger, type S
 import { GUN_FEEL } from '../combat/GunFeel';
 import { STARTER_GUN_ID, getGun, type GunId } from '../combat/GunStats';
 import type { AmmoId, AttachmentId, AttachmentSlot } from '../combat/Loadout';
-import { FpsAudio } from '../audio';
+import { FpsAudio, ambienceKey } from '../audio';
 import { computeEdgeArrow } from '../verb/threatArrow';
 import { useGunPrototypes, ALL_GUN_IDS, GUN_LENGTH } from './gunModels';
 import { OperatorRig, type OperatorApi } from './OperatorRig';
@@ -1459,7 +1459,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
 
   // Load this op's ambience bed (retunes the room tone + zone drone; the mission
   // remounts per op, so this fires whenever the zone changes).
-  useEffect(() => { audio.setZone(mission.zone); }, [audio, mission.zone]);
+  useEffect(() => { audio.setZone(ambienceKey(mission.zone, mission.level)); }, [audio, mission.zone, mission.level]);
   // The refinery runs while you fight in it.
   useEffect(() => { audio.setMachinery(mission.level === 'cinder_yard'); return () => audio.setMachinery(false); }, [audio, mission.level]);
 

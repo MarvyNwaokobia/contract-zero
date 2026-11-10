@@ -2,6 +2,7 @@ import type { Speaker } from '../story/presence';
 import { spatialize } from './spatial';
 import type { GunShotAudio } from '../combat/GunFeel';
 import { MusicLayers } from './MusicLayers';
+import type { LevelId } from '../fps/levels';
 
 /**
  * @module audio/FpsAudio
@@ -54,12 +55,26 @@ export function zoneAmbience(zone: string): { lp: number; vol: number; drone?: n
   return ZONE_AMB[zone] ?? ZONE_AMB.DUSTLINE;
 }
 
+/**
+ * Which ambience bed a mission plays. A contract is bound to a site, so the site's
+ * level decides it; `zone` on a contract is only a time-of-day theme (day, dusk and
+ * night map to DUSTLINE, REDYARD and BLACKSITE) and must not pick the room tone.
+ * Authored missions (campaign, survival) carry no level and keep their own zone.
+ */
+export function ambienceKey(zone: string, level?: LevelId): string {
+  if (level === 'blacksite') return 'BLACKSITE';
+  if (level === 'cinder_yard') return 'CINDER_YARD';
+  if (level === 'dustline_depot') return 'DUSTLINE';
+  return zone;
+}
+
 // Per-zone ambience bed: how dark the room tone is (lowpass), how loud, and an
 // optional low drone — the Rift gets an ominous sub hum, Survival a tense one.
 const ZONE_AMB: Record<string, { lp: number; vol: number; drone?: number }> = {
   DUSTLINE: { lp: 520, vol: 0.05 },
   'REDYARD': { lp: 360, vol: 0.045 },        // colder, quieter, institutional
   'BLACKSITE': { lp: 240, vol: 0.06, drone: 44 },     // the dark place hums under you
+  CINDER_YARD: { lp: 300, vol: 0.055, drone: 55 },   // a refinery's low rumble; the machinery bed sits on top
   SURVIVAL: { lp: 620, vol: 0.055, drone: 70 },      // a taut arena bed
 };
 

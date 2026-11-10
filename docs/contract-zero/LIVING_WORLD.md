@@ -50,7 +50,7 @@ Read in full: `engine/audio/{FpsAudio,AudioDirector,MusicLayers,spatial}.ts`, th
 | Requirement | Today |
 |---|---|
 | Channels: master, music, environment, combat, radio, UI, interactions | Settings has 6 sliders: master, music, **effects** (gun and impacts together), voice, ambience, ui. No separate combat vs interactions; the radio static sits on the voice bus, but recorded voice does not (see below). |
-| Per-site soundscapes | **Wrong key.** Live contracts pick the ambience bed from `mission.zone = PHASE_THEME[phase]`, i.e. time of day (day=DUSTLINE, dusk=REDYARD, night=BLACKSITE), not the site. A night raid on Dustline plays the Blacksite 44 Hz drone; Cinder Yard by day plays the Dustline bed. Only the refinery machinery follows the site (`mission.level === 'cinder_yard'`). |
+| Per-site soundscapes | **Fixed (`ambienceKey`).** Was: wrong key. Live contracts pick the ambience bed from `mission.zone = PHASE_THEME[phase]`, i.e. time of day (day=DUSTLINE, dusk=REDYARD, night=BLACKSITE), not the site. A night raid on Dustline plays the Blacksite 44 Hz drone; Cinder Yard by day plays the Dustline bed. Only the refinery machinery follows the site (`mission.level === 'cinder_yard'`). |
 | Positional ambient sources | None. The bed is one global brown-noise loop plus a drone; machinery is global, not placed at tanks. Steam vents pan randomly, not at vent positions. |
 | Occlusion and indoor/outdoor | None. `spatialize()` has distance and behind-you only. No reverb or indoor/outdoor difference for any weapon. |
 | Distinct weapon signatures | Partly: one rifle sample reshaped per gun (pitch, tone, sub) by `shotShape()`. |
@@ -73,7 +73,7 @@ Read in full: `engine/audio/{FpsAudio,AudioDirector,MusicLayers,spatial}.ts`, th
 **Tests.** 5 tests on `FpsAudio` (shot shaping, zone config) and 11 on spatialisation math. Nothing exercises the graph, buses, mix or music.
 
 **What this means for Phase 7**
-1. Fix the zone key first: choose the bed from the site layout (`dustline_depot`, `blacksite`, `cinder_yard`) and let time of day only modulate it. Small and testable.
+1. ~~Fix the zone key~~ Done: `ambienceKey(zone, level)` picks the bed from the site level; Cinder Yard has its own `CINDER_YARD` bed. Time of day does not yet modulate it.
 2. Introduce a thin `AudioBus` / voice-budget layer (priority, per-sound cooldown, max concurrent voices, radio ducking of music and combat) inside `FpsAudio` rather than a second system; delete `AudioDirector`.
 3. Split the `effects` slider into combat and interactions only if the new buses need it; keep saved settings compatible (`lib/settings.ts` normalises on load).
 4. Radio: add triggers fed by real state (low ammo from the HUD count, reinforcement from the sim event, faction shortage from the presenter) and make fallbacks speak the real target and operation type.

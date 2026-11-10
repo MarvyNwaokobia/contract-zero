@@ -5,6 +5,7 @@
 // signed in their own wallet (or within a quick-trade budget): place, accept, cancel.
 // The server only applies a step to the game after reading it back from the chain.
 
+import { MerchantSummary } from '@/components/world/Readiness'
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type MarketMerchant, type MarketOrder, type MarketView, type OrderProposal, type ResourceName } from '@/lib/api'
@@ -37,6 +38,7 @@ function PartnerCard({ x }: { x: MarketMerchant }) {
         <div className="font-mono text-xs text-steel">{x.margin_bp / 100}% margin</div>
       </div>
       <div className="mt-0.5 text-xs text-dim">{x.instant_market ? 'Also runs the instant market. ' : ''}Commits up to {x.max_commit_bp / 100}% of a shelf per order · never below {x.min_margin_bp / 100}% over cost</div>
+      <div className="mt-2"><MerchantSummary m={x} /></div>
       <table className="mt-2 w-full text-sm">
         <thead><tr className="text-left text-[11px] uppercase tracking-wider text-dim"><th className="font-normal">Shelf</th><th className="font-normal">Stock</th><th className="font-normal">Sells at</th><th className="font-normal">Buys at</th></tr></thead>
         <tbody>

@@ -3,7 +3,8 @@
 //
 //   apps/api/crates/economy/src/mission.rs  (guards, arming, reinforcements, depot staging)
 //   apps/api/crates/economy/src/lib.rs      (LOGISTICS_FUEL, DEFENSE_COST)
-//   apps/api/crates/economy/src/policy.rs   (spendable = credits above the reserve)
+//   apps/api/crates/economy/src/policy.rs   (spendable = credits above the reserve; merchant_proposals)
+//   apps/api/crates/economy/src/pricing.rs  (scarcity from stock against target)
 //
 // If the engine changes one of these, the pinned vectors in __tests__/rules.test.ts
 // (copied from the Rust tests) fail and this file must follow. Where the server already
@@ -46,3 +47,20 @@ export const ammoTarget = (ammoRequirement: number, defense: number) =>
 
 /** Credits a faction may spend: anything above its reserve (policy.rs spendable). */
 export const spendable = (credits: number, reserve: number) => Math.max(0, credits - reserve)
+
+// ── merchants ──
+
+const BP = 10_000
+export const SCARCITY_MIN_BP = 5_000
+export const SCARCITY_MAX_BP = 30_000
+
+/** Units a merchant will commit to one supply order it answers: its per-order share of the
+ *  shelf (policy.rs merchant_proposals, buy side). */
+export const merchantCommit = (stock: number, maxCommitBp: number) => Math.floor((stock * maxCommitBp) / BP)
+
+/** Shelf room it will fill by buying: up to twice its target (policy.rs, sell side). */
+export const merchantRoom = (target: number, stock: number) => Math.max(0, target * 2 - stock)
+
+/** How far stock below (or above) target moves its prices, in basis points (pricing.rs). */
+export const scarcityBp = (stock: number, target: number) =>
+  Math.min(SCARCITY_MAX_BP, Math.max(SCARCITY_MIN_BP, Math.floor((BP * Math.max(1, target)) / Math.max(1, stock))))

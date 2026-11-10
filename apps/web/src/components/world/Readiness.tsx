@@ -4,7 +4,8 @@
 // Everything shown is computed by lib/presenter from the faction's real holdings.
 
 import { useQuery } from '@tanstack/react-query'
-import { api, type WarActor, type MarketOrder, type WarConvoy } from '@/lib/api'
+import { api, type MarketMerchant, type WarActor, type MarketOrder, type WarConvoy } from '@/lib/api'
+import { describeMerchant, MERCHANT_LABEL, type MerchantState } from '@/lib/presenter/merchant'
 import { describeFaction, READINESS_LABEL, type Inbound, type Readiness, type Severity } from '@/lib/presenter/economy'
 
 const BADGE: Record<Readiness, string> = {
@@ -95,4 +96,43 @@ export function useReadinessData(enabled = true) {
     actor: (id: string) => actors.find((a) => a.id === id),
     inbound: (id: string) => inboundFor(id, orders, convoys),
   }
+}
+
+const MERCHANT_BADGE: Record<MerchantState, string> = {
+  trading: 'border-friendly/60 bg-friendly/10 text-friendly',
+  stretched: 'border-amber/60 bg-amber/10 text-amber-hi',
+  constrained: 'border-hostile/70 bg-hostile/10 text-hostile',
+  insolvent: 'border-hostile/70 bg-hostile/10 text-hostile',
+}
+
+/** A merchant's trading position: what it can still supply or buy, and why. */
+export function MerchantSummary({ m }: { m: MarketMerchant }) {
+  const p = describeMerchant(m)
+  return (
+    <div data-testid={`merchant-state-${m.id}`} className="grid gap-2">
+      <div className="flex items-center gap-2">
+        <span className={`border px-2 py-0.5 font-display text-[11px] font-bold uppercase tracking-[0.18em] ${MERCHANT_BADGE[p.state]}`}>{MERCHANT_LABEL[p.state]}</span>
+        {p.state === 'trading' && <span className="text-xs text-muted">{p.summary}</span>}
+      </div>
+      {p.statements.length > 0 && (
+        <ul className="grid gap-1">
+          {p.statements.map((s) => (
+            <li key={`${s.topic}-${s.headline}`} className="flex items-start gap-2 text-xs">
+              <span className={`mt-1 h-2 w-2 shrink-0 ${DOT[s.severity]}`} aria-label={SEV_WORD[s.severity]} />
+              <span><span className="font-display font-bold tracking-wider text-fog">{s.headline}</span> <span className="text-muted">· {s.effect}</span></span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <details className="text-xs text-muted">
+        <summary className="cursor-pointer text-steel hover:text-fog">Exact figures</summary>
+        <dl className="mt-1 grid gap-x-4 gap-y-0.5 sm:grid-cols-2">
+          {(['ammo', 'med', 'fuel'] as const).map((r) => (
+            <div key={r} className="flex justify-between gap-2 border-b border-line/50 py-0.5"><dt>{r} shelf</dt><dd className="cz-num text-fog">{m.shelves[r].stock}/{m.shelves[r].target}</dd></div>
+          ))}
+          <div className="flex justify-between gap-2 border-b border-line/50 py-0.5"><dt>Credits / reserve</dt><dd className="cz-num text-fog">{m.credits.toLocaleString()} / {m.credit_reserve.toLocaleString()}</dd></div>
+        </dl>
+      </details>
+    </div>
+  )
 }

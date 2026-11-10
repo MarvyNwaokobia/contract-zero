@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { WarActor } from '@/lib/api'
-import { ammoTarget, armGuards, plannedGuards, reinforcements, spendable } from '../rules'
+import { ammoTarget, armGuards, merchantCommit, merchantRoom, plannedGuards, reinforcements, scarcityBp, spendable } from '../rules'
 import { ammoStatement, describeFaction, describeGuardPlan, fuelStatement, medStatement } from '../economy'
 
 // Vectors copied from apps/api/crates/economy/src/mission.rs tests.
@@ -24,6 +24,17 @@ describe('mirrored engine rules', () => {
   it('ammo target is two days of need plus half a rifle-load per planned guard', () => {
     expect(ammoTarget(100, 4)).toBe(100 + (8 * 13) / 2) // 152
     expect(ammoTarget(88, 1)).toBe(88 + 28)             // 7 guards -> 28
+  })
+  it('mirrors merchant commit, room and scarcity', () => {
+    expect(merchantCommit(100, 8_000)).toBe(80) // Vex-style 80% of the shelf
+    expect(merchantCommit(50, 6_000)).toBe(30)  // Halcyon's 60%
+    expect(merchantCommit(1, 6_000)).toBe(0)
+    expect(merchantRoom(80, 30)).toBe(130)
+    expect(merchantRoom(80, 200)).toBe(0)
+    expect(scarcityBp(80, 80)).toBe(10_000)
+    expect(scarcityBp(1, 80)).toBe(30_000) // clamped at ×3.0
+    expect(scarcityBp(400, 80)).toBe(5_000) // clamped at ×0.5
+    expect(scarcityBp(0, 80)).toBe(30_000)
   })
   it('spendable is credits above the reserve', () => {
     expect(spendable(500, 300)).toBe(200)

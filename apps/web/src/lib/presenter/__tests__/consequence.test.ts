@@ -63,6 +63,22 @@ describe('consequence story', () => {
     const c = raid({ next: { available: false, reason: 'Vanguard holds less than 20 fuel, so it cannot stage a depot', manifest: 0, defense: 2, guards: null } })
     expect(describeConsequence(res, c).steps[4].lines[0]).toContain('cannot stage a depot')
   })
+  it('separates what the operation took from what the clock did (found live: 101 → 83 for 20 taken)', () => {
+    const c = raid({ before: snap(101, { tick: 0 }), after: snap(83, { tick: 3 }), settled_tick: 3 })
+    const line = describeConsequence({ ...res, extracted_units: 20 }, c).steps[2].lines[0]
+    expect(line).toContain('101 → 83 (−18)')
+    expect(line).toContain('The operation took 20')
+    expect(line).toContain('over the 3 in-game hours it lasted added 2')
+  })
+  it('does not blame the clock when no game time passed', () => {
+    const c = raid({ before: snap(100), after: snap(40) })
+    expect(describeConsequence(res, c).steps[2].lines[0]).not.toContain('in-game hours')
+  })
+  it('a change with no operation involved is attributed to production and consumption', () => {
+    const c = raid({ before: snap(100, { tick: 0 }), after: snap(104, { tick: 2 }), settled_tick: 2 })
+    const line = describeConsequence({ ...res, outcome: 'killed', extracted_units: 0, bounty: 0 }, c).steps[2].lines[0]
+    expect(line).toContain('not the operation')
+  })
   it('copes with a snapshot recorded without a requirement', () => {
     const old = (s: FactionSnapshot) => ({ ...s, requirement: undefined }) as unknown as FactionSnapshot
     const s = describeConsequence(res, raid({ before: old(snap(100)), after: old(snap(40)) }))

@@ -45,11 +45,32 @@ function delta(b: FactionSnapshot, a: FactionSnapshot) {
   return (r: ResourceName) => a.holdings[r] - b.holdings[r]
 }
 
-function lost(c: Consequence): Step {
+/** Units the operation itself removed from the target, by kind. Raids take, sabotage
+ *  destroys, and a recovery takes back what the target had seized: all leave the target. */
+function removedByOp(r: Pick<MissionResult, 'outcome' | 'extracted_units'>): number {
+  return r.outcome === 'extracted' ? r.extracted_units : 0
+}
+
+function lost(c: Consequence, r: Pick<MissionResult, 'outcome' | 'extracted_units'>): Step {
   if (!c.after) return { key: 'lost', title: `What ${c.before.name} lost`, state: 'pending', lines: ['The operation has not settled yet.'] }
   const d = delta(c.before, c.after)
   const lines: string[] = []
-  for (const r of RES) if (d(r) !== 0) lines.push(`${NAME[r][0].toUpperCase()}${NAME[r].slice(1)}: ${n(c.before.holdings[r])} → ${n(c.after.holdings[r])} (${d(r) > 0 ? '+' : '−'}${n(Math.abs(d(r)))}).`)
+  // Game time passes while the player is in the field, and the world keeps producing and
+  // consuming. Say how much of the change was the operation and how much was the clock.
+  const hours = c.settled_tick != null ? Math.max(0, c.settled_tick - c.before.tick) : 0
+  const took = removedByOp(r)
+  for (const res of RES) {
+    if (d(res) === 0) continue
+    let line = `${NAME[res][0].toUpperCase()}${NAME[res].slice(1)}: ${n(c.before.holdings[res])} → ${n(c.after.holdings[res])} (${d(res) > 0 ? '+' : '−'}${n(Math.abs(d(res)))}).`
+    const own = res === c.resource ? took : 0
+    const residual = d(res) + own
+    if (hours > 0 && residual !== 0) {
+      line += own > 0
+        ? ` The operation took ${n(own)}; production and consumption over the ${hours} in-game hours it lasted ${residual > 0 ? 'added' : 'removed'} ${n(Math.abs(residual))}.`
+        : ` That is production and consumption over the ${hours} in-game hours it lasted, not the operation.`
+    }
+    lines.push(line)
+  }
   const credits = c.after.holdings.credits - c.before.holdings.credits
   if (credits !== 0) lines.push(`Credits: ${n(c.before.holdings.credits)} → ${n(c.after.holdings.credits)}.`)
   for (const x of c.after.disrupted) {
@@ -129,5 +150,5 @@ export function describeConsequence(
       steps: [first, { key: 'moved', title: 'What the world recorded', state: 'none', lines: ['No before-and-after snapshot was recorded for this operation (it began before recording was added).'] }],
     }
   }
-  return { recorded: true, steps: [first, moved(c, r), lost(c), decided(c, aftermath), next(c)] }
+  return { recorded: true, steps: [first, moved(c, r), lost(c, r), decided(c, aftermath), next(c)] }
 }

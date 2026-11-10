@@ -396,3 +396,72 @@ pub async fn procurement(state: web::Data<AppState>, q: web::Query<ProcurementQu
         .collect();
     HttpResponse::Ok().json(json!({ "chains": chains }))
 }
+
+#[derive(Deserialize)]
+pub struct OperationsQuery {
+    pub limit: Option<i64>,
+}
+
+/// GET /warroom/operations: completed player operations, newest first, each with the
+/// recorded before and after of its target (`cz_economy::consequence`), the target's own
+/// logged decisions since it settled, and the NEAR settlement status of the payout.
+///
+/// Only operations that recorded a consequence are listed; older sessions have no
+/// snapshot and are left out rather than reconstructed. A settlement that is not
+/// confirmed is reported with its real status.
+pub async fn operations(state: web::Data<AppState>, q: web::Query<OperationsQuery>) -> HttpResponse {
+    let limit = q.limit.unwrap_or(10).clamp(1, 30);
+    let db = state.world.db();
+    let rows: Vec<(String, chrono::DateTime<chrono::Utc>, Value, Value)> = match sqlx::query_as(
+        "SELECT player, completed_at, result, consequence FROM mission_sessions
+         WHERE completed_at IS NOT NULL AND consequence IS NOT NULL AND result IS NOT NULL
+         ORDER BY completed_at DESC LIMIT $1",
+    )
+    .bind(limit)
+    .fetch_all(db)
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("warroom operations failed: {e}");
+            return HttpResponse::InternalServerError().json(json!({ "error": "storage error" }));
+        }
+    };
+    let mut out = Vec::with_capacity(rows.len());
+    for (player, completed_at, result, consequence) in rows {
+        let c: Option<cz_economy::consequence::Consequence> = serde_json::from_value(consequence.clone()).ok();
+        let decisions: Vec<Value> = match c.as_ref().and_then(|c| c.settled_tick.map(|t| (c.target.clone(), t))) {
+            Some((target, settled)) => sqlx::query_as::<_, (i64, i64, Value)>(
+                "SELECT seq, tick, payload FROM world_events WHERE kind = 'agent_decision' AND source = $1 AND tick > $2 ORDER BY seq ASC LIMIT 8",
+            )
+            .bind(target)
+            .bind(settled as i64)
+            .fetch_all(db)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(seq, tick, payload)| json!({ "seq": seq, "tick": tick, "payload": payload }))
+            .collect(),
+            None => vec![],
+        };
+        let settlement = match result["settlement"]["op_id"].as_str() {
+            Some(op) => sqlx::query_as::<_, (String, String, Vec<String>, Option<String>)>(
+                "SELECT kind, status, tx_hashes, error FROM settlements WHERE op_id = $1 ORDER BY id DESC LIMIT 1",
+            )
+            .bind(op)
+            .fetch_optional(db)
+            .await
+            .ok()
+            .flatten()
+            .map(|(kind, status, hashes, error)| settlement_json(op, &kind, &status, &hashes, &error)),
+            None => None,
+        };
+        out.push(json!({
+            "player": player, "completed_at": completed_at,
+            "outcome": result["outcome"], "reason": result["reason"], "kind": result["kind"], "resource": result["resource"],
+            "target": result["target"], "extracted_units": result["extracted_units"], "bounty": result["bounty"],
+            "consequence": consequence, "decisions": decisions, "settlement": settlement,
+        }));
+    }
+    HttpResponse::Ok().json(json!({ "operations": out }))
+}

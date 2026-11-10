@@ -1,7 +1,7 @@
 // VO generation pipeline.
 //
 // Reads the presence-line manifest and synthesizes one mp3 per line into
-// public/vo/{id}.mp3 via ElevenLabs. AudioDirector.playVo() picks the files
+// public/vo/{id}.mp3 via ElevenLabs. FpsAudio.vo() picks the files
 // up automatically — no code changes needed after generating.
 //
 // Usage:

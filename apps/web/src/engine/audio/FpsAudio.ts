@@ -9,8 +9,9 @@ import type { LevelId } from '../fps/levels';
  * @description The tactical audio director for CONTRACT ZERO.
  *
  * Ready-or-Not sells itself through sound, so this is the first full-quality
- * system. Self-contained WebAudio synthesis — no samples to download, which
- * keeps it instant on mobile — routed through a small bus + limiter graph so
+ * system. Self-contained WebAudio synthesis — the only downloads are four tiny
+ * generated mp3s (three rifle shots, one wall impact), so it stays instant on
+ * mobile — routed through a small bus + limiter graph so
  * the mix has a ducking hierarchy instead of everything hitting the speakers
  * flat:
  *
@@ -28,9 +29,10 @@ import type { LevelId } from '../fps/levels';
 
 type Ctx = AudioContext;
 
-// Real recorded gunshots (Pixabay, royalty-free) — the synth read like a punch,
-// so the gun is real audio now. Trimmed dry + loudness-matched; one is picked at
-// random per shot with a little pitch wobble so rapid fire isn't a copy-paste.
+// Gunshot and wall-impact samples: original, synthesised offline by
+// scripts/generate-sfx.mjs (see CREDITS.md), not recordings. The runtime synth read
+// like a punch, so the gun plays these buffers. One is picked at random per shot
+// with a little pitch wobble so rapid fire isn't a copy-paste.
 const SAMPLE_BASE = '/sounds/fps/';
 const RIFLE_FILES = ['rifle_1.mp3', 'rifle_2.mp3', 'rifle_3.mp3'];
 const WALL_FILE = 'impact_wall.mp3';

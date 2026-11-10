@@ -1,5 +1,5 @@
 /**
- * Pure spatialization math for the AudioDirector (CLONE_PLAN.md slice 2).
+ * Pure spatialization math for FpsAudio.
  *
  * Stereo can't do true behind-you audio, so the trick every stereo game uses:
  * pan carries left/right, distance carries gain, and a lowpass "muffle"

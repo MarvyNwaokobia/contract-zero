@@ -119,6 +119,17 @@ export interface Aftermath {
   decisions: { seq: number; tick: number; payload: AgentEvent['payload'] }[]
 }
 
+/** One completed operation in the War Room's record (GET /warroom/operations). */
+export interface OperationRecord {
+  player: string; completed_at: string
+  outcome: MissionResult['outcome']; reason: string | null; kind: OpKind; resource: ResourceName; target: string
+  extracted_units: number; bounty: number
+  consequence: Consequence
+  decisions: Aftermath['decisions']
+  /** The payout's NEAR settlement as recorded; only `settled_on_chain` means confirmed. */
+  settlement: { op_id: string; kind: string; status: string; settled_on_chain: boolean; tx_hashes: string[]; explorer: string[]; error: string | null } | null
+}
+
 export interface MissionStart { session: string; raid: number; min_secs: number; mission: ConvoyContract; story?: MissionStory }
 
 export interface MissionResult {
@@ -364,6 +375,7 @@ export const api = {
   intentsQuote: (b: { origin_asset: string; destination_asset: string; amount: string }) => req<IntentsQuote>('/intents/quote', { method: 'POST', body: JSON.stringify(b) }),
   savePreferences: (version: number, prefs: Record<string, unknown>) => req<StoredPreferences>('/me/preferences', { method: 'PUT', body: JSON.stringify({ version, prefs }) }),
   missionStory: (session: string) => req<{ story: MissionStory }>(`/missions/${session}/story`).then((r) => r.story),
+  warOperations: (limit = 10) => req<{ operations: OperationRecord[] }>(`/warroom/operations?limit=${limit}`).then((r) => r.operations),
   aftermath: (session: string) => req<Aftermath>(`/missions/${session}/aftermath`),
   settlement: (opId: string) => req<SettlementView>(`/settlements/${encodeURIComponent(opId)}`),
   completeMission: (session: string, outcome: 'extracted' | 'killed', kills: number, record?: FieldRecord) =>

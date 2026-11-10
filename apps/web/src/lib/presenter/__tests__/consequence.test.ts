@@ -63,6 +63,14 @@ describe('consequence story', () => {
     const c = raid({ next: { available: false, reason: 'Vanguard holds less than 20 fuel, so it cannot stage a depot', manifest: 0, defense: 2, guards: null } })
     expect(describeConsequence(res, c).steps[4].lines[0]).toContain('cannot stage a depot')
   })
+  it('copes with a snapshot recorded without a requirement', () => {
+    const old = (s: FactionSnapshot) => ({ ...s, requirement: undefined }) as unknown as FactionSnapshot
+    const s = describeConsequence(res, raid({ before: old(snap(100)), after: old(snap(40)) }))
+    expect(s.steps[2].lines.join(' ')).toContain('100 → 40')
+    expect(s.steps[2].lines.join(' ')).not.toContain('Readiness')
+    const same = describeConsequence({ ...res, outcome: 'killed', extracted_units: 0, bounty: 0 }, raid({ before: old(snap(100)), after: old(snap(100)) }))
+    expect(same.steps[2].lines).toEqual(['Its stock did not change.'])
+  })
   it('flags a readiness change from before to after', () => {
     const c = raid({ before: snap(200), after: snap(0) })
     expect(describeConsequence(res, c).steps[2].lines.join(' ')).toMatch(/Readiness: Operational → /)

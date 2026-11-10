@@ -60,9 +60,13 @@ function lost(c: Consequence): Step {
     }
   }
   if (c.after.defense !== c.before.defense) lines.push(`Defense level ${c.before.defense} → ${c.after.defense}.`)
-  const rb = describeFaction(c.before).readiness, ra = describeFaction(c.after).readiness
-  lines.push(rb === ra ? `Readiness: ${READINESS_LABEL[ra]}, unchanged.` : `Readiness: ${READINESS_LABEL[rb]} → ${READINESS_LABEL[ra]}.`)
-  if (lines.length === 1 && rb === ra) lines.unshift('Its stock did not change.')
+  // Readiness needs the faction's requirement. Snapshots recorded by an earlier server
+  // version lack it; say nothing about readiness rather than guess (or crash the screen).
+  const comparable = !!c.before.requirement && !!c.after.requirement
+  const rb = comparable ? describeFaction(c.before).readiness : null
+  const ra = comparable ? describeFaction(c.after).readiness : null
+  if (rb && ra) lines.push(rb === ra ? `Readiness: ${READINESS_LABEL[ra]}, unchanged.` : `Readiness: ${READINESS_LABEL[rb]} → ${READINESS_LABEL[ra]}.`)
+  if (lines.length === 0 || (lines.length === 1 && rb === ra && rb)) lines.unshift('Its stock did not change.')
   return { key: 'lost', title: `What ${c.before.name} lost`, state: 'done', lines }
 }
 

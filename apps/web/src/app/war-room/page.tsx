@@ -11,6 +11,7 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { Panel, Shell, Stat } from '@/components/ui/Shell'
 import { Procurement } from '@/components/market/Procurement'
 import { inboundFor, ReadinessSummary } from '@/components/world/Readiness'
+import { Operations } from '@/components/world/Operations'
 import { TradingPartners, useMarket } from '@/components/market/SupplyOrders'
 import { api, RESOURCE_LABEL, type CausalChain, type MarketOrder, type ChainTx, type ResourceName, type SimulationView, type WarActor, type WarConvoy, type WarContract, type WarRoomView } from '@/lib/api'
 
@@ -368,6 +369,7 @@ export default function WarRoom() {
             {[...d.world.actors].sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'faction' ? -1 : 1)).map((a) => <ActorCard key={a.id} a={a} v={d} orders={market.data?.orders} />)}
           </div>
 
+          <Operations />
           <Procurement />
           {market.data && <TradingPartners m={market.data} />}
 

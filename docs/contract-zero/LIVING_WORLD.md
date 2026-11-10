@@ -23,6 +23,22 @@ Baseline: 515 web tests passing; production build was **failing at HEAD** on a t
 **Technically present, disconnected from state:** the hangar scene; level environments (no depletion, idle machinery or alarms from real data).
 **Where players must read technical text:** War Room cards (raw `stock/need` bars), procurement steps (JSON-ish rationale strings), faction defense as an unexplained 1-5 pips.
 
+### Screenshot and demo review
+
+Reviewed from `docs/media/*.jpg` and `docs/contract-zero/demo/report-2026-11-09.json`. **No gameplay recording is in the repo** (video output is git-ignored), so this is a review of stills and the run report. The 2026-11-09 run: 16 steps, 7.6 minutes, 0 page errors.
+
+| Finding | Evidence | Belongs to |
+|---|---|---|
+| The Hub's "Next operation" card is clipped by the status panels below it at 1280x720 | `hub.jpg` | Phase 5, Hub |
+| Hub and Exchange show raw `stock/target` bars and rationale strings ("Treasury strong (11127 cr): extra patrols") instead of meaning | `hub.jpg`, `warroom-causal.jpg` | Phase 2 (War Room done; Hub next) |
+| War Room decision cards are a 7-row text table; the "gameplay" row is the only one a player cares about | `warroom-causal.jpg` | Phase 3/4 |
+| Exchange order history is a text ledger; winner and losing bidders are not visible as a contest | `exchange-orders.jpg` | Phase 4 |
+| Contract Intel is thorough but entirely text; the site map is the only visual | `intel.jpg` | Phase 5 |
+| Cinder Yard reads as beige cylinders and rails; no steam, machinery or catwalk life; tanks are plain flat-shaded | `fight-cinder-yard.jpg` | Phase 6 |
+| Blacksite at night has good mood (NVG, corridor light) but rooms are boxes with little set dressing | `fight-blacksite-night.jpg` | Phase 6 |
+| In-fight HUD: control hints top-right are tiny and low contrast; weapon name overlaps the NVG/light chips bottom-right | both fight shots | Phase 5/10 |
+| The fallback radio line "Contract's live. The cargo is in the yard... Load it, walk it out" is shown on sabotage and recovery missions; `vanguard-*` lines name Vanguard regardless of the site's owner | `fight-*.jpg`; `engine/story/presence.ts:71` | Phase 7 (radio from real state) |
+
 ### The authoritative rules the UI may speak about
 
 Verified in the Rust engine; the presenter mirrors these and nothing else.
@@ -60,7 +76,7 @@ Character names and portraits are **not yet created**. When added they must be r
 
 | Phase | Status |
 |---|---|
-| 0. Audit | Done (this document). |
+| 0. Audit | Done (this document), except the audio engine deep-dive. |
 | 1. Creative direction | Written (above). Faction insignia, tokens and portraits **not built**. |
 | 2A. Plain-language presenter | **Built**: `lib/presenter/{rules,economy}.ts`, 14 tests, vectors from the Rust tests. |
 | 2B. Faction readiness | **Built** in the War Room (`components/world/Readiness.tsx`): Operational / Under Pressure / Supply Critical / Rebuilding from real stock, with an "Exact figures" disclosure. "Rebuilding" requires a real open buy order or in-transit convoy. |

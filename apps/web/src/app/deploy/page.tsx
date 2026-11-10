@@ -17,6 +17,7 @@ import { useSession } from '@/lib/useSession'
 import { api, RESOURCE_LABEL, type OpKind, type BoardEntry, type MissionResult, type MissionStart, type ResourceName, type WorldView } from '@/lib/api'
 import { OperationIntel } from '@/components/world/OperationIntel'
 import { ReadinessSummary, useReadinessData } from '@/components/world/Readiness'
+import { ConsequencePanel } from '@/components/world/Consequence'
 import { WorldClockPanel } from '@/components/world/WorldClock'
 import { MissionStream } from '@/lib/missionStream'
 import { ItemInspector } from '@/components/inspect/ItemInspector'
@@ -44,7 +45,7 @@ type Phase =
   | { kind: 'arming'; start: MissionStart; before: WorldView; story: MissionStory | null }
   | { kind: 'fighting'; start: MissionStart; before: WorldView; story: MissionStory | null }
   | { kind: 'reporting' }
-  | { kind: 'results'; result: MissionResult; before: WorldView; after: WorldView }
+  | { kind: 'results'; session: string; result: MissionResult; before: WorldView; after: WorldView }
   | { kind: 'error'; message: string }
 
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`
@@ -142,7 +143,7 @@ function Deploy() {
       const { result } = await api.completeMission(start.session, outcome, stats.kills, outcome === 'extracted' ? stats.record : undefined)
       // Give the world clock a moment so the agents' response is visible.
       const after = await api.world()
-      setPhase({ kind: 'results', result, before, after })
+      setPhase({ kind: 'results', session: start.session, result, before, after })
     } catch (e) {
       setPhase({ kind: 'error', message: (e as Error).message })
     }
@@ -189,7 +190,7 @@ function Deploy() {
   }
 
   if (phase.kind === 'results') {
-    const { result, before, after } = phase
+    const { result, before, after, session } = phase
     const vgBefore = before.actors.find((a) => a.id === result.target)
     const vgAfter = after.actors.find((a) => a.id === result.target)
     const nextBefore = before.board.find((b) => b.target === result.target && b.resource === result.resource)
@@ -217,8 +218,11 @@ function Deploy() {
             <Debrief lines={result.debrief} />
           </Panel>
         )}
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
-          <Panel title={`WHAT IT DID TO ${(vgAfter?.name ?? result.target).toUpperCase()}`}>
+        <ConsequencePanel session={session} result={result} />
+        {/* Sessions from before recording have no snapshot: fall back to this browser's two
+            reads of the world, labelled as such. */}
+        {!result.consequence && <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <Panel title={`FROM THIS BROWSER: ${(vgAfter?.name ?? result.target).toUpperCase()} BEFORE AND AFTER`}>
             {vgBefore && vgAfter && (
               <div className="grid grid-cols-3 gap-3">
                 {(['ammo', 'med', 'fuel'] as const).map((r) => (
@@ -232,7 +236,7 @@ function Deploy() {
             <p className="mt-1 text-sm text-slate-100">Now: {guardsLine(nextAfter)}</p>
             <p className="mt-2 text-xs text-slate-500">The commander reacts on the next world tick; check the board again in a minute.</p>
           </Panel>
-        </div>
+        </div>}
         <div className="mt-6 flex gap-3">
           <Link href="/contracts" className="cz-btn cz-btn-primary px-5 py-2 text-sm">Back to the board</Link>
           <Link href="/" className="cz-btn cz-btn-ghost px-5 py-2 text-sm">Hub</Link>

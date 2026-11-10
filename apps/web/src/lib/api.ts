@@ -102,6 +102,23 @@ export interface WorldView {
   flows: Record<string, { issued: number; destroyed: number; conserved: boolean }>;
 }
 
+/** The server's recorded before/after of an operation (consequence.rs). `after`, `next` and
+ *  `settled_tick` are null until it settles; a session from before recording has none. */
+export interface FactionSnapshot {
+  tick: number; id: string; name: string; holdings: Holdings; requirement: Record<ResourceName, number>
+  defense: number; credit_reserve: number; disrupted: { resource: ResourceName; until: number }[]
+}
+export interface NextPlan { available: boolean; reason: string | null; manifest: number; defense: number; guards: GuardPlan | null }
+export interface Consequence {
+  kind: OpKind; target: string; resource: ResourceName
+  before: FactionSnapshot; faced: NextPlan; after: FactionSnapshot | null; next: NextPlan | null; settled_tick: number | null
+}
+/** The target's own logged decisions after the operation settled (GET /missions/{id}/aftermath). */
+export interface Aftermath {
+  recorded: boolean; settled?: boolean; target?: string; settled_tick?: number
+  decisions: { seq: number; tick: number; payload: AgentEvent['payload'] }[]
+}
+
 export interface MissionStart { session: string; raid: number; min_secs: number; mission: ConvoyContract; story?: MissionStory }
 
 export interface MissionResult {
@@ -125,6 +142,8 @@ export interface MissionResult {
   /** The cast's account of what happened, written from the result. */
   debrief?: StoryLine[];
   codename?: string | null;
+  /** Recorded before/after; null for sessions started before recording. */
+  consequence?: Consequence | null;
 }
 
 export interface SettlementView {
@@ -345,6 +364,7 @@ export const api = {
   intentsQuote: (b: { origin_asset: string; destination_asset: string; amount: string }) => req<IntentsQuote>('/intents/quote', { method: 'POST', body: JSON.stringify(b) }),
   savePreferences: (version: number, prefs: Record<string, unknown>) => req<StoredPreferences>('/me/preferences', { method: 'PUT', body: JSON.stringify({ version, prefs }) }),
   missionStory: (session: string) => req<{ story: MissionStory }>(`/missions/${session}/story`).then((r) => r.story),
+  aftermath: (session: string) => req<Aftermath>(`/missions/${session}/aftermath`),
   settlement: (opId: string) => req<SettlementView>(`/settlements/${encodeURIComponent(opId)}`),
   completeMission: (session: string, outcome: 'extracted' | 'killed', kills: number, record?: FieldRecord) =>
     req<{ replayed: boolean; result: MissionResult }>(`/missions/${session}/complete`, { method: 'POST', body: JSON.stringify({ outcome, kills, record }) }),

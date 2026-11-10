@@ -5,23 +5,17 @@ import { useQuery } from '@tanstack/react-query'
 import { Panel, Shell, Stat } from '@/components/ui/Shell'
 import { api, RESOURCE_LABEL, type BoardEntry } from '@/lib/api'
 import { WorldClockPanel } from '@/components/world/WorldClock'
+import { describeGuardPlan } from '@/lib/presenter/economy'
 
 const PHASE_WORD = { day: 'by day', dusk: 'at dusk', night: 'at night' } as const
 
 function Guards({ e }: { e: BoardEntry }) {
-  const g = e.guards
-  const rifles = g.hall.rifles + g.yard.rifles
-  const sidearms = g.hall.sidearms + g.yard.sidearms
-  const missing = g.planned - rifles - sidearms
+  const d = describeGuardPlan(e.guards, e.target_name)
   return (
     <div className="text-sm text-slate-300">
-      <span className="font-semibold text-slate-100">{rifles + sidearms}</span> guards: {rifles} rifle{rifles === 1 ? '' : 's'}
-      {sidearms > 0 && <>, {sidearms} sidearm{sidearms === 1 ? '' : 's'}</>}
-      {missing > 0 && <span className="text-amber-400"> · {missing} stayed home (not enough ammunition)</span>}
-      <div className="text-xs text-slate-500">
-        {g.reinforce_per_drop === 0 ? 'No reinforcements: Vanguard is out of medicine' : `${g.reinforce_per_drop} reinforcements per wave while you load`}
-        {' · '}guard HP {g.guard_hp}
-      </div>
+      <span className="font-semibold text-slate-100">{d.arms}</span>
+      {d.stayedHome > 0 && <span className="text-amber-400"> · {d.stayedHome} stayed home (not enough ammunition)</span>}
+      <div className="text-xs text-slate-500">{d.medical} · guard HP {e.guards.guard_hp}</div>
     </div>
   )
 }

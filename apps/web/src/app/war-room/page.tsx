@@ -10,8 +10,9 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Panel, Shell, Stat } from '@/components/ui/Shell'
 import { Procurement } from '@/components/market/Procurement'
+import { inboundFor, ReadinessSummary } from '@/components/world/Readiness'
 import { TradingPartners, useMarket } from '@/components/market/SupplyOrders'
-import { api, RESOURCE_LABEL, type CausalChain, type ChainTx, type ResourceName, type SimulationView, type WarActor, type WarConvoy, type WarContract, type WarRoomView } from '@/lib/api'
+import { api, RESOURCE_LABEL, type CausalChain, type MarketOrder, type ChainTx, type ResourceName, type SimulationView, type WarActor, type WarConvoy, type WarContract, type WarRoomView } from '@/lib/api'
 
 const RES: ResourceName[] = ['ammo', 'med', 'fuel']
 const RES_COLOR: Record<ResourceName, string> = { ammo: 'var(--color-amber)', med: 'var(--color-friendly)', fuel: 'var(--color-steel)' }
@@ -131,7 +132,7 @@ function Bar({ have, need, c }: { have: number; need: number; c: string }) {
   )
 }
 
-function ActorCard({ a, v }: { a: WarActor; v: WarRoomView }) {
+function ActorCard({ a, v, orders }: { a: WarActor; v: WarRoomView; orders?: MarketOrder[] }) {
   const credits = v.history.map((h) => h.holdings[a.id]?.credits).filter((x): x is number => x != null)
   const against = v.world.contracts.filter((c) => c.target === a.id)
   const sponsoring = v.world.contracts.filter((c) => c.sponsor === a.id)
@@ -151,6 +152,7 @@ function ActorCard({ a, v }: { a: WarActor; v: WarRoomView }) {
           </div>
         )}
       </div>
+      <ReadinessSummary a={a} inbound={inboundFor(a.id, orders, v.world.convoys)} />
       <div className="flex items-end justify-between">
         <Stat label="Treasury" value={`${a.holdings.credits.toLocaleString()} cr`} hint={`reserve ${a.credit_reserve.toLocaleString()}`} />
         <Spark values={credits} stroke={color(a.id)} w={120} />
@@ -363,7 +365,7 @@ export default function WarRoom() {
           </div>
 
           <div className="grid gap-4 md:grid-cols-3">
-            {[...d.world.actors].sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'faction' ? -1 : 1)).map((a) => <ActorCard key={a.id} a={a} v={d} />)}
+            {[...d.world.actors].sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'faction' ? -1 : 1)).map((a) => <ActorCard key={a.id} a={a} v={d} orders={market.data?.orders} />)}
           </div>
 
           <Procurement />

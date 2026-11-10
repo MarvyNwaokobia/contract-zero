@@ -38,5 +38,11 @@ export function reinforcements(med: number, medRequirement: number, defense: num
   return defense >= 4 ? 3 : 2
 }
 
+/** Ammunition a faction tries to hold: two days of need plus half a rifle-load for
+ *  every guard its defense plans (policy.rs ammo_target). This, not `requirement`, is
+ *  what its commander restocks toward. */
+export const ammoTarget = (ammoRequirement: number, defense: number) =>
+  ammoRequirement + Math.floor((AMMO_PER_RIFLE * plannedGuards(defense)) / 2)
+
 /** Credits a faction may spend: anything above its reserve (policy.rs spendable). */
 export const spendable = (credits: number, reserve: number) => Math.max(0, credits - reserve)

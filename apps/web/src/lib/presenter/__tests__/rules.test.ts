@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { WarActor } from '@/lib/api'
-import { armGuards, plannedGuards, reinforcements, spendable } from '../rules'
+import { ammoTarget, armGuards, plannedGuards, reinforcements, spendable } from '../rules'
 import { ammoStatement, describeFaction, describeGuardPlan, fuelStatement, medStatement } from '../economy'
 
 // Vectors copied from apps/api/crates/economy/src/mission.rs tests.
@@ -20,6 +20,10 @@ describe('mirrored engine rules', () => {
     expect(reinforcements(5, 10, 3)).toBe(1)
     expect(reinforcements(10, 10, 3)).toBe(2)
     expect(reinforcements(10, 10, 4)).toBe(3)
+  })
+  it('ammo target is two days of need plus half a rifle-load per planned guard', () => {
+    expect(ammoTarget(100, 4)).toBe(100 + (8 * 13) / 2) // 152
+    expect(ammoTarget(88, 1)).toBe(88 + 28)             // 7 guards -> 28
   })
   it('spendable is credits above the reserve', () => {
     expect(spendable(500, 300)).toBe(200)
@@ -80,6 +84,24 @@ describe('faction readiness', () => {
     expect(describeFaction(actor({ holdings: broke })).statements.find((s) => s.topic === 'credits')!.severity).not.toBe('critical')
     const shortAndBroke = describeFaction(actor({ holdings: { ...broke, med: 10 } }))
     expect(shortAndBroke.statements.find((s) => s.topic === 'credits')!.severity).toBe('critical')
+  })
+  it('judges ammunition against the commander\'s target, not bare requirement', () => {
+    // defense 2: requirement 100, target 100 + 36 = 136. 120 ammo is under the target.
+    const a = actor({ holdings: { credits: 300, ammo: 120, med: 100, fuel: 100 } })
+    const credits = describeFaction(a).statements.find((s) => s.topic === 'credits')!
+    expect(credits.severity).toBe('critical') // short on ammo (vs target) and at its reserve
+  })
+  it('uses the operation own ammunition when given (depot stock excluded)', () => {
+    const a = actor({ holdings: { credits: 2000, ammo: 200, med: 100, fuel: 100 } })
+    expect(describeFaction(a).statements[0].severity).toBe('ok')
+    const raid = describeFaction(a, [], { ammoForGuards: 44 }).statements[0]
+    expect(raid.severity).toBe('warn')
+    expect(raid.factors.some((f) => f.value.includes('depot'))).toBe(true)
+  })
+  it('works from a view with no disruption list', () => {
+    const { disrupted: _d, ...bare } = actor()
+    void _d
+    expect(describeFaction(bare).readiness).toBe('operational')
   })
   it('every statement exposes its exact factors', () => {
     for (const s of describeFaction(actor()).statements) expect(s.factors.length).toBeGreaterThan(0)

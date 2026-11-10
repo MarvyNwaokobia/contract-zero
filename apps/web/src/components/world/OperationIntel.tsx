@@ -15,12 +15,14 @@ import { bindLabel } from '@/lib/keybinds'
 
 const PHASE_LABEL = { day: 'Day', dusk: 'Dusk', night: 'Night' } as const
 
-export function OperationIntel({ contract, kind, reward, practice = false }: {
+export function OperationIntel({ contract, kind, reward, practice = false, targetBrief }: {
   contract: ConvoyContract
   kind: OpKind
   /** What it pays: the bounty or fee, and the cargo's market value for a raid. */
   reward?: { fee: number; sponsor?: string | null; cargoValue?: number }
   practice?: boolean
+  /** Why the target is armed as it is: its real supply picture (live contracts only). */
+  targetBrief?: React.ReactNode
 }) {
   // The player's own interact key, and whether they hold it or press it once.
   const settings = useSettings()
@@ -93,6 +95,13 @@ export function OperationIntel({ contract, kind, reward, practice = false }: {
             )}
           </div>
         </section>
+
+        {targetBrief && (
+          <section className="cz-panel p-4" data-testid="intel-target-brief">
+            <div className="cz-label !text-[10px]">Why they are armed like this</div>
+            <div className="mt-2">{targetBrief}</div>
+          </section>
+        )}
 
         <section className="cz-panel p-4">
           <div className="cz-label !text-[10px]">You go in with</div>

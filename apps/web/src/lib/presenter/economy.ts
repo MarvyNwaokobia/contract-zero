@@ -4,8 +4,8 @@
 // source of each threshold). Nothing is a UI-only threshold. Every statement carries the
 // exact `factors` it was computed from, so the advanced view can show the numbers.
 
-import type { GuardPlan, ResourceName, WarActor } from '@/lib/api'
-import { LOGISTICS_FUEL, STAGING_FUEL, DEFENSE_COST, armGuards, plannedGuards, reinforcements, spendable } from './rules'
+import type { GuardPlan, Holdings, ResourceName } from '@/lib/api'
+import { LOGISTICS_FUEL, STAGING_FUEL, DEFENSE_COST, ammoTarget, armGuards, plannedGuards, reinforcements, spendable } from './rules'
 
 export type Severity = 'ok' | 'warn' | 'critical'
 export type Readiness = 'operational' | 'under_pressure' | 'supply_critical' | 'rebuilding'
@@ -98,11 +98,29 @@ export interface Inbound { resource: ResourceName; kind: 'order' | 'convoy' }
  *  - Under Pressure: something is short (or a line is sabotaged) with nothing inbound.
  *  - Operational: nothing short.
  */
-export function describeFaction(a: WarActor, inbound: Inbound[] = []): FactionPicture {
+/** The fields of a faction the presenter reads; both the War Room and world views fit. */
+export interface FactionInput {
+  holdings: Holdings
+  requirement: Record<ResourceName, number>
+  defense: number
+  credit_reserve: number
+  disrupted?: { resource: ResourceName; until: number }[]
+}
+
+export interface DescribeOptions {
+  /** Ammunition actually available to arm guards for one specific operation. For a raid
+   *  on an ammunition depot the engine excludes the depot's own stock, so pass the
+   *  server's `guards.ammo_available` instead of the faction's total. */
+  ammoForGuards?: number
+}
+
+export function describeFaction(a: FactionInput, inbound: Inbound[] = [], opts: DescribeOptions = {}): FactionPicture {
   const { holdings: h, requirement: req } = a
-  const anyShort = (['ammo', 'med', 'fuel'] as const).some((r) => h[r] < req[r])
+  const disrupted = a.disrupted ?? []
+  const want = { ammo: ammoTarget(req.ammo, a.defense), med: req.med, fuel: req.fuel }
+  const anyShort = (['ammo', 'med', 'fuel'] as const).some((r) => h[r] < want[r])
   const statements = [
-    ammoStatement(a.defense, h.ammo),
+    ammoStatement(a.defense, opts.ammoForGuards ?? h.ammo, opts.ammoForGuards !== undefined ? "Excludes the depot's own stock (this operation)" : undefined),
     medStatement(a.defense, h.med, req.med),
     fuelStatement(h.fuel),
     treasuryStatement(h.credits, a.credit_reserve, a.defense, anyShort),
@@ -117,14 +135,14 @@ export function describeFaction(a: WarActor, inbound: Inbound[] = []): FactionPi
   } else if (short.length > 0 && short.every(covered)) {
     readiness = 'rebuilding'
     summary = 'Resupply is on its way for what it is short of.'
-  } else if (short.length > 0 || a.disrupted.length > 0) {
+  } else if (short.length > 0 || disrupted.length > 0) {
     readiness = 'under_pressure'
     summary = short[0]?.effect ?? 'A production line is sabotaged.'
   } else {
     readiness = 'operational'
     summary = 'Fully supplied: guards armed, reinforcements flowing, depots staged.'
   }
-  return { readiness, summary, statements, disrupted: a.disrupted }
+  return { readiness, summary, statements, disrupted }
 }
 
 /** The server's own guard plan for a mission (exact; no recomputation), in plain words. */

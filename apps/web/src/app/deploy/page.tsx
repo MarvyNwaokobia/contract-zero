@@ -16,6 +16,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useSession } from '@/lib/useSession'
 import { api, RESOURCE_LABEL, type OpKind, type BoardEntry, type MissionResult, type MissionStart, type ResourceName, type WorldView } from '@/lib/api'
 import { OperationIntel } from '@/components/world/OperationIntel'
+import { ReadinessSummary, useReadinessData } from '@/components/world/Readiness'
 import { WorldClockPanel } from '@/components/world/WorldClock'
 import { MissionStream } from '@/lib/missionStream'
 import { ItemInspector } from '@/components/inspect/ItemInspector'
@@ -91,6 +92,8 @@ function Deploy() {
   const [inspect, setInspect] = useState<InspectItem | null>(null)
   const world = useQuery({ queryKey: ['world'], queryFn: api.world, refetchInterval: 10_000, enabled: phase.kind === 'intel' })
   const entry = world.data?.board.find((b) => b.kind === kind && b.target === target && b.resource === resource)
+  const readiness = useReadinessData(phase.kind === 'intel')
+  const targetActor = entry ? readiness.actor(entry.target) : undefined
 
   const accept = async () => {
     if (!player) return
@@ -249,6 +252,7 @@ function Deploy() {
             contract={entry.mission}
             kind={kind}
             reward={{ fee: entry.bounty?.amount ?? 0, sponsor: entry.bounty?.sponsor_name, cargoValue: entry.market_value.bid }}
+            targetBrief={targetActor ? <ReadinessSummary a={targetActor} inbound={readiness.inbound(targetActor.id)} ammoForGuards={entry.guards.ammo_available} /> : undefined}
           />
         )}
         <button onClick={accept} disabled={!entry || phase.kind === 'starting'} className="cz-btn cz-btn-primary mt-6 px-6 py-3" data-testid="accept-contract">

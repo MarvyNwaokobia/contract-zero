@@ -29,7 +29,7 @@ Reviewed from `docs/media/*.jpg` and `docs/contract-zero/demo/report-2026-11-09.
 
 | Finding | Evidence | Belongs to |
 |---|---|---|
-| The Hub's "Next operation" card is clipped by the status panels below it at 1280x720 | `hub.jpg` | Phase 5, Hub |
+| The Hub's "Next operation" card is clipped by the status panels below it at 1280x720 | `hub.jpg` | Phase 5, Hub. Eased by the compact readiness strip (card fully visible at 1280x720 with mocked data); the underlying fixed-height layout is unchanged. |
 | Hub and Exchange show raw `stock/target` bars and rationale strings ("Treasury strong (11127 cr): extra patrols") instead of meaning | `hub.jpg`, `warroom-causal.jpg` | Phase 2 (War Room done; Hub next) |
 | War Room decision cards are a 7-row text table; the "gameplay" row is the only one a player cares about | `warroom-causal.jpg` | Phase 3/4 |
 | Exchange order history is a text ledger; winner and losing bidders are not visible as a contest | `exchange-orders.jpg` | Phase 4 |
@@ -119,7 +119,7 @@ Character names and portraits are **not yet created**. When added they must be r
 | 0. Audit | Done (this document). |
 | 1. Creative direction | Written (above). Faction insignia, tokens and portraits **not built**. |
 | 2A. Plain-language presenter | **Built**: `lib/presenter/{rules,economy}.ts`, 14 tests, vectors from the Rust tests. |
-| 2B. Faction readiness | **Built** in the War Room (`components/world/Readiness.tsx`): Operational / Under Pressure / Supply Critical / Rebuilding from real stock, with an "Exact figures" disclosure. "Rebuilding" requires a real open buy order or in-transit convoy. |
+| 2B. Faction readiness | **Built** on the War Room, the Hub (compact) and Contract Intel (`components/world/Readiness.tsx`): Operational / Under Pressure / Supply Critical / Rebuilding from real stock, with an "Exact figures" disclosure. "Rebuilding" requires a real open buy order or in-transit convoy. Shortage is judged against the commander's `ammo_target`, and Contract Intel uses the server's own `guards.ammo_available` so it cannot contradict the guard plan. Checked in a browser with mocked API data (desktop and 390 px wide); not yet against the live API. |
 | 2C. Consequence pipeline | Not built. Needs a before/after snapshot source; `history` only carries holdings and defense. |
 | 3. 3D War Table | Not built. Existing SVG map unchanged. |
 | 4. Faction/merchant presentation, agent sequence | Not built (procurement chain unchanged). |

@@ -11,6 +11,8 @@ import { api, RESOURCE_LABEL, type ActorView, type BoardEntry, type ResourceName
 import { fixedTier, loadSettings, type Quality } from '@/lib/settings'
 import { useProfile, useSession, useStash } from '@/lib/useSession'
 import { WorldClockPanel } from '@/components/world/WorldClock'
+import { ReadinessSummary, useReadinessData } from '@/components/world/Readiness'
+import { describeGuardPlan } from '@/lib/presenter/economy'
 
 const HangarScene = dynamic(() => import('@/components/hub/HangarScene'), { ssr: false })
 
@@ -37,9 +39,7 @@ function Meter({ label, have, want }: { label: string; have: number; want: numbe
 }
 
 function NextOperation({ e, others, signedIn }: { e: BoardEntry; others: BoardEntry[]; signedIn: boolean }) {
-  const g = e.guards
-  const rifles = g.hall.rifles + g.yard.rifles
-  const sidearms = g.hall.sidearms + g.yard.sidearms
+  const g = describeGuardPlan(e.guards, e.target_name)
   return (
     <section className="cz-panel cz-rise p-5">
       <div className="cz-label text-amber">Next operation</div>
@@ -51,8 +51,8 @@ function NextOperation({ e, others, signedIn }: { e: BoardEntry; others: BoardEn
         <div><div className="cz-label !text-[10px]">Bounty</div><div className="cz-num font-display text-xl font-bold">{e.bounty ? e.bounty.amount : '—'}</div><div className="text-xs text-muted">{e.bounty ? `from ${e.bounty.sponsor_name}` : 'none posted'}</div></div>
       </div>
       <div className="mt-4 border-l-2 border-hostile/70 pl-3 text-sm">
-        <div><span className="font-semibold text-fog">{rifles + sidearms} guards</span> <span className="text-muted">· {rifles} rifles{sidearms ? `, ${sidearms} sidearms` : ''} · HP {g.guard_hp}</span></div>
-        <div className="text-muted">{g.reinforce_per_drop ? `${g.reinforce_per_drop} reinforcement${g.reinforce_per_drop === 1 ? '' : 's'} per wave while you work` : 'No reinforcements: they are out of medicine'}</div>
+        <div><span className="font-semibold text-fog">{g.arms}</span> <span className="text-muted">· HP {e.guards.guard_hp}{g.stayedHome > 0 ? ` · ${g.stayedHome} stayed home, no ammunition to arm them` : ''}</span></div>
+        <div className="text-muted">{g.medical}</div>
       </div>
       <p className="mt-3 text-sm text-muted">
         Taking it strips {e.target_name} of {e.manifest} {e.resource}. Expect its commander to restock from Vex, and its next patrols to field what it can still arm.
@@ -86,6 +86,7 @@ export default function Hub() {
   const next = useMemo(() => pickNext(board), [board])
   const factions = world.data?.actors.filter((a) => a.kind === 'faction') ?? []
   const merchant = world.data?.actors.find((a) => a.kind === 'merchant')
+  const readiness = useReadinessData()
   const needsCallsign = !!session && !profileLoading && !profile?.callsign
 
   return (
@@ -154,12 +155,19 @@ export default function Hub() {
         <div className="grid grid-cols-1 gap-4 px-4 pb-4 sm:px-8 sm:pb-6 md:grid-cols-3">
           <section className="cz-panel p-4">
             <div className="cz-label mb-2">World status</div>
-            {factions.map((f) => (
-              <div key={f.id} className="space-y-2">
-                <div className="flex items-baseline justify-between"><span className="font-display font-bold uppercase tracking-wider">{f.name}</span><span className="text-xs text-muted">defense L{f.defense}</span></div>
-                {RES.map((r) => <Meter key={r} label={r} have={f.holdings[r]} want={target(f, r)} />)}
-              </div>
-            ))}
+            {factions.map((f) => {
+              const wa = readiness.actor(f.id)
+              return (
+                <div key={f.id} className="mb-3 space-y-2">
+                  <div className="flex items-baseline justify-between"><span className="font-display font-bold uppercase tracking-wider">{f.name}</span><span className="text-xs text-muted">defense L{f.defense}</span></div>
+                  {wa ? <ReadinessSummary a={wa} inbound={readiness.inbound(f.id)} compact /> : <p className="text-xs text-muted">Reading the front…</p>}
+                  <details className="text-xs">
+                    <summary className="cursor-pointer text-steel hover:text-fog">Stock levels</summary>
+                    <div className="mt-2 space-y-2">{RES.map((r) => <Meter key={r} label={r} have={f.holdings[r]} want={target(f, r)} />)}</div>
+                  </details>
+                </div>
+              )
+            })}
             {merchant && <div className="mt-3 text-xs text-muted">{merchant.name}: {merchant.holdings.credits.toLocaleString()} cr{world.data?.market.insolvent ? ' · insolvent, not buying' : ''}</div>}
           </section>
           <section className="cz-panel p-4">

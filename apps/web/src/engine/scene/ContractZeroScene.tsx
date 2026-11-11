@@ -4463,6 +4463,13 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
     document.addEventListener('visibilitychange', apply);
     return () => document.removeEventListener('visibilitychange', apply);
   }, [audio, settings.muteInBackground]);
+  // Leaving the tab pauses a fight: the sim must not run on while nobody is watching. Only when no
+  // menu or debrief is already up.
+  useEffect(() => {
+    const onHide = () => { if (document.hidden && !menuOpenRef.current) { setPaused(true); try { document.exitPointerLock?.(); } catch { /* ignore */ } } };
+    document.addEventListener('visibilitychange', onHide);
+    return () => document.removeEventListener('visibilitychange', onHide);
+  }, []);
   // Crosshair (Settings → Interface): style, colour, size and opacity. The frame loop
   // still moves the ticks for spread; this sets everything else.
   useEffect(() => {

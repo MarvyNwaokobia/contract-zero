@@ -12,6 +12,7 @@
 
 import { Suspense, useEffect, useMemo, useRef } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
+import { usePageVisible } from '@/lib/usePageVisible'
 import { useGLTF } from '@react-three/drei'
 import * as THREE from 'three'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
@@ -386,8 +387,11 @@ function CameraRig({ onFps }: { onFps?: (fps: number) => void }) {
 
 export default function HangarScene({ quality, onFps }: { quality: Quality; onFps?: (fps: number) => void }) {
   const q = QUALITY[fixedTier(quality)]
+  // The hangar stops rendering while the tab is in the background.
+  const visible = usePageVisible()
   return (
     <Canvas
+      frameloop={visible ? 'always' : 'never'}
       dpr={q.dpr}
       shadows={q.shadows}
       camera={{ fov: 42, position: [0.4, 1.75, 7.6], near: 0.1, far: 120 }}

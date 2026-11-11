@@ -8,6 +8,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { api, accountLabel, RESOURCE_LABEL, type OperationRecord } from '@/lib/api'
 import { describeConsequence, worldClock } from '@/lib/presenter/consequence'
+import { BeforeAfter } from './BeforeAfter'
 
 const KIND: Record<OperationRecord['kind'], string> = { raid: 'Raid', sabotage: 'Sabotage', recovery: 'Recovery' }
 const OUTCOME: Record<OperationRecord['outcome'], { label: string; cls: string }> = {
@@ -51,6 +52,10 @@ function Row({ o }: { o: OperationRecord }) {
           </li>
         ))}
       </ol>
+      <details className="mt-2 text-xs">
+        <summary className="cursor-pointer text-steel hover:text-fog">Compare before and after</summary>
+        <div className="mt-1"><BeforeAfter c={c} /></div>
+      </details>
       {o.settlement && <Settlement s={o.settlement} />}
       <details className="mt-2 text-xs text-muted">
         <summary className="cursor-pointer text-steel hover:text-fog">Advanced evidence (recorded snapshots)</summary>

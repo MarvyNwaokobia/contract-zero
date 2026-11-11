@@ -14,6 +14,7 @@ import type { MarketMerchant } from '@/lib/api'
 import { RESOURCE_LABEL } from '@/lib/api'
 import { convoyState } from '@/lib/world/convoy'
 import { inboundFor, MerchantSummary, ReadinessSummary } from '@/components/world/Readiness'
+import { BeforeAfter } from '@/components/world/BeforeAfter'
 import { FacilityGlyph } from './FacilityGlyph'
 import { SupplyGauge } from './SupplyGauge'
 
@@ -113,6 +114,10 @@ export function FacilityPanel({ intel, merchant, tick }: { intel: FacilityIntel;
                 <li key={i} className="text-sm">
                   <div className="text-fog capitalize">{o.kind} · {RESOURCE_LABEL[o.resource]} · {o.outcome === 'extracted' ? `${o.extracted_units} units` : o.outcome}{o.consequence.settled_tick != null ? <span className="text-dim"> · {worldClock(o.consequence.settled_tick)}</span> : null}</div>
                   <div className="text-xs text-muted">{story.steps[2]?.lines[0]}</div>
+                  <details className="mt-1 text-xs">
+                    <summary className="cursor-pointer text-steel hover:text-fog">Compare before and after</summary>
+                    <div className="mt-1"><BeforeAfter c={o.consequence} /></div>
+                  </details>
                 </li>
               )
             })}

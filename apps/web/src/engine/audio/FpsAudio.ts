@@ -815,6 +815,9 @@ export class FpsAudio {
       this.noiseBand(1400, 0.07, 0.09);
     } else if (speaker === 'vanguard') { // low — the channel drops to make room for command
       this.noiseBand(520, 0.16, 0.16);
+    } else if (speaker === 'halcyon') {  // clean and narrow: a procurement desk's headset
+      this.noiseBand(2800, 0.06, 0.1);
+      this.noiseBand(2100, 0.05, 0.07);
     } else if (speaker === 'ashen') {   // harsh, overdriven: a refinery set
       this.noiseBand(760, 0.13, 0.15);
       this.noiseBand(2600, 0.09, 0.08);

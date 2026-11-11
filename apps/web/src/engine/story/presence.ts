@@ -22,7 +22,7 @@
  * layer prefers the file and falls back to static-only.
  */
 
-export type Speaker = 'handler' | 'vanguard' | 'vex' | 'ashen';
+export type Speaker = 'handler' | 'vanguard' | 'vex' | 'ashen' | 'halcyon';
 
 export interface PresenceLine {
   id: string;
@@ -51,13 +51,20 @@ export type PresenceTrigger =
   | 'detonation'     // the charges blow: the target reacts
   | 'extractCalled'  // extraction called in: hold the zone
   | 'extractBroken'  // left the zone mid-countdown
-  | 'extractDone';   // out
+  | 'extractDone'    // out
+  | 'firstContact'   // the first guard opens fire on you (once per run)
+  | 'lowAmmo'        // your weapon's reserve is down to one magazine or less
+  | 'reinforcements' // guards really did arrive (with the real count)
+  | 'shortage'       // a faction reports a shortage (from the economy's own decision log)
+  | 'procurement'    // a merchant answers a supply order (from the order record)
+  | 'retaliation';   // a faction answers a raid (from its logged decision)
 
 export const SPEAKER_META: Record<Speaker, { name: string; color: string }> = {
   handler: { name: 'KESTREL', color: '#8fd6e8' },
   vanguard: { name: 'VANGUARD COMMAND', color: '#e0455a' },
   vex: { name: 'VEX', color: '#e6c766' },
   ashen: { name: 'ASHEN COMPACT', color: '#f08a4b' },
+  halcyon: { name: 'HALCYON DESK', color: '#9fc3e0' },
 };
 
 export const PRESENCE_LINES: PresenceLine[] = [
@@ -70,6 +77,9 @@ export const PRESENCE_LINES: PresenceLine[] = [
   { id: 'dyn-default-exfil-done', speaker: 'handler', trigger: 'extractDone', text: "You're out. Nice work." },
   { id: 'handler-op-start', speaker: 'handler', trigger: 'opStart', text: "Contract's live. The cargo is in the yard past the hall. Load it, walk it out, get paid." },
   { id: 'handler-op-breach', speaker: 'handler', trigger: 'opBreach', text: "You're in. Escort's awake now, so make it quick." },
+  { id: 'handler-first-contact', speaker: 'handler', trigger: 'firstContact', text: "Contact. They know you're here now. Move." },
+  { id: 'handler-low-ammo', speaker: 'handler', trigger: 'lowAmmo', text: "You're nearly dry. Take what the guards drop." },
+  { id: 'handler-reinforce', speaker: 'handler', trigger: 'reinforcements', text: 'More guards are coming in. Finish up.' },
   { id: 'handler-troops-cleared', speaker: 'handler', trigger: 'troopsCleared', text: 'Forward escort is down. Someone just keyed in on the convoy channel.' },
   { id: 'vanguard-first-word', speaker: 'vanguard', trigger: 'rivalFirstWord', text: "This is Vanguard. That cargo is accounted for. You will be too." },
   { id: 'handler-push-in', speaker: 'handler', trigger: 'opPushIn', text: "That's the yard. Get on the cargo and start loading. They will try to take it back." },
@@ -105,4 +115,10 @@ export function linesFor(trigger: PresenceTrigger, radio?: MissionRadio): Presen
   const own = radio?.[trigger]?.filter((l) => known(l.speaker) && l.text.trim());
   if (own?.length) return own.map((l) => ({ id: l.id, speaker: l.speaker as Speaker, text: l.text, trigger }));
   return PRESENCE_LINES.filter((l) => l.trigger === trigger);
+}
+
+/** The line for guards that really arrived: the real count, in the handler's voice. */
+export function reinforcementLine(count: number): PresenceLine {
+  const n = Math.max(1, Math.round(count));
+  return { id: 'dyn-reinforce', speaker: 'handler', trigger: 'reinforcements', text: n === 1 ? 'One more guard coming in. Finish up.' : `${n} more guards coming in. Finish up.` };
 }

@@ -19,7 +19,7 @@ import {
   xpForKill, rankForXp, xpIntoRank, xpBarSize, rankUpsBetween, careerXpFor, XP_REWARD, rayAABB, aabbOfCover, slideMove, type FpsInput, type Vec3, type Rank, type Attachment,
 } from '../fps';
 import { RANK_COLORS } from '../../lib/constants';
-import { linesFor, SPEAKER_META, type PresenceLine, type PresenceTrigger, type Speaker } from '../story/presence';
+import { linesFor, reinforcementLine, SPEAKER_META, type PresenceLine, type PresenceTrigger, type Speaker } from '../story/presence';
 import { GUN_FEEL } from '../combat/GunFeel';
 import { STARTER_GUN_ID, getGun, type GunId } from '../combat/GunStats';
 import type { AmmoId, AttachmentId, AttachmentSlot } from '../combat/Loadout';
@@ -1134,6 +1134,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
   const lastBeep = useRef(-1);
   // Audio cues that fire once per run, and where each guard last was (for footsteps).
   const alertedRef = useRef(false);
+  const lastSaid = useRef(new Map<string, number>());
   const finalAlarmRef = useRef(false);
   const enemyStepRef = useRef(new Map<number, { x: number; z: number; t: number }>());
   const lastHeartbeat = useRef(0);
@@ -2746,7 +2747,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
         // Keep the pressure up — trickle reinforcements in until the clock runs out.
         if (holdProgress.current < hold && sim.time - lastReinforceAt.current > (obj.reinforceEvery ?? 3.5)) {
           lastReinforceAt.current = sim.time;
-          sim.reinforce(obj.reinforceRoom ?? obj.room ?? 0, obj.reinforceCount ?? 2);
+          reinforced(sim.reinforce(obj.reinforceRoom ?? obj.room ?? 0, obj.reinforceCount ?? 2));
         }
         done = holdProgress.current >= hold;
       } else if (obj.kind === 'secure' || obj.kind === 'plant' || obj.kind === 'retrieve' || obj.kind === 'extract') {
@@ -2757,7 +2758,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
           : near;
         if (working && (obj.reinforceCount ?? 0) > 0 && sim.time - lastReinforceAt.current > (obj.reinforceEvery ?? 3.5)) {
           lastReinforceAt.current = sim.time;
-          sim.reinforce(obj.reinforceRoom ?? obj.room ?? 0, obj.reinforceCount ?? 2);
+          reinforced(sim.reinforce(obj.reinforceRoom ?? obj.room ?? 0, obj.reinforceCount ?? 2));
         }
         if (obj.kind === 'secure') done = FIELD.carried.length >= Math.min(FIELD.cases.length, CARRY_MAX) || FIELD.exfilPhase === 'counting' || FIELD.exfilPhase === 'done';
         else if (obj.kind === 'plant') done = FIELD.planted.includes(obj.item ?? '');
@@ -2931,7 +2932,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
         }
         say('detonation');
         toast('THE LINE IS BURNING', '#ff8a5a');
-        sim.reinforce(2, 2);
+        reinforced(sim.reinforce(2, 2));
         break;
       case 'extractCalled':
         say('extractCalled');
@@ -3317,7 +3318,9 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       audio.setMusicIntensity(lvl);
       // A site raises the alarm the first time its guards open fire, and escalates when the fuse is
       // down to its last seconds. Each fires once per run.
-      if (LEVEL && lvl >= 2 && !alertedRef.current) { alertedRef.current = true; audio.alarm(4, 1); }
+      if (LEVEL && lvl >= 2 && !alertedRef.current) { alertedRef.current = true; audio.alarm(4, 1); say('firstContact'); }
+      // Your weapon's reserve is down to a magazine or less (a finite reserve: field operations)
+      if (Number.isFinite(sim.reserve) && sim.reserve + sim.ammo <= sim.gun.magazine && sim.playerAlive) sayAgain('lowAmmo', 90);
       const fuse = FIELD.fuseLeft;
       if (fuse > 0 && fuse <= 8 && !finalAlarmRef.current) { finalAlarmRef.current = true; audio.alarm(Math.max(3, Math.ceil(fuse)), 3); }
       // Guards on the move within earshot are heard: a step each time one has covered ground.
@@ -3531,6 +3534,20 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
 
   // ── Story presence: the fight is where the story arrives, never a menu ──
   /** Queue a trigger's lines. Fires at most once per operation. */
+  /** A trigger that may fire again: at most once per `cooldown` seconds of mission time, from real state.
+   *  `line` overrides the authored line (reinforcements carry their real count). */
+  function sayAgain(trigger: PresenceTrigger, cooldown: number, line?: PresenceLine) {
+    const last = lastSaid.current.get(trigger) ?? -Infinity;
+    if (sim.time - last < cooldown) return;
+    lastSaid.current.set(trigger, sim.time);
+    for (const l of line ? [line] : linesFor(trigger, mission.radio)) voQueue.current.push(l);
+  }
+
+  /** Guards really arrived: say so once per wave, with the number the sim spawned. */
+  function reinforced(spawned: number) {
+    if (spawned > 0) sayAgain('reinforcements', 25, reinforcementLine(spawned));
+  }
+
   function say(trigger: PresenceTrigger) {
     if (storyFired.current.has(trigger)) return;
     storyFired.current.add(trigger);
@@ -3575,6 +3592,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
     reviveAt.current = 0;
     paintRefills();
     storyFired.current.clear();
+    lastSaid.current.clear();
     voQueue.current.length = 0;
     voUntil.current = 0;
     voCurrentId.current = null;

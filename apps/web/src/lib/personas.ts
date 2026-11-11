@@ -24,7 +24,7 @@ export const PERSONAS: Record<string, Persona> = {
   vanguard: { id: 'vanguard', voice: 'VANGUARD COMMAND', name: 'Ilse Brandt', title: 'Quartermaster', callSign: 'LEDGER', cadence: 'Cold, measured, procedural. Counts things.', say: ['We keep count.', 'Logged.', 'Escorts are doubled on every route out.'], avoid: ['insults', 'boasting', 'slang'], onRadio: true },
   ashen: { id: 'ashen', voice: 'ASHEN COMPACT', name: 'Tavi Roake', title: 'Foreman of the Yard', callSign: 'SLAG', cadence: 'Short, loud, blunt. Threatens rather than warns.', say: ['Burn it.', 'We pay for the fire.', 'Ash remembers.'], avoid: ['polish', 'corporate words', 'long explanations'], onRadio: true },
   vex: { id: 'vex', voice: 'VEX', name: 'Vex', title: 'Proprietor', callSign: 'VEX', cadence: 'Warm the way a business is warm. Easy, informal. Pays as agreed.', say: ['Lovely.', 'As agreed.', 'Bring it round.'], avoid: ['sentiment', 'loyalty', 'promises'], onRadio: true },
-  halcyon: { id: 'halcyon', voice: 'HALCYON DESK', name: 'Sena Halloran', title: 'Director of Procurement', callSign: 'DESK', cadence: 'Polished, efficient, courteous. Procurement vocabulary.', say: ['We can fill that.', 'Terms are standard.', 'Lead time is short.'], avoid: ['menace', 'slang', 'anything improvised'], onRadio: false },
+  halcyon: { id: 'halcyon', voice: 'HALCYON DESK', name: 'Sena Halloran', title: 'Director of Procurement', callSign: 'DESK', cadence: 'Polished, efficient, courteous. Procurement vocabulary.', say: ['We can fill that.', 'Terms are standard.', 'Lead time is short.'], avoid: ['menace', 'slang', 'anything improvised'], onRadio: true },
 }
 
 export const personaFor = (id: string | null | undefined): Persona | undefined => (id ? PERSONAS[id] : undefined)

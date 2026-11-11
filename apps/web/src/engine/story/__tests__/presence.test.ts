@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { PRESENCE_LINES, SPEAKER_META, linesFor, type PresenceTrigger } from '../presence';
+import { PRESENCE_LINES, SPEAKER_META, linesFor, reinforcementLine, type PresenceTrigger } from '../presence';
 
 const SCENE = readFileSync(resolve(__dirname, '../../scene/ContractZeroScene.tsx'), 'utf8');
 
@@ -24,7 +24,7 @@ describe('presence lines', () => {
 
   it('has a line for every trigger the scene fires', () => {
     const fired = new Set<string>();
-    for (const m of SCENE.matchAll(/say\((?:[^)]*?\?\s*)?'([a-zA-Z]+)'(?:\s*:\s*'([a-zA-Z]+)')?/g)) {
+    for (const m of SCENE.matchAll(/say(?:Again)?\((?:[^)]*?\?\s*)?'([a-zA-Z]+)'(?:\s*:\s*'([a-zA-Z]+)')?/g)) {
       fired.add(m[1]);
       if (m[2]) fired.add(m[2]);
     }
@@ -46,7 +46,7 @@ describe('mission radio from the server', () => {
   })
 
   it('ignores lines from a speaker the client cannot voice, or empty ones', () => {
-    const radio = { opStart: [{ id: 'x', speaker: 'halcyon', text: 'hi' }, { id: 'y', speaker: 'handler', text: '  ' }] }
+    const radio = { opStart: [{ id: 'x', speaker: 'stranger', text: 'hi' }, { id: 'y', speaker: 'handler', text: '  ' }] }
     expect(linesFor('opStart', radio)).toEqual(linesFor('opStart'))
   })
 
@@ -62,3 +62,25 @@ describe('mission radio from the server', () => {
     }
   })
 })
+
+describe('radio from real state', () => {
+  it('first contact, low ammunition and reinforcements each have a default line', () => {
+    for (const t of ['firstContact', 'lowAmmo', 'reinforcements'] as PresenceTrigger[]) expect(linesFor(t).length, t).toBeGreaterThan(0);
+  });
+  it('the reinforcement line carries the real number of guards, never an invented one', () => {
+    expect(reinforcementLine(1).text).toBe('One more guard coming in. Finish up.');
+    expect(reinforcementLine(3).text).toBe('3 more guards coming in. Finish up.');
+    expect(reinforcementLine(0).text).toContain('One more');   // never "0 more": it is only said when guards arrived
+    expect(reinforcementLine(2).id.startsWith('dyn-')).toBe(true); // played as radio, never looked up as a recording
+  });
+  it('the scene says each from the state that makes it true', () => {
+    expect(SCENE).toMatch(/sayAgain\('lowAmmo'/);
+    expect(SCENE).toMatch(/Number\.isFinite\(sim\.reserve\)/);          // only where the reserve is finite
+    expect(SCENE).toMatch(/reinforced\(sim\.reinforce\(/);               // the count is what the sim spawned
+    expect(SCENE).toMatch(/if \(spawned > 0\)/);                          // and nothing is said if none arrived
+    expect(SCENE).toMatch(/say\('firstContact'\)/);
+  });
+  it('Halcyon has a voice on the channel', () => {
+    expect(SPEAKER_META.halcyon.name).toBe('HALCYON DESK');
+  });
+});

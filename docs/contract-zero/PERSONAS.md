@@ -21,7 +21,7 @@ This extends the cast in [STORY.md](STORY.md). It records the names, roles and v
 | Vex Exchange | **VEX** | Vex | Proprietor | VEX |
 | Halcyon Logistics | **HALCYON DESK** | Sena Halloran | Director of Procurement | DESK |
 
-Kestrel and Vex are the names the game already uses; they are their own representatives. Halcyon's voice is **not wired into the radio yet** (see "Status").
+Kestrel and Vex are the names the game already uses; they are their own representatives. Halcyon's voice is on the radio as **HALCYON DESK**, with its own subtitle colour and a clean, narrow signature; no mission line uses it yet (see "Status").
 
 ## Voice direction
 
@@ -66,7 +66,7 @@ Kestrel and Vex are the names the game already uses; they are their own represen
 - **Say:** "We can fill that." "Terms are standard." "Lead time is short."
 - **Avoid:** menace, slang, anything that sounds improvised.
 - **Sample:** "Halcyon can fill seven lots against that order at the stated price."
-- **Radio signature (to build):** clean, higher, narrower band than Vex, with a short even tone.
+- **Radio signature:** clean, higher, narrower band than Vex (two short narrow bands, built).
 - **Visual direction:** pale grey uniform with a thin blue edge, a tablet, palletised freight behind.
 
 ## Where each voice may speak
@@ -82,6 +82,6 @@ Kestrel and Vex are the names the game already uses; they are their own represen
 
 - Names, titles, call signs and voice direction: **documented here** and defined in `apps/web/src/lib/personas.ts` (checked by tests).
 - Interface attribution: **built** on the War Table's Commander block.
-- Radio: Kestrel, Vanguard, Ashen and Vex speak today. **Halcyon's voice is not wired** (no speaker, subtitle colour or radio signature yet).
+- Radio: Kestrel, Vanguard, Ashen, Vex and Halcyon all have a voice (speaker, subtitle colour, signature). No mission line is written in Halcyon's voice yet; its lines come from the strategic radio (merchant procurement), not from `story.rs`.
 - Portraits: **not drawn**; the visual direction above is the brief for them.
 - Recorded voice: none. Lines are subtitles over a synthesised radio signature.

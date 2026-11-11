@@ -297,3 +297,20 @@ describe('soundscape voices', () => {
     }
   })
 })
+
+describe('every radio voice has its own signature', () => {
+  it('each speaker puts static on the radio channel, and they are not all the same', () => {
+    const a = inner(audio)
+    const ctx = a.ctx as FakeAudioContext
+    const built: Record<string, number> = {}
+    for (const who of ['handler', 'vanguard', 'ashen', 'vex', 'halcyon'] as const) {
+      const before = ctx.nodesByKind.source ?? 0
+      const inputs = a.voiceBus.inputs
+      audio.vo('dyn-sig', who)
+      expect(a.voiceBus.inputs, who).toBeGreaterThan(inputs)
+      built[who] = (ctx.nodesByKind.source ?? 0) - before
+    }
+    expect(built.halcyon).toBe(2)                                    // two narrow bands
+    expect(new Set(Object.values(built)).size).toBeGreaterThan(1)    // not one signature for everyone
+  })
+})

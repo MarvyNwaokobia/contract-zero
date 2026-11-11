@@ -1,0 +1,1702 @@
+{
+ "result": {
+  "bounty": 0,
+  "codename": "OPERATION RED MOTH",
+  "consequence": {
+   "after": {
+    "credit_reserve": 600,
+    "defense": 4,
+    "disrupted": [],
+    "holdings": {
+     "ammo": 164,
+     "credits": 10514,
+     "fuel": 174,
+     "med": 18
+    },
+    "id": "vanguard",
+    "name": "Vanguard",
+    "requirement": {
+     "ammo": 48,
+     "fuel": 96,
+     "med": 24
+    },
+    "tick": 346
+   },
+   "before": {
+    "credit_reserve": 600,
+    "defense": 4,
+    "disrupted": [],
+    "holdings": {
+     "ammo": 189,
+     "credits": 10384,
+     "fuel": 182,
+     "med": 20
+    },
+    "id": "vanguard",
+    "name": "Vanguard",
+    "requirement": {
+     "ammo": 48,
+     "fuel": 96,
+     "med": 24
+    },
+    "tick": 342
+   },
+   "faced": {
+    "available": true,
+    "defense": 4,
+    "guards": {
+     "ammo_available": 76,
+     "guard_hp": 136,
+     "hall": {
+      "rifles": 2,
+      "sidearms": 2
+     },
+     "planned": 13,
+     "reinforce_every_secs_x100": 290,
+     "reinforce_per_drop": 1,
+     "sidearm_damage_bp": 4500,
+     "yard": {
+      "rifles": 7,
+      "sidearms": 0
+     }
+    },
+    "manifest": 113,
+    "reason": null
+   },
+   "kind": "raid",
+   "next": {
+    "available": true,
+    "defense": 4,
+    "guards": {
+     "ammo_available": 66,
+     "guard_hp": 136,
+     "hall": {
+      "rifles": 3,
+      "sidearms": 1
+     },
+     "planned": 13,
+     "reinforce_every_secs_x100": 290,
+     "reinforce_per_drop": 1,
+     "sidearm_damage_bp": 4500,
+     "yard": {
+      "rifles": 5,
+      "sidearms": 0
+     }
+    },
+    "manifest": 98,
+    "reason": null
+   },
+   "resource": "ammo",
+   "settled_tick": 346,
+   "target": "vanguard"
+  },
+  "debrief": [
+   {
+    "id": "dyn-debrief-handler",
+    "speaker": "handler",
+    "text": "29 ammunition out. Sell it on the Exchange or keep it."
+   },
+   {
+    "id": "dyn-debrief-target",
+    "speaker": "vanguard",
+    "text": "We have your name now, Contractor. Vanguard remembers."
+   }
+  ],
+  "elapsed_secs": 43.025,
+  "extracted_units": 29,
+  "kind": "raid",
+  "manifest": 113,
+  "min_secs": 35,
+  "outcome": "extracted",
+  "player_holdings": {
+   "cargo": 29,
+   "credits": 0
+  },
+  "raid": 473,
+  "reason": null,
+  "record": {
+   "charges": [],
+   "delivered": null,
+   "looted": [],
+   "secured": [
+    "case-1"
+   ]
+  },
+  "resource": "ammo",
+  "settlement": null,
+  "site": {
+   "environment": "Outdoor logistics yard: motor pool, container wall, warehouse",
+   "exfil": "Vex's flatbed at the south gate",
+   "facility": "munitions warehouse",
+   "id": "dustline-depot",
+   "layout": "dustline_depot",
+   "name": "Dustline Depot",
+   "owner": "vanguard",
+   "region": "Dustline basin, south road",
+   "shared_layout": false
+  },
+  "target": "vanguard"
+ },
+ "session": "7b722e0b-de4b-4f0c-bfe2-37221ad42f89",
+ "before": {
+  "actors": [
+   {
+    "account": "faction:ashen",
+    "ammo_target": 88,
+    "credit_reserve": 500,
+    "defense": 1,
+    "holdings": {
+     "ammo": 89,
+     "credits": 3652,
+     "fuel": 767,
+     "med": 16
+    },
+    "id": "ashen",
+    "kind": "faction",
+    "name": "Ashen Compact",
+    "recent_raids": 0,
+    "requirement": {
+     "ammo": 60,
+     "fuel": 48,
+     "med": 16
+    }
+   },
+   {
+    "account": "merchant:halcyon",
+    "ammo_target": 0,
+    "credit_reserve": 400,
+    "defense": 1,
+    "holdings": {
+     "ammo": 75,
+     "credits": 4232,
+     "fuel": 90,
+     "med": 35
+    },
+    "id": "halcyon",
+    "kind": "merchant",
+    "name": "Halcyon Logistics",
+    "recent_raids": 0,
+    "requirement": {
+     "ammo": 0,
+     "fuel": 0,
+     "med": 0
+    }
+   },
+   {
+    "account": "faction:vanguard",
+    "ammo_target": 100,
+    "credit_reserve": 600,
+    "defense": 4,
+    "holdings": {
+     "ammo": 189,
+     "credits": 10384,
+     "fuel": 182,
+     "med": 20
+    },
+    "id": "vanguard",
+    "kind": "faction",
+    "name": "Vanguard",
+    "recent_raids": 0,
+    "requirement": {
+     "ammo": 48,
+     "fuel": 96,
+     "med": 24
+    }
+   },
+   {
+    "account": "merchant:vex",
+    "ammo_target": 0,
+    "credit_reserve": 300,
+    "defense": 1,
+    "holdings": {
+     "ammo": 131,
+     "credits": 5532,
+     "fuel": 131,
+     "med": 53
+    },
+    "id": "vex",
+    "kind": "merchant",
+    "name": "Vex Exchange",
+    "recent_raids": 0,
+    "requirement": {
+     "ammo": 0,
+     "fuel": 0,
+     "med": 0
+    }
+   }
+  ],
+  "board": [
+   {
+    "bounty": null,
+    "defense": 1,
+    "disrupted": false,
+    "guards": {
+     "ammo_available": 36,
+     "guard_hp": 100,
+     "hall": {
+      "rifles": 0,
+      "sidearms": 2
+     },
+     "planned": 7,
+     "reinforce_every_secs_x100": 410,
+     "reinforce_per_drop": 2,
+     "sidearm_damage_bp": 4500,
+     "yard": {
+      "rifles": 4,
+      "sidearms": 0
+     }
+    },
+    "kind": "raid",
+    "manifest": 53,
+    "market_value": {
+     "bid": 689,
+     "unit_bid": 13
+    },
+    "mission": {
+     "cargo": {
+      "resource": "ammo",
+      "units": 53
+     },
+     "conditions": {
+      "accuracy_bp": 10000,
+      "hour": 6,
+      "lighting": "Full daylight",
+      "next_change_hour": 17,
+      "next_phase": "dusk",
+      "nvg": false,
+      "patrol": "Day shift: full patrols, long sight lines",
+      "phase": "day",
+      "reinforce_bp": 10000,
+      "sight_m": 30,
+      "ticks_to_change": 11
+     },
+     "cues": {
+      "deliveries": [],
+      "lines_down": [],
+      "tick": 342
+     },
+     "defense": 1,
+     "field": {
+      "cases": [
+       {
+        "id": "case-1",
+        "units": 18
+       },
+       {
+        "id": "case-2",
+        "units": 18
+       },
+       {
+        "id": "case-3",
+        "units": 17
+       }
+      ],
+      "charges": [],
+      "containers": [
+       {
+        "id": "ammo-1",
+        "kind": "ammo",
+        "qty": 3
+       },
+       {
+        "id": "med-1",
+        "kind": "med",
+        "qty": 2
+       }
+      ]
+     },
+     "guards": {
+      "ammo_available": 36,
+      "guard_hp": 100,
+      "hall": {
+       "rifles": 0,
+       "sidearms": 2
+      },
+      "planned": 7,
+      "reinforce_every_secs_x100": 410,
+      "reinforce_per_drop": 2,
+      "sidearm_damage_bp": 4500,
+      "yard": {
+       "rifles": 4,
+       "sidearms": 0
+      }
+     },
+     "id": "ashen-ammo-342",
+     "issuer": null,
+     "kind": "raid",
+     "seed": 683514555,
+     "site": {
+      "environment": "Refinery: tank farm, fractionation columns, loading bay, arms shed, control room",
+      "exfil": "the flatbed on the road outside the south gate",
+      "facility": "loading bay",
+      "id": "cinder-yard",
+      "layout": "cinder_yard",
+      "name": "Cinder Yard",
+      "owner": "ashen",
+      "region": "Dustline basin, refinery flats",
+      "shared_layout": false
+     },
+     "target": "Ashen Compact",
+     "zone": "DUSTLINE"
+    },
+    "resource": "ammo",
+    "site": {
+     "environment": "Refinery: tank farm, fractionation columns, loading bay, arms shed, control room",
+     "exfil": "the flatbed on the road outside the south gate",
+     "facility": "loading bay",
+     "id": "cinder-yard",
+     "layout": "cinder_yard",
+     "name": "Cinder Yard",
+     "owner": "ashen",
+     "region": "Dustline basin, refinery flats",
+     "shared_layout": false
+    },
+    "target": "ashen",
+    "target_name": "Ashen Compact"
+   },
+   {
+    "bounty": null,
+    "defense": 1,
+    "disrupted": false,
+    "guards": {
+     "ammo_available": 89,
+     "guard_hp": 100,
+     "hall": {
+      "rifles": 3,
+      "sidearms": 0
+     },
+     "planned": 7,
+     "reinforce_every_secs_x100": 410,
+     "reinforce_per_drop": 2,
+     "sidearm_damage_bp": 4500,
+     "yard": {
+      "rifles": 4,
+      "sidearms": 0
+     }
+    },
+    "kind": "raid",
+    "manifest": 460,
+    "market_value": {
+     "bid": 8740,
+     "unit_bid": 19
+    },
+    "mission": {
+     "cargo": {
+      "resource": "fuel",
+      "units": 460
+     },
+     "conditions": {
+      "accuracy_bp": 10000,
+      "hour": 6,
+      "lighting": "Full daylight",
+      "next_change_hour": 17,
+      "next_phase": "dusk",
+      "nvg": false,
+      "patrol": "Day shift: full patrols, long sight lines",
+      "phase": "day",
+      "reinforce_bp": 10000,
+      "sight_m": 30,
+      "ticks_to_change": 11
+     },
+     "cues": {
+      "deliveries": [],
+      "lines_down": [],
+      "tick": 342
+     },
+     "defense": 1,
+     "field": {
+      "cases": [
+       {
+        "id": "case-1",
+        "units": 115
+       },
+       {
+        "id": "case-2",
+        "units": 115
+       },
+       {
+        "id": "case-3",
+        "units": 115
+       },
+       {
+        "id": "case-4",
+        "units": 115
+       }
+      ],
+      "charges": [],
+      "containers": [
+       {
+        "id": "ammo-1",
+        "kind": "ammo",
+        "qty": 3
+       },
+       {
+        "id": "ammo-2",
+        "kind": "ammo",
+        "qty": 3
+       },
+       {
+        "id": "med-1",
+        "kind": "med",
+        "qty": 2
+       }
+      ]
+     },
+     "guards": {
+      "ammo_available": 89,
+      "guard_hp": 100,
+      "hall": {
+       "rifles": 3,
+       "sidearms": 0
+      },
+      "planned": 7,
+      "reinforce_every_secs_x100": 410,
+      "reinforce_per_drop": 2,
+      "sidearm_damage_bp": 4500,
+      "yard": {
+       "rifles": 4,
+       "sidearms": 0
+      }
+     },
+     "id": "ashen-fuel-342",
+     "issuer": null,
+     "kind": "raid",
+     "seed": 3190015004,
+     "site": {
+      "environment": "Refinery: tank farm, fractionation columns, loading bay, arms shed, control room",
+      "exfil": "the flatbed on the road outside the south gate",
+      "facility": "loading bay",
+      "id": "cinder-yard",
+      "layout": "cinder_yard",
+      "name": "Cinder Yard",
+      "owner": "ashen",
+      "region": "Dustline basin, refinery flats",
+      "shared_layout": false
+     },
+     "target": "Ashen Compact",
+     "zone": "DUSTLINE"
+    },
+    "resource": "fuel",
+    "site": {
+     "environment": "Refinery: tank farm, fractionation columns, loading bay, arms shed, control room",
+     "exfil": "the flatbed on the road outside the south gate",
+     "facility": "loading bay",
+     "id": "cinder-yard",
+     "layout": "cinder_yard",
+     "name": "Cinder Yard",
+     "owner": "ashen",
+     "region": "Dustline basin, refinery flats",
+     "shared_layout": false
+    },
+    "target": "ashen",
+    "target_name": "Ashen Compact"
+   },
+   {
+    "bounty": null,
+    "defense": 4,
+    "disrupted": false,
+    "guards": {
+     "ammo_available": 76,
+     "guard_hp": 136,
+     "hall": {
+      "rifles": 2,
+      "sidearms": 2
+     },
+     "planned": 13,
+     "reinforce_every_secs_x100": 290,
+     "reinforce_per_drop": 1,
+     "sidearm_damage_bp": 4500,
+     "yard": {
+      "rifles": 7,
+      "sidearms": 0
+     }
+    },
+    "kind": "raid",
+    "manifest": 113,
+    "market_value": {
+     "bid": 1469,
+     "unit_bid": 13
+    },
+    "mission": {
+     "cargo": {
+      "resource": "ammo",
+      "units": 113
+     },
+     "conditions": {
+      "accuracy_bp": 10000,
+      "hour": 6,
+      "lighting": "Full daylight",
+      "next_change_hour": 17,
+      "next_phase": "dusk",
+      "nvg": false,
+      "patrol": "Day shift: full patrols, long sight lines",
+      "phase": "day",
+      "reinforce_bp": 10000,
+      "sight_m": 30,
+      "ticks_to_change": 11
+     },
+     "cues": {
+      "deliveries": [],
+      "lines_down": [],
+      "tick": 342
+     },
+     "defense": 4,
+     "field": {
+      "cases": [
+       {
+        "id": "case-1",
+        "units": 29
+       },
+       {
+        "id": "case-2",
+        "units": 28
+       },
+       {
+        "id": "case-3",
+        "units": 28
+       },
+       {
+        "id": "case-4",
+        "units": 28
+       }
+      ],
+      "charges": [],
+      "containers": [
+       {
+        "id": "ammo-1",
+        "kind": "ammo",
+        "qty": 3
+       },
+       {
+        "id": "ammo-2",
+        "kind": "ammo",
+        "qty": 3
+       },
+       {
+        "id": "med-1",
+        "kind": "med",
+        "qty": 2
+       },
+       {
+        "id": "med-2",
+        "kind": "med",
+        "qty": 2
+       }
+      ]
+     },
+     "guards": {
+      "ammo_available": 76,
+      "guard_hp": 136,
+      "hall": {
+       "rifles": 2,
+       "sidearms": 2
+      },
+      "planned": 13,
+      "reinforce_every_secs_x100": 290,
+      "reinforce_per_drop": 1,
+      "sidearm_damage_bp": 4500,
+      "yard": {
+       "rifles": 7,
+       "sidearms": 0
+      }
+     },
+     "id": "vanguard-ammo-342",
+     "issuer": null,
+     "kind": "raid",
+     "seed": 683514555,
+     "site": {
+      "environment": "Outdoor logistics yard: motor pool, container wall, warehouse",
+      "exfil": "Vex's flatbed at the south gate",
+      "facility": "munitions warehouse",
+      "id": "dustline-depot",
+      "layout": "dustline_depot",
+      "name": "Dustline Depot",
+      "owner": "vanguard",
+      "region": "Dustline basin, south road",
+      "shared_layout": false
+     },
+     "target": "Vanguard",
+     "zone": "DUSTLINE"
+    },
+    "resource": "ammo",
+    "site": {
+     "environment": "Outdoor logistics yard: motor pool, container wall, warehouse",
+     "exfil": "Vex's flatbed at the south gate",
+     "facility": "munitions warehouse",
+     "id": "dustline-depot",
+     "layout": "dustline_depot",
+     "name": "Dustline Depot",
+     "owner": "vanguard",
+     "region": "Dustline basin, south road",
+     "shared_layout": false
+    },
+    "target": "vanguard",
+    "target_name": "Vanguard"
+   },
+   {
+    "bounty": null,
+    "defense": 4,
+    "disrupted": false,
+    "guards": {
+     "ammo_available": 189,
+     "guard_hp": 136,
+     "hall": {
+      "rifles": 5,
+      "sidearms": 0
+     },
+     "planned": 13,
+     "reinforce_every_secs_x100": 290,
+     "reinforce_per_drop": 1,
+     "sidearm_damage_bp": 4500,
+     "yard": {
+      "rifles": 8,
+      "sidearms": 0
+     }
+    },
+    "kind": "raid",
+    "manifest": 12,
+    "market_value": {
+     "bid": 540,
+     "unit_bid": 45
+    },
+    "mission": {
+     "cargo": {
+      "resource": "med",
+      "units": 12
+     },
+     "conditions": {
+      "accuracy_bp": 10000,
+      "hour": 6,
+      "lighting": "Full daylight",
+      "next_change_hour": 17,
+      "next_phase": "dusk",
+      "nvg": false,
+      "patrol": "Day shift: full patrols, long sight lines",
+      "phase": "day",
+      "reinforce_bp": 10000,
+      "sight_m": 30,
+      "ticks_to_change": 11
+     },
+     "cues": {
+      "deliveries": [],
+      "lines_down": [],
+      "tick": 342
+     },
+     "defense": 4,
+     "field": {
+      "cases": [
+       {
+        "id": "case-1",
+        "units": 12
+       }
+      ],
+      "charges": [],
+      "containers": [
+       {
+        "id": "ammo-1",
+        "kind": "ammo",
+        "qty": 3
+       },
+       {
+        "id": "ammo-2",
+        "kind": "ammo",
+        "qty": 3
+       },
+       {
+        "id": "ammo-3",
+        "kind": "ammo",
+        "qty": 3
+       },
+       {
+        "id": "ammo-4",
+        "kind": "ammo",
+        "qty": 3
+       },
+       {
+        "id": "med-1",
+        "kind": "med",
+        "qty": 2
+       },
+       {
+        "id": "med-2",
+        "kind": "med",
+        "qty": 2
+       }
+      ]
+     },
+     "guards": {
+      "ammo_available": 189,
+      "guard_hp": 136,
+      "hall": {
+       "rifles": 5,
+       "sidearms": 0
+      },
+      "planned": 13,
+      "reinforce_every_secs_x100": 290,
+      "reinforce_per_drop": 1,
+      "sidearm_damage_bp": 4500,
+      "yard": {
+       "rifles": 8,
+       "sidearms": 0
+      }
+     },
+     "id": "vanguard-med-342",
+     "issuer": null,
+     "kind": "raid",
+     "seed": 2042633415,
+     "site": {
+      "environment": "Fortified research facility: floodlit courtyard, labs, control room, vault",
+      "exfil": "landing zone outside the gate",
+      "facility": "medical vault",
+      "id": "blacksite",
+      "layout": "blacksite",
+      "name": "Blacksite",
+      "owner": "vanguard",
+      "region": "Dustline basin, north ridge",
+      "shared_layout": false
+     },
+     "target": "Vanguard",
+     "zone": "DUSTLINE"
+    },
+    "resource": "med",
+    "site": {
+     "environment": "Fortified research facility: floodlit courtyard, labs, control room, vault",
+     "exfil": "landing zone outside the gate",
+     "facility": "medical vault",
+     "id": "blacksite",
+     "layout": "blacksite",
+     "name": "Blacksite",
+     "owner": "vanguard",
+     "region": "Dustline basin, north ridge",
+     "shared_layout": false
+    },
+    "target": "vanguard",
+    "target_name": "Vanguard"
+   },
+   {
+    "bounty": {
+     "amount": 770,
+     "expires_at": 353,
+     "id": 451,
+     "sponsor": "ashen",
+     "sponsor_name": "Ashen Compact"
+    },
+    "defense": 4,
+    "disrupted": false,
+    "guards": {
+     "ammo_available": 189,
+     "guard_hp": 136,
+     "hall": {
+      "rifles": 5,
+      "sidearms": 0
+     },
+     "planned": 13,
+     "reinforce_every_secs_x100": 290,
+     "reinforce_per_drop": 1,
+     "sidearm_damage_bp": 4500,
+     "yard": {
+      "rifles": 8,
+      "sidearms": 0
+     }
+    },
+    "kind": "raid",
+    "manifest": 109,
+    "market_value": {
+     "bid": 2071,
+     "unit_bid": 19
+    },
+    "mission": {
+     "cargo": {
+      "resource": "fuel",
+      "units": 109
+     },
+     "conditions": {
+      "accuracy_bp": 10000,
+      "hour": 6,
+      "lighting": "Full daylight",
+      "next_change_hour": 17,
+      "next_phase": "dusk",
+      "nvg": false,
+      "patrol": "Day shift: full patrols, long sight lines",
+      "phase": "day",
+      "reinforce_bp": 10000,
+      "sight_m": 30,
+      "ticks_to_change": 11
+     },
+     "cues": {
+      "deliveries": [],
+      "lines_down": [],
+      "tick": 342
+     },
+     "defense": 4,
+     "field": {
+      "cases": [
+       {
+        "id": "case-1",
+        "units": 28
+       },
+       {
+        "id": "case-2",
+        "units": 27
+       },
+       {
+        "id": "case-3",
+        "units": 27
+       },
+       {
+        "id": "case-4",
+        "units": 27
+       }
+      ],
+      "charges": [],
+      "containers": [
+       {
+        "id": "ammo-1",
+        "kind": "ammo",
+        "qty": 3
+       },
+       {
+        "id": "ammo-2",
+        "kind": "ammo",
+        "qty": 3
+       },
+       {
+        "id": "ammo-3",
+        "kind": "ammo",
+        "qty": 3
+       },
+       {
+        "id": "ammo-4",
+        "kind": "ammo",
+        "qty": 3
+       },
+       {
+        "id": "med-1",
+        "kind": "med",
+        "qty": 2
+       },
+       {
+        "id": "med-2",
+        "kind": "med",
+        "qty": 2
+       }
+      ]
+     },
+     "guards": {
+      "ammo_available": 189,
+      "guard_hp": 136,
+      "hall": {
+       "rifles": 5,
+       "sidearms": 0
+      },
+      "planned": 13,
+      "reinforce_every_secs_x100": 290,
+      "reinforce_per_drop": 1,
+      "sidearm_damage_bp": 4500,
+      "yard": {
+       "rifles": 8,
+       "sidearms": 0
+      }
+     },
+     "id": "vanguard-fuel-342",
+     "issuer": "Ashen Compact",
+     "kind": "raid",
+     "seed": 3190015004,
+     "site": {
+      "environment": "Outdoor logistics yard: motor pool, container wall, warehouse",
+      "exfil": "Vex's flatbed at the south gate",
+      "facility": "motor-pool fuel depot",
+      "id": "dustline-depot",
+      "layout": "dustline_depot",
+      "name": "Dustline Depot",
+      "owner": "vanguard",
+      "region": "Dustline basin, south road",
+      "shared_layout": false
+     },
+     "target": "Vanguard",
+     "zone": "DUSTLINE"
+    },
+    "resource": "fuel",
+    "site": {
+     "environment": "Outdoor logistics yard: motor pool, container wall, warehouse",
+     "exfil": "Vex's flatbed at the south gate",
+     "facility": "motor-pool fuel depot",
+     "id": "dustline-depot",
+     "layout": "dustline_depot",
+     "name": "Dustline Depot",
+     "owner": "vanguard",
+     "region": "Dustline basin, south road",
+     "shared_layout": false
+    },
+    "target": "vanguard",
+    "target_name": "Vanguard"
+   }
+  ]
+ },
+ "after": {
+  "actors": [
+   {
+    "account": "faction:ashen",
+    "ammo_target": 88,
+    "credit_reserve": 500,
+    "defense": 1,
+    "holdings": {
+     "ammo": 84,
+     "credits": 3792,
+     "fuel": 775,
+     "med": 15
+    },
+    "id": "ashen",
+    "kind": "faction",
+    "name": "Ashen Compact",
+    "recent_raids": 0,
+    "requirement": {
+     "ammo": 60,
+     "fuel": 48,
+     "med": 16
+    }
+   },
+   {
+    "account": "merchant:halcyon",
+    "ammo_target": 0,
+    "credit_reserve": 400,
+    "defense": 1,
+    "holdings": {
+     "ammo": 80,
+     "credits": 4232,
+     "fuel": 90,
+     "med": 35
+    },
+    "id": "halcyon",
+    "kind": "merchant",
+    "name": "Halcyon Logistics",
+    "recent_raids": 0,
+    "requirement": {
+     "ammo": 0,
+     "fuel": 0,
+     "med": 0
+    }
+   },
+   {
+    "account": "faction:vanguard",
+    "ammo_target": 100,
+    "credit_reserve": 600,
+    "defense": 4,
+    "holdings": {
+     "ammo": 164,
+     "credits": 10514,
+     "fuel": 174,
+     "med": 18
+    },
+    "id": "vanguard",
+    "kind": "faction",
+    "name": "Vanguard",
+    "recent_raids": 1,
+    "requirement": {
+     "ammo": 48,
+     "fuel": 96,
+     "med": 24
+    }
+   },
+   {
+    "account": "merchant:vex",
+    "ammo_target": 0,
+    "credit_reserve": 300,
+    "defense": 1,
+    "holdings": {
+     "ammo": 131,
+     "credits": 5532,
+     "fuel": 131,
+     "med": 60
+    },
+    "id": "vex",
+    "kind": "merchant",
+    "name": "Vex Exchange",
+    "recent_raids": 0,
+    "requirement": {
+     "ammo": 0,
+     "fuel": 0,
+     "med": 0
+    }
+   }
+  ],
+  "board": [
+   {
+    "bounty": null,
+    "defense": 1,
+    "disrupted": false,
+    "guards": {
+     "ammo_available": 34,
+     "guard_hp": 100,
+     "hall": {
+      "rifles": 1,
+      "sidearms": 1
+     },
+     "planned": 7,
+     "reinforce_every_secs_x100": 410,
+     "reinforce_per_drop": 1,
+     "sidearm_damage_bp": 4500,
+     "yard": {
+      "rifles": 3,
+      "sidearms": 0
+     }
+    },
+    "kind": "raid",
+    "manifest": 50,
+    "market_value": {
+     "bid": 600,
+     "unit_bid": 12
+    },
+    "mission": {
+     "cargo": {
+      "resource": "ammo",
+      "units": 50
+     },
+     "conditions": {
+      "accuracy_bp": 10000,
+      "hour": 10,
+      "lighting": "Full daylight",
+      "next_change_hour": 17,
+      "next_phase": "dusk",
+      "nvg": false,
+      "patrol": "Day shift: full patrols, long sight lines",
+      "phase": "day",
+      "reinforce_bp": 10000,
+      "sight_m": 30,
+      "ticks_to_change": 7
+     },
+     "cues": {
+      "deliveries": [],
+      "lines_down": [],
+      "tick": 346
+     },
+     "defense": 1,
+     "field": {
+      "cases": [
+       {
+        "id": "case-1",
+        "units": 25
+       },
+       {
+        "id": "case-2",
+        "units": 25
+       }
+      ],
+      "charges": [],
+      "containers": [
+       {
+        "id": "ammo-1",
+        "kind": "ammo",
+        "qty": 3
+       },
+       {
+        "id": "med-1",
+        "kind": "med",
+        "qty": 2
+       }
+      ]
+     },
+     "guards": {
+      "ammo_available": 34,
+      "guard_hp": 100,
+      "hall": {
+       "rifles": 1,
+       "sidearms": 1
+      },
+      "planned": 7,
+      "reinforce_every_secs_x100": 410,
+      "reinforce_per_drop": 1,
+      "sidearm_damage_bp": 4500,
+      "yard": {
+       "rifles": 3,
+       "sidearms": 0
+      }
+     },
+     "id": "ashen-ammo-346",
+     "issuer": null,
+     "kind": "raid",
+     "seed": 2669293688,
+     "site": {
+      "environment": "Refinery: tank farm, fractionation columns, loading bay, arms shed, control room",
+      "exfil": "the flatbed on the road outside the south gate",
+      "facility": "loading bay",
+      "id": "cinder-yard",
+      "layout": "cinder_yard",
+      "name": "Cinder Yard",
+      "owner": "ashen",
+      "region": "Dustline basin, refinery flats",
+      "shared_layout": false
+     },
+     "target": "Ashen Compact",
+     "zone": "DUSTLINE"
+    },
+    "resource": "ammo",
+    "site": {
+     "environment": "Refinery: tank farm, fractionation columns, loading bay, arms shed, control room",
+     "exfil": "the flatbed on the road outside the south gate",
+     "facility": "loading bay",
+     "id": "cinder-yard",
+     "layout": "cinder_yard",
+     "name": "Cinder Yard",
+     "owner": "ashen",
+     "region": "Dustline basin, refinery flats",
+     "shared_layout": false
+    },
+    "target": "ashen",
+    "target_name": "Ashen Compact"
+   },
+   {
+    "bounty": null,
+    "defense": 1,
+    "disrupted": false,
+    "guards": {
+     "ammo_available": 84,
+     "guard_hp": 100,
+     "hall": {
+      "rifles": 3,
+      "sidearms": 0
+     },
+     "planned": 7,
+     "reinforce_every_secs_x100": 410,
+     "reinforce_per_drop": 1,
+     "sidearm_damage_bp": 4500,
+     "yard": {
+      "rifles": 4,
+      "sidearms": 0
+     }
+    },
+    "kind": "raid",
+    "manifest": 465,
+    "market_value": {
+     "bid": 8835,
+     "unit_bid": 19
+    },
+    "mission": {
+     "cargo": {
+      "resource": "fuel",
+      "units": 465
+     },
+     "conditions": {
+      "accuracy_bp": 10000,
+      "hour": 10,
+      "lighting": "Full daylight",
+      "next_change_hour": 17,
+      "next_phase": "dusk",
+      "nvg": false,
+      "patrol": "Day shift: full patrols, long sight lines",
+      "phase": "day",
+      "reinforce_bp": 10000,
+      "sight_m": 30,
+      "ticks_to_change": 7
+     },
+     "cues": {
+      "deliveries": [],
+      "lines_down": [],
+      "tick": 346
+     },
+     "defense": 1,
+     "field": {
+      "cases": [
+       {
+        "id": "case-1",
+        "units": 117
+       },
+       {
+        "id": "case-2",
+        "units": 116
+       },
+       {
+        "id": "case-3",
+        "units": 116
+       },
+       {
+        "id": "case-4",
+        "units": 116
+       }
+      ],
+      "charges": [],
+      "containers": [
+       {
+        "id": "ammo-1",
+        "kind": "ammo",
+        "qty": 3
+       },
+       {
+        "id": "ammo-2",
+        "kind": "ammo",
+        "qty": 3
+       },
+       {
+        "id": "med-1",
+        "kind": "med",
+        "qty": 2
+       }
+      ]
+     },
+     "guards": {
+      "ammo_available": 84,
+      "guard_hp": 100,
+      "hall": {
+       "rifles": 3,
+       "sidearms": 0
+      },
+      "planned": 7,
+      "reinforce_every_secs_x100": 410,
+      "reinforce_per_drop": 1,
+      "sidearm_damage_bp": 4500,
+      "yard": {
+       "rifles": 4,
+       "sidearms": 0
+      }
+     },
+     "id": "ashen-fuel-346",
+     "issuer": null,
+     "kind": "raid",
+     "seed": 109576377,
+     "site": {
+      "environment": "Refinery: tank farm, fractionation columns, loading bay, arms shed, control room",
+      "exfil": "the flatbed on the road outside the south gate",
+      "facility": "loading bay",
+      "id": "cinder-yard",
+      "layout": "cinder_yard",
+      "name": "Cinder Yard",
+      "owner": "ashen",
+      "region": "Dustline basin, refinery flats",
+      "shared_layout": false
+     },
+     "target": "Ashen Compact",
+     "zone": "DUSTLINE"
+    },
+    "resource": "fuel",
+    "site": {
+     "environment": "Refinery: tank farm, fractionation columns, loading bay, arms shed, control room",
+     "exfil": "the flatbed on the road outside the south gate",
+     "facility": "loading bay",
+     "id": "cinder-yard",
+     "layout": "cinder_yard",
+     "name": "Cinder Yard",
+     "owner": "ashen",
+     "region": "Dustline basin, refinery flats",
+     "shared_layout": false
+    },
+    "target": "ashen",
+    "target_name": "Ashen Compact"
+   },
+   {
+    "bounty": null,
+    "defense": 4,
+    "disrupted": false,
+    "guards": {
+     "ammo_available": 66,
+     "guard_hp": 136,
+     "hall": {
+      "rifles": 3,
+      "sidearms": 1
+     },
+     "planned": 13,
+     "reinforce_every_secs_x100": 290,
+     "reinforce_per_drop": 1,
+     "sidearm_damage_bp": 4500,
+     "yard": {
+      "rifles": 5,
+      "sidearms": 0
+     }
+    },
+    "kind": "raid",
+    "manifest": 98,
+    "market_value": {
+     "bid": 1176,
+     "unit_bid": 12
+    },
+    "mission": {
+     "cargo": {
+      "resource": "ammo",
+      "units": 98
+     },
+     "conditions": {
+      "accuracy_bp": 10000,
+      "hour": 10,
+      "lighting": "Full daylight",
+      "next_change_hour": 17,
+      "next_phase": "dusk",
+      "nvg": false,
+      "patrol": "Day shift: full patrols, long sight lines",
+      "phase": "day",
+      "reinforce_bp": 10000,
+      "sight_m": 30,
+      "ticks_to_change": 7
+     },
+     "cues": {
+      "deliveries": [],
+      "lines_down": [],
+      "tick": 346
+     },
+     "defense": 4,
+     "field": {
+      "cases": [
+       {
+        "id": "case-1",
+        "units": 25
+       },
+       {
+        "id": "case-2",
+        "units": 25
+       },
+       {
+        "id": "case-3",
+        "units": 24
+       },
+       {
+        "id": "case-4",
+        "units": 24
+       }
+      ],
+      "charges": [],
+      "containers": [
+       {
+        "id": "ammo-1",
+        "kind": "ammo",
+        "qty": 3
+       },
+       {
+        "id": "ammo-2",
+        "kind": "ammo",
+        "qty": 3
+       },
+       {
+        "id": "med-1",
+        "kind": "med",
+        "qty": 2
+       }
+      ]
+     },
+     "guards": {
+      "ammo_available": 66,
+      "guard_hp": 136,
+      "hall": {
+       "rifles": 3,
+       "sidearms": 1
+      },
+      "planned": 13,
+      "reinforce_every_secs_x100": 290,
+      "reinforce_per_drop": 1,
+      "sidearm_damage_bp": 4500,
+      "yard": {
+       "rifles": 5,
+       "sidearms": 0
+      }
+     },
+     "id": "vanguard-ammo-346",
+     "issuer": null,
+     "kind": "raid",
+     "seed": 2669293688,
+     "site": {
+      "environment": "Outdoor logistics yard: motor pool, container wall, warehouse",
+      "exfil": "Vex's flatbed at the south gate",
+      "facility": "munitions warehouse",
+      "id": "dustline-depot",
+      "layout": "dustline_depot",
+      "name": "Dustline Depot",
+      "owner": "vanguard",
+      "region": "Dustline basin, south road",
+      "shared_layout": false
+     },
+     "target": "Vanguard",
+     "zone": "DUSTLINE"
+    },
+    "resource": "ammo",
+    "site": {
+     "environment": "Outdoor logistics yard: motor pool, container wall, warehouse",
+     "exfil": "Vex's flatbed at the south gate",
+     "facility": "munitions warehouse",
+     "id": "dustline-depot",
+     "layout": "dustline_depot",
+     "name": "Dustline Depot",
+     "owner": "vanguard",
+     "region": "Dustline basin, south road",
+     "shared_layout": false
+    },
+    "target": "vanguard",
+    "target_name": "Vanguard"
+   },
+   {
+    "bounty": null,
+    "defense": 4,
+    "disrupted": false,
+    "guards": {
+     "ammo_available": 164,
+     "guard_hp": 136,
+     "hall": {
+      "rifles": 5,
+      "sidearms": 0
+     },
+     "planned": 13,
+     "reinforce_every_secs_x100": 290,
+     "reinforce_per_drop": 1,
+     "sidearm_damage_bp": 4500,
+     "yard": {
+      "rifles": 8,
+      "sidearms": 0
+     }
+    },
+    "kind": "raid",
+    "manifest": 10,
+    "market_value": {
+     "bid": 380,
+     "unit_bid": 38
+    },
+    "mission": {
+     "cargo": {
+      "resource": "med",
+      "units": 10
+     },
+     "conditions": {
+      "accuracy_bp": 10000,
+      "hour": 10,
+      "lighting": "Full daylight",
+      "next_change_hour": 17,
+      "next_phase": "dusk",
+      "nvg": false,
+      "patrol": "Day shift: full patrols, long sight lines",
+      "phase": "day",
+      "reinforce_bp": 10000,
+      "sight_m": 30,
+      "ticks_to_change": 7
+     },
+     "cues": {
+      "deliveries": [],
+      "lines_down": [],
+      "tick": 346
+     },
+     "defense": 4,
+     "field": {
+      "cases": [
+       {
+        "id": "case-1",
+        "units": 10
+       }
+      ],
+      "charges": [],
+      "containers": [
+       {
+        "id": "ammo-1",
+        "kind": "ammo",
+        "qty": 3
+       },
+       {
+        "id": "ammo-2",
+        "kind": "ammo",
+        "qty": 3
+       },
+       {
+        "id": "ammo-3",
+        "kind": "ammo",
+        "qty": 3
+       },
+       {
+        "id": "med-1",
+        "kind": "med",
+        "qty": 2
+       }
+      ]
+     },
+     "guards": {
+      "ammo_available": 164,
+      "guard_hp": 136,
+      "hall": {
+       "rifles": 5,
+       "sidearms": 0
+      },
+      "planned": 13,
+      "reinforce_every_secs_x100": 290,
+      "reinforce_per_drop": 1,
+      "sidearm_damage_bp": 4500,
+      "yard": {
+       "rifles": 8,
+       "sidearms": 0
+      }
+     },
+     "id": "vanguard-med-346",
+     "issuer": null,
+     "kind": "raid",
+     "seed": 1439911641,
+     "site": {
+      "environment": "Fortified research facility: floodlit courtyard, labs, control room, vault",
+      "exfil": "landing zone outside the gate",
+      "facility": "medical vault",
+      "id": "blacksite",
+      "layout": "blacksite",
+      "name": "Blacksite",
+      "owner": "vanguard",
+      "region": "Dustline basin, north ridge",
+      "shared_layout": false
+     },
+     "target": "Vanguard",
+     "zone": "DUSTLINE"
+    },
+    "resource": "med",
+    "site": {
+     "environment": "Fortified research facility: floodlit courtyard, labs, control room, vault",
+     "exfil": "landing zone outside the gate",
+     "facility": "medical vault",
+     "id": "blacksite",
+     "layout": "blacksite",
+     "name": "Blacksite",
+     "owner": "vanguard",
+     "region": "Dustline basin, north ridge",
+     "shared_layout": false
+    },
+    "target": "vanguard",
+    "target_name": "Vanguard"
+   },
+   {
+    "bounty": {
+     "amount": 770,
+     "expires_at": 353,
+     "id": 451,
+     "sponsor": "ashen",
+     "sponsor_name": "Ashen Compact"
+    },
+    "defense": 4,
+    "disrupted": false,
+    "guards": {
+     "ammo_available": 164,
+     "guard_hp": 136,
+     "hall": {
+      "rifles": 5,
+      "sidearms": 0
+     },
+     "planned": 13,
+     "reinforce_every_secs_x100": 290,
+     "reinforce_per_drop": 1,
+     "sidearm_damage_bp": 4500,
+     "yard": {
+      "rifles": 8,
+      "sidearms": 0
+     }
+    },
+    "kind": "raid",
+    "manifest": 104,
+    "market_value": {
+     "bid": 1976,
+     "unit_bid": 19
+    },
+    "mission": {
+     "cargo": {
+      "resource": "fuel",
+      "units": 104
+     },
+     "conditions": {
+      "accuracy_bp": 10000,
+      "hour": 10,
+      "lighting": "Full daylight",
+      "next_change_hour": 17,
+      "next_phase": "dusk",
+      "nvg": false,
+      "patrol": "Day shift: full patrols, long sight lines",
+      "phase": "day",
+      "reinforce_bp": 10000,
+      "sight_m": 30,
+      "ticks_to_change": 7
+     },
+     "cues": {
+      "deliveries": [],
+      "lines_down": [],
+      "tick": 346
+     },
+     "defense": 4,
+     "field": {
+      "cases": [
+       {
+        "id": "case-1",
+        "units": 26
+       },
+       {
+        "id": "case-2",
+        "units": 26
+       },
+       {
+        "id": "case-3",
+        "units": 26
+       },
+       {
+        "id": "case-4",
+        "units": 26
+       }
+      ],
+      "charges": [],
+      "containers": [
+       {
+        "id": "ammo-1",
+        "kind": "ammo",
+        "qty": 3
+       },
+       {
+        "id": "ammo-2",
+        "kind": "ammo",
+        "qty": 3
+       },
+       {
+        "id": "ammo-3",
+        "kind": "ammo",
+        "qty": 3
+       },
+       {
+        "id": "med-1",
+        "kind": "med",
+        "qty": 2
+       }
+      ]
+     },
+     "guards": {
+      "ammo_available": 164,
+      "guard_hp": 136,
+      "hall": {
+       "rifles": 5,
+       "sidearms": 0
+      },
+      "planned": 13,
+      "reinforce_every_secs_x100": 290,
+      "reinforce_per_drop": 1,
+      "sidearm_damage_bp": 4500,
+      "yard": {
+       "rifles": 8,
+       "sidearms": 0
+      }
+     },
+     "id": "vanguard-fuel-346",
+     "issuer": "Ashen Compact",
+     "kind": "raid",
+     "seed": 109576377,
+     "site": {
+      "environment": "Outdoor logistics yard: motor pool, container wall, warehouse",
+      "exfil": "Vex's flatbed at the south gate",
+      "facility": "motor-pool fuel depot",
+      "id": "dustline-depot",
+      "layout": "dustline_depot",
+      "name": "Dustline Depot",
+      "owner": "vanguard",
+      "region": "Dustline basin, south road",
+      "shared_layout": false
+     },
+     "target": "Vanguard",
+     "zone": "DUSTLINE"
+    },
+    "resource": "fuel",
+    "site": {
+     "environment": "Outdoor logistics yard: motor pool, container wall, warehouse",
+     "exfil": "Vex's flatbed at the south gate",
+     "facility": "motor-pool fuel depot",
+     "id": "dustline-depot",
+     "layout": "dustline_depot",
+     "name": "Dustline Depot",
+     "owner": "vanguard",
+     "region": "Dustline basin, south road",
+     "shared_layout": false
+    },
+    "target": "vanguard",
+    "target_name": "Vanguard"
+   }
+  ]
+ }
+}

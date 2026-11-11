@@ -135,9 +135,10 @@ export function Debrief({ lines }: { lines: { id: string; speaker: string; text:
       {lines.map((l) => {
         const s = speaker(l.speaker)
         return (
-          <div key={l.id} className="grid gap-1 sm:grid-cols-[10rem_1fr] sm:gap-3">
+          <div key={l.id} className="grid grid-cols-[2.5rem_1fr] gap-x-3 gap-y-0.5">
+            <span className="row-span-2" style={{ color: s.color }}><Portrait id={l.speaker} size={40} title="" /></span>
             <span className="font-display text-xs font-bold uppercase tracking-[0.2em]" style={{ color: s.color }}>{s.name}</span>
-            <p className="text-sm text-slate-200">{l.text}</p>
+            <p className="text-sm text-fog">{l.text}</p>
           </div>
         )
       })}

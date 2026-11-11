@@ -5,21 +5,20 @@ import Link from 'next/link'
 import { Rajdhani } from 'next/font/google'
 import { useSearchParams } from 'next/navigation'
 import { Suspense, useMemo, useState } from 'react'
-import { Briefing, Debrief } from '@/components/story/Briefing'
+import { Briefing } from '@/components/story/Briefing'
 import { GunStatBars } from '@/components/armory/GunStatBars'
 import { ScreenTip } from '@/components/help/ScreenTip'
-import { ConsequenceTip } from '@/components/help/ConsequenceTip'
 import type { MissionStory } from '@/engine/story/presence'
-import { Panel, Shell, Stat } from '@/components/ui/Shell'
+import { Panel, Shell } from '@/components/ui/Shell'
 import { buildOperationMission } from '@/engine/fps/convoy'
 import { GUN_CATALOG, type GunId } from '@/engine/combat/GunStats'
 import type { ContractRunStats } from '@/engine/scene/ContractZeroScene'
 import { useQuery } from '@tanstack/react-query'
 import { useSession } from '@/lib/useSession'
-import { api, RESOURCE_LABEL, type OpKind, type BoardEntry, type MissionResult, type MissionStart, type ResourceName, type WorldView } from '@/lib/api'
+import { api, RESOURCE_LABEL, type OpKind, type MissionResult, type MissionStart, type ResourceName, type WorldView } from '@/lib/api'
 import { OperationIntel } from '@/components/world/OperationIntel'
 import { ReadinessSummary, useReadinessData } from '@/components/world/Readiness'
-import { ConsequencePanel } from '@/components/world/Consequence'
+import { MissionResults } from '@/components/world/MissionResults'
 import { useMusicState } from '@/components/audio/AudioProvider'
 import { WorldClockPanel } from '@/components/world/WorldClock'
 import { MissionStream } from '@/lib/missionStream'
@@ -50,38 +49,6 @@ type Phase =
   | { kind: 'reporting' }
   | { kind: 'results'; session: string; result: MissionResult; before: WorldView; after: WorldView }
   | { kind: 'error'; message: string }
-
-const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`
-
-function guardsLine(e?: BoardEntry) {
-  if (!e) return 'no depot (not worth raiding, or no fuel to stage it)'
-  const g = e.guards
-  return `${plural(g.hall.rifles + g.yard.rifles, "rifle")}, ${plural(g.hall.sidearms + g.yard.sidearms, "sidearm")}, ${g.reinforce_per_drop} reinforcements per wave, defense L${e.defense}`
-}
-
-/** Shows on-chain settlement only once it is confirmed (verified FINAL on NEAR). */
-function SettlementStatus({ opId }: { opId: string }) {
-  const q = useQuery({
-    queryKey: ['settlement', opId],
-    queryFn: () => api.settlement(opId),
-    refetchInterval: (query) => (query.state.data && ['confirmed', 'failed', 'compensated'].includes(query.state.data.status) ? false : 3000),
-  })
-  const s = q.data
-  if (!s || !s.settled_on_chain) {
-    if (s && (s.status === 'failed' || s.status === 'compensated')) {
-      return <p className="text-sm text-rose-400">On-chain settlement failed: {s.error}</p>
-    }
-    return <p className="text-sm text-slate-400">Settling on NEAR… ({s?.status ?? 'queued'}). Not settled until confirmed.</p>
-  }
-  return (
-    <p className="text-sm text-emerald-400">
-      Settled on NEAR testnet:{' '}
-      {s.explorer.map((url, i) => (
-        <a key={url} href={url} target="_blank" rel="noreferrer" className="underline">{s.tx_hashes[i].slice(0, 10)}…</a>
-      ))}
-    </p>
-  )
-}
 
 function Deploy() {
   const params = useSearchParams()
@@ -194,61 +161,7 @@ function Deploy() {
     )
   }
 
-  if (phase.kind === 'results') {
-    const { result, before, after, session } = phase
-    const vgBefore = before.actors.find((a) => a.id === result.target)
-    const vgAfter = after.actors.find((a) => a.id === result.target)
-    const nextBefore = before.board.find((b) => b.target === result.target && b.resource === result.resource)
-    const nextAfter = after.board.find((b) => b.target === result.target && b.resource === result.resource)
-    const won = result.outcome === 'extracted'
-    return (
-      <Shell title="Extraction Results" back={{ href: '/contracts', label: 'Contract Board' }}>
-        <Panel>
-          <div className={`text-2xl font-bold ${won ? 'text-emerald-400' : 'text-rose-400'}`}>
-            {won ? (result.kind === 'sabotage' ? 'LINE DESTROYED' : result.kind === 'recovery' ? 'CARGO HANDED OVER' : 'CARGO EXTRACTED') : result.outcome === 'killed' ? 'KILLED IN ACTION · NOTHING SECURED' : 'RUN REJECTED'}
-          </div>
-          {result.reason && <p className="mt-1 text-sm text-amber-400">The server rejected the run: {result.reason}.</p>}
-          {result.settlement && <div className="mt-2"><SettlementStatus opId={result.settlement.op_id} /></div>}
-          <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <Stat label={result.kind === 'sabotage' ? 'Destroyed' : result.kind === 'recovery' ? 'Returned' : 'Extracted'} value={`${result.extracted_units} ${result.resource}`}
-              hint={result.kind === 'raid' && result.record ? `${result.record.secured.length} case${result.record.secured.length === 1 ? '' : 's'} carried out of ${result.manifest ?? '?'} units on site` : result.kind === 'sabotage' && result.record ? `${result.record.charges.length} charges set` : undefined} />
-            <Stat label="Bounty" value={`${result.bounty} cr`} />
-            <Stat label="Mission time" value={`${Math.round(result.elapsed_secs)} s`} hint={`minimum ${result.min_secs} s`} />
-            <Stat label="You now hold" value={`${result.player_holdings.cargo} ${result.resource}`} hint={`${result.player_holdings.credits} credits`} />
-          </div>
-        </Panel>
-        {won && <ConsequenceTip target={vgAfter?.name ?? result.target} />}
-        {result.debrief && result.debrief.length > 0 && (
-          <Panel title={result.codename ? `DEBRIEF · ${result.codename}` : 'DEBRIEF'} className="mt-4">
-            <Debrief lines={result.debrief} />
-          </Panel>
-        )}
-        <ConsequencePanel session={session} result={result} />
-        {/* Sessions from before recording have no snapshot: fall back to this browser's two
-            reads of the world, labelled as such. */}
-        {!result.consequence && <div className="mt-4 grid gap-4 md:grid-cols-2">
-          <Panel title={`FROM THIS BROWSER: ${(vgAfter?.name ?? result.target).toUpperCase()} BEFORE AND AFTER`}>
-            {vgBefore && vgAfter && (
-              <div className="grid grid-cols-3 gap-3">
-                {(['ammo', 'med', 'fuel'] as const).map((r) => (
-                  <Stat key={r} label={RESOURCE_LABEL[r]} value={`${vgBefore.holdings[r]} → ${vgAfter.holdings[r]}`} />
-                ))}
-              </div>
-            )}
-          </Panel>
-          <Panel title="THE NEXT RAID ON THIS DEPOT">
-            <p className="text-sm text-slate-400">Before: {guardsLine(nextBefore)}</p>
-            <p className="mt-1 text-sm text-slate-100">Now: {guardsLine(nextAfter)}</p>
-            <p className="mt-2 text-xs text-slate-500">The commander reacts on the next world tick; check the board again in a minute.</p>
-          </Panel>
-        </div>}
-        <div className="mt-6 flex gap-3">
-          <Link href="/contracts" className="cz-btn cz-btn-primary px-5 py-2 text-sm">Back to the board</Link>
-          <Link href="/" className="cz-btn cz-btn-ghost px-5 py-2 text-sm">Hub</Link>
-        </div>
-      </Shell>
-    )
-  }
+  if (phase.kind === 'results') return <MissionResults result={phase.result} before={phase.before} after={phase.after} session={phase.session} />
 
   if (phase.kind === 'intel' || phase.kind === 'starting') {
     return (

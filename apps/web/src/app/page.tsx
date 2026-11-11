@@ -53,14 +53,7 @@ function NextOperation({ e, others, signedIn }: { e: BoardEntry; others: BoardEn
         <div><div className="cz-label !text-[10px]">Resale</div><div className="cz-num font-display text-xl font-bold text-amber-hi">{e.market_value.bid}</div><div className="text-xs text-muted">credits at Vex</div></div>
         <div><div className="cz-label !text-[10px]">Bounty</div><div className="cz-num font-display text-xl font-bold">{e.bounty ? e.bounty.amount : '—'}</div><div className="text-xs text-muted">{e.bounty ? `from ${e.bounty.sponsor_name}` : 'none posted'}</div></div>
       </div>
-      <div className="mt-4 border-l-2 border-hostile/70 pl-3 text-sm">
-        <div><span className="font-semibold text-fog">{g.arms}</span> <span className="text-muted">· HP {e.guards.guard_hp}{g.stayedHome > 0 ? ` · ${g.stayedHome} stayed home, no ammunition to arm them` : ''}</span></div>
-        <div className="text-muted">{g.medical}</div>
-      </div>
-      <p className="mt-3 text-sm text-muted">
-        Taking it strips {e.target_name} of {e.manifest} {e.resource}. Expect its commander to restock from Vex, and its next patrols to field what it can still arm.
-      </p>
-      <div className="mt-5 flex flex-wrap gap-3">
+      <div className="mt-4 flex flex-wrap gap-3">
         {signedIn ? (
           <Link href={`/deploy?target=${e.target}&resource=${e.resource}&kind=${e.kind}`} className="cz-btn cz-btn-primary px-6 py-2.5 text-sm">Brief &amp; deploy</Link>
         ) : (
@@ -69,6 +62,13 @@ function NextOperation({ e, others, signedIn }: { e: BoardEntry; others: BoardEn
         <Link href="/contracts" className="cz-btn cz-btn-ghost px-5 py-2.5 text-sm">All contracts{others.length ? ` (${others.length + 1})` : ''}</Link>
         <HowToPlayButton className="cz-btn cz-btn-ghost px-5 py-2.5 text-sm" />
       </div>
+      <div className="mt-4 border-l-2 border-hostile/70 pl-3 text-sm">
+        <div><span className="font-semibold text-fog">{g.arms}</span> <span className="text-muted">· HP {e.guards.guard_hp}{g.stayedHome > 0 ? ` · ${g.stayedHome} stayed home, no ammunition to arm them` : ''}</span></div>
+        <div className="text-muted">{g.medical}</div>
+      </div>
+      <p className="mt-3 text-sm text-muted" data-testid="next-op-note">
+        Taking it strips {e.target_name} of {e.manifest} {e.resource}. Expect its commander to restock from Vex, and its next patrols to field what it can still arm.
+      </p>
     </section>
   )
 }
@@ -94,19 +94,19 @@ export default function Hub() {
   const needsCallsign = !!session && !profileLoading && !profile?.callsign
 
   return (
-    <main className="relative h-screen min-h-[640px] w-full overflow-hidden bg-ink text-fog">
-      <div className="absolute inset-0">{quality && <HangarScene quality={quality} />}</div>
+    <main className="relative min-h-screen w-full bg-ink text-fog">
+      <div className="fixed inset-0">{quality && <HangarScene quality={quality} />}</div>
       {/* legibility gradients */}
-      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,rgba(10,11,13,0.82)_0%,rgba(10,11,13,0.15)_38%,rgba(10,11,13,0.15)_55%,rgba(10,11,13,0.88)_100%)]" />
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-56 bg-gradient-to-t from-ink via-ink/70 to-transparent" />
+      <div className="pointer-events-none fixed inset-0 bg-[linear-gradient(90deg,rgba(10,11,13,0.82)_0%,rgba(10,11,13,0.15)_38%,rgba(10,11,13,0.15)_55%,rgba(10,11,13,0.88)_100%)]" />
+      <div className="pointer-events-none fixed inset-x-0 bottom-0 h-56 bg-gradient-to-t from-ink via-ink/70 to-transparent" />
 
-      <div className={`relative z-10 flex h-full flex-col ${clean ? 'hidden' : ''}`}>
+      <div className={`relative z-10 flex min-h-screen flex-col ${clean ? 'hidden' : ''}`}>
         <TopBar />
         <Welcome />
         <RadioFeed />
-        <div className="grid flex-1 grid-cols-1 gap-6 overflow-y-auto p-4 sm:p-8 lg:grid-cols-[minmax(280px,360px)_1fr_minmax(340px,440px)]">
+        <div className="grid flex-1 grid-cols-1 gap-6 p-4 sm:p-8 lg:grid-cols-[minmax(280px,360px)_1fr_minmax(340px,440px)]">
           {/* operator */}
-          <div className="flex flex-col justify-end gap-4">
+          <div className="flex flex-col gap-4 [&>*:first-child]:mt-auto">
             {!session && !loading && (
               <section className="cz-panel cz-rise p-5">
                 <div className="font-display text-4xl font-bold uppercase leading-none tracking-wide">Contract Zero</div>
@@ -144,7 +144,7 @@ export default function Hub() {
           <div className="hidden lg:block" />
 
           {/* operations console */}
-          <div className="flex flex-col justify-end gap-4">
+          <div className="flex flex-col gap-4 [&>*:first-child]:mt-auto">
             {world.isError && <section className="cz-panel p-4 text-sm text-hostile">Command is unreachable: the game server is down.</section>}
             {/* One line here: the full clock panel lives on the Contract Board. */}
             <section className="cz-panel px-4 py-3"><WorldClockPanel clock={world.data?.clock} compact /></section>
@@ -160,11 +160,12 @@ export default function Hub() {
         <div className="grid grid-cols-1 gap-4 px-4 pb-4 sm:px-8 sm:pb-6 md:grid-cols-3">
           <section className="cz-panel p-4">
             <div className="cz-label mb-2">World status</div>
+            <div className="grid grid-cols-2 gap-3">
             {factions.map((f) => {
               const wa = readiness.actor(f.id)
               return (
-                <div key={f.id} className="mb-3 space-y-2">
-                  <div className="flex items-baseline justify-between"><span className="font-display font-bold uppercase tracking-wider">{f.name}</span><span className="text-xs text-muted">defense L{f.defense}</span></div>
+                <div key={f.id} className="space-y-1.5">
+                  <div><div className="font-display font-bold uppercase leading-tight tracking-wider">{f.name}</div><div className="text-[11px] text-dim">defense level {f.defense}</div></div>
                   {wa ? <ReadinessSummary a={wa} inbound={readiness.inbound(f.id)} compact /> : <p className="text-xs text-muted">Reading the front…</p>}
                   <details className="text-xs">
                     <summary className="cursor-pointer text-steel hover:text-fog">Stock levels</summary>
@@ -173,13 +174,14 @@ export default function Hub() {
                 </div>
               )
             })}
-            {merchant && <div className="mt-3 text-xs text-muted">{merchant.name}: {merchant.holdings.credits.toLocaleString()} cr{world.data?.market.insolvent ? ' · insolvent, not buying' : ''}</div>}
+            </div>
+            {merchant && <div className="mt-2 text-xs text-muted">{merchant.name}: {merchant.holdings.credits.toLocaleString()} cr{world.data?.market.insolvent ? ' · insolvent, not buying' : ''}</div>}
           </section>
           <section className="cz-panel p-4">
             <div className="cz-label mb-2">Alerts</div>
             {(ex.data?.shortages ?? []).length === 0 && <p className="text-sm text-muted">No shortages.</p>}
             <ul className="space-y-1.5 text-sm">
-              {(ex.data?.shortages ?? []).slice(0, 4).map((s) => (
+              {(ex.data?.shortages ?? []).slice(0, 3).map((s) => (
                 <li key={`${s.actor}-${s.resource}`}><span className="font-semibold text-amber">{s.name}</span> short {s.short} {s.resource} <span className="text-muted">({s.have}/{s.target})</span></li>
               ))}
             </ul>
@@ -192,8 +194,8 @@ export default function Hub() {
           <section className="cz-panel p-4">
             <div className="cz-label mb-2">Faction activity</div>
             <ul className="space-y-2 text-sm">
-              {(decisions.data ?? []).slice(0, 3).map((d) => (
-                <li key={d.seq} className="leading-snug">
+              {(decisions.data ?? []).slice(0, 2).map((d) => (
+                <li key={d.seq} className="line-clamp-2 leading-snug">
                   <span className="font-semibold text-steel">{d.source.replace(/^agent:/, '').replace(/^\w/, (c) => c.toUpperCase())}</span>{' '}
                   <span className="text-muted">{d.payload.rationale ?? d.payload.trigger ?? 'acted'}</span>
                 </li>

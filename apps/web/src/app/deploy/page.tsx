@@ -6,6 +6,7 @@ import { Rajdhani } from 'next/font/google'
 import { useSearchParams } from 'next/navigation'
 import { Suspense, useMemo, useState } from 'react'
 import { Briefing, Debrief } from '@/components/story/Briefing'
+import { ScreenTip } from '@/components/help/ScreenTip'
 import { ConsequenceTip } from '@/components/help/ConsequenceTip'
 import type { MissionStory } from '@/engine/story/presence'
 import { Panel, Shell, Stat } from '@/components/ui/Shell'
@@ -252,6 +253,10 @@ function Deploy() {
     return (
       <Shell title="Contract Intel" back={{ href: '/contracts', label: 'Contract Board' }} wide>
         <div className="mb-4"><WorldClockPanel clock={world.data?.clock} compact /></div>
+        <ScreenTip tip="intel" title="Reading a contract">
+          <p>The sponsor pays for what is <b className="text-fog">taken</b>, so the target&apos;s stock matters twice: it sets what is worth carrying out and how well its guards are armed.</p>
+          <p>The readiness note on the target is its real stock turned into what you will meet: armed guards, reinforcements, and whether it can field a forward depot. Open “Exact figures” to see the numbers behind it.</p>
+        </ScreenTip>
         {world.isLoading && <Panel><p className="text-muted">Pulling the contract…</p></Panel>}
         {world.data && !entry && <Panel><p className="text-muted">This contract is no longer on the board. The world moved on: <Link href="/contracts" className="text-amber-hi">see what&apos;s open now</Link>.</p></Panel>}
         {entry && (

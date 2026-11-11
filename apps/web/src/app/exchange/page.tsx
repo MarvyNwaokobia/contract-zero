@@ -6,6 +6,8 @@ import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Panel, Shell, Stat } from '@/components/ui/Shell'
 import { NewSupplyOrder, OrderBoard, TradingPartners, useMarket } from '@/components/market/SupplyOrders'
+import { ScreenTip } from '@/components/help/ScreenTip'
+import { AdvancedSwitch, ExchangeAdvanced } from '@/components/help/AdvancedView'
 import { IntentsPanel } from '@/components/market/IntentsPanel'
 import dynamic from 'next/dynamic'
 import { api, RESOURCE_LABEL, type ArmoryItem, type ExchangePrice, type PlayerQuote, type ResourceName, type Standing } from '@/lib/api'
@@ -251,6 +253,11 @@ export default function Exchange() {
 
   return (
     <Shell title="Exchange" back={{ href: '/', label: 'Hub' }}>
+      <ScreenTip tip="exchange" title="How the Exchange works">
+        <p>Quick trade sells your haul at once at the posted price. <b className="text-fog">Supply orders</b> are different: a faction short of stock posts an order, and the trading partners each answer with their own offer from their own shelves. Only real offers are listed.</p>
+        <p>Open any order to follow it: shortage, order, bids, winner, settlement, arrival, readiness. A step that has not happened yet says it is waiting, and a payment is only marked confirmed when the chain says so.</p>
+      </ScreenTip>
+      <div className="mb-3 flex justify-end"><AdvancedSwitch /></div>
       {ex.isError && <p className="mb-4 text-hostile">The economy server is not reachable.</p>}
 
       {!session && (
@@ -345,6 +352,7 @@ export default function Exchange() {
         </Panel>
       )}
 
+      {market.data && <ExchangeAdvanced m={market.data} />}
       {market.data && <TradingPartners m={market.data} />}
       {market.data && <NewSupplyOrder m={market.data} session={session} onDone={(m) => { setOrderMsg(m); market.refetch() }} />}
       {orderMsg && <p className="mt-2 text-sm text-friendly" role="status" data-testid="order-msg">{orderMsg}</p>}

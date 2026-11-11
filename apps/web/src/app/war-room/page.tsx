@@ -12,6 +12,8 @@ import { Panel, Shell, Stat } from '@/components/ui/Shell'
 import { Procurement } from '@/components/market/Procurement'
 import { inboundFor, MerchantSummary, ReadinessSummary } from '@/components/world/Readiness'
 import { Operations } from '@/components/world/Operations'
+import { ScreenTip } from '@/components/help/ScreenTip'
+import { AdvancedSwitch } from '@/components/help/AdvancedView'
 import { FactionDossier } from '@/components/world/FactionDossier'
 import { describeFaction } from '@/lib/presenter/economy'
 import { describeMerchant } from '@/lib/presenter/merchant'
@@ -305,6 +307,11 @@ export default function WarRoom() {
             {d.world.merchant_insolvent && <span className="text-hostile">Vex is out of credits</span>}
           </div>
 
+          <ScreenTip tip="table" title="Reading the War Table">
+            <p>The map shows real facilities and real movement: a convoy only appears while one is on the road, and a flag only changes when its owner really changes. Select a facility to see its stock, readiness, what has hit it and what its commander last decided.</p>
+            <p>A faction&apos;s voice describes its position; the economy engine makes the decisions, and every one is logged.</p>
+          </ScreenTip>
+          <div className="flex justify-end"><AdvancedSwitch /></div>
           <WarTableSection war={d} market={market.data} />
 
           <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">

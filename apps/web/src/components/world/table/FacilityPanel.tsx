@@ -13,6 +13,7 @@ import type { FacilityIntel } from '@/lib/world/intel'
 import type { MarketMerchant } from '@/lib/api'
 import { RESOURCE_LABEL } from '@/lib/api'
 import { convoyState } from '@/lib/world/convoy'
+import { ValidationRecord } from '@/components/help/AdvancedView'
 import { FactionDossier } from '@/components/world/FactionDossier'
 import { describeMerchant } from '@/lib/presenter/merchant'
 import { factionRemark, merchantRemark } from '@/lib/presenter/remarks'
@@ -140,6 +141,7 @@ export function FacilityPanel({ intel, merchant, tick }: { intel: FacilityIntel;
         {intel.latestDecision ? (
           <p className="text-sm"><span className="text-dim">{worldClock(intel.latestDecision.tick)} · </span><span className="text-fog">{intel.latestDecision.payload.rationale ?? intel.latestDecision.payload.trigger ?? 'acted'}</span>{intel.latestDecision.payload.validation === 'rejected' && <span className="text-hostile"> (rejected by the engine)</span>}</p>
         ) : <p className="text-sm text-muted">No decision logged yet.</p>}
+        {intel.latestDecision && <ValidationRecord e={intel.latestDecision} />}
         {isFaction && owner && <p className="mt-1 text-xs text-dim">{owner.doctrine.aggression >= 50 ? 'Aggressive doctrine' : 'Defensive doctrine'} · {tick >= 0 ? `as of ${worldClock(tick)}` : ''}</p>}
       </Block>
     </div>

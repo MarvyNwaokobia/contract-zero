@@ -5,8 +5,8 @@
 // (Settings → Interface) and replayed (there, or from How to Play).
 'use client'
 
-export type Tip = 'controls' | 'loot' | 'heal' | 'cargo' | 'extract' | 'consequence'
-export const TIPS: Tip[] = ['controls', 'loot', 'heal', 'cargo', 'extract', 'consequence']
+export type Tip = 'controls' | 'loot' | 'heal' | 'cargo' | 'extract' | 'consequence' | 'intel' | 'exchange' | 'table'
+export const TIPS: Tip[] = ['controls', 'loot', 'heal', 'cargo', 'extract', 'consequence', 'intel', 'exchange', 'table']
 const KEY = 'cz_tips_seen'
 
 function read(): Set<string> {

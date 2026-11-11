@@ -30,13 +30,14 @@ export type Kind =
   | 'fence' | 'barrier' | 'container' | 'truck' | 'tank' | 'booth' | 'tower_leg' | 'crate' | 'case'
   | 'warehouse' | 'rack' | 'concrete' | 'facade' | 'interior' | 'desk' | 'server' | 'door_frame'
   | 'column' | 'pipe_rack' | 'pump'
+  | 'bed' | 'cabinet' | 'console' | 'locker' | 'drum'
 
 export interface Box extends CoverBox { kind: Kind; color?: string }
 
 /** Visual-only set pieces. */
 export interface Art {
   kind: 'roof' | 'tower' | 'light_pole' | 'floodlight' | 'catwalk' | 'beacon' | 'radar' | 'road' | 'stripe' | 'camera' | 'lamp'
-    | 'pipe' | 'stack' | 'steam'
+    | 'pipe' | 'stack' | 'steam' | 'sign' | 'valve'
   x: number; z: number; w?: number; d?: number; h?: number; rot?: number; color?: string
 }
 
@@ -120,6 +121,8 @@ const DEPOT: LevelDef = {
     { x: -16, z: -48, w: 20, d: 0.4, h: 7, kind: 'warehouse' },
     { x: -26, z: -36, w: 0.4, d: 24, h: 7, kind: 'warehouse' },
     { x: -6, z: -28, w: 0.4, d: 8, h: 7, kind: 'warehouse' }, { x: -6, z: -42, w: 0.4, d: 12, h: 7, kind: 'warehouse' },
+    // the south gate: concrete pillars either side of the open lane (x -4…4)
+    { x: -4.6, z: 16.5, w: 0.8, d: 0.8, h: 3.4, kind: 'concrete' }, { x: 4.6, z: 16.5, w: 0.8, d: 0.8, h: 3.4, kind: 'concrete' },
     // motor pool: guard booth, fuel tanks, watchtower legs
     { x: 7, z: 10, w: 3, d: 3, h: 2.8, kind: 'booth' },
     { x: 21, z: 4, w: 4, d: 4, h: 4.2, kind: 'tank' }, { x: 21, z: -3, w: 4, d: 4, h: 4.2, kind: 'tank' },
@@ -141,6 +144,8 @@ const DEPOT: LevelDef = {
     { x: 2, z: -22, w: 3.2, d: 0.7, h: 1.1, kind: 'barrier' }, { x: -3, z: -30, w: 2.2, d: 1.2, h: 1.0, kind: 'crate' },
     { x: 4, z: -34, w: 1.4, d: 1.4, h: 1.2, kind: 'case' }, { x: -1, z: -44, w: 3.2, d: 0.7, h: 1.1, kind: 'barrier' },
     { x: 18, z: -22, w: 2.2, d: 1.2, h: 1.0, kind: 'crate' }, { x: 25, z: -36, w: 1.4, d: 1.4, h: 1.2, kind: 'case' },
+    // fuel drums by the motor-pool tanks
+    { x: 25, z: 0.2, w: 0.6, d: 0.6, h: 0.95, kind: 'drum' }, { x: 25.8, z: 1.0, w: 0.6, d: 0.6, h: 0.95, kind: 'drum' }, { x: 25.2, z: 1.2, w: 0.6, d: 0.6, h: 0.95, kind: 'drum' },
     // inside the warehouse, around the cargo
     { x: -19, z: -31, w: 2.2, d: 1.2, h: 1.0, kind: 'crate' }, { x: -12, z: -33, w: 1.4, d: 1.4, h: 1.2, kind: 'case' },
     { x: -16, z: -43, w: 2.2, d: 1.2, h: 1.0, kind: 'crate' },
@@ -148,7 +153,8 @@ const DEPOT: LevelDef = {
   art: [
     { kind: 'road', x: 0, z: -18, w: 8, d: 70 },
     { kind: 'roof', x: -16, z: -36, w: 20.6, d: 24.6, h: 7 },
-    { kind: 'tower', x: -19, z: 6, h: 7 },
+    { kind: 'tower', x: -19, z: 6, h: 7 }, { kind: 'tower', x: 26, z: -50, h: 7 },
+    { kind: 'sign', x: 0, z: 16.7, h: 3.7, w: 5, color: '#c9a227' },
     { kind: 'light_pole', x: -6, z: 12 }, { kind: 'light_pole', x: 6, z: -12 }, { kind: 'light_pole', x: 0, z: -26 }, { kind: 'light_pole', x: 16, z: -50 },
     { kind: 'stripe', x: -16, z: -27.5, w: 4, d: 0.15 },
     { kind: 'beacon', x: -16, z: -24.2, h: 6, color: '#ff9a2e' },
@@ -229,8 +235,22 @@ const BLACKSITE: LevelDef = {
     // vault: cases around the cargo
     { x: -4, z: -35, w: 1.4, d: 1.4, h: 1.2, kind: 'case' }, { x: 4, z: -37, w: 2.2, d: 1.2, h: 1.0, kind: 'crate' },
     { x: -10, z: -39, w: 2.2, d: 1.2, h: 1.0, kind: 'crate' }, { x: 12, z: -36, w: 1.4, d: 1.4, h: 1.2, kind: 'case' },
+    // checkpoint at the gate: a second booth and jersey barriers flank the open lane (x -3…3)
+    { x: -5.5, z: 19.8, w: 2.4, d: 2.4, h: 2.8, kind: 'booth' },
+    { x: 5.2, z: 17.6, w: 3, d: 0.7, h: 1.1, kind: 'barrier' }, { x: -5.2, z: 16.6, w: 3, d: 0.7, h: 1.1, kind: 'barrier' },
+    // medical bay (the west room off the corridor): cots down the outer wall, a drugs cabinet
+    { x: -16.9, z: -12.4, w: 1, d: 2.1, h: 0.8, kind: 'bed' }, { x: -16.9, z: -9.4, w: 1, d: 2.1, h: 0.8, kind: 'bed' }, { x: -16.9, z: -0.8, w: 1, d: 2.1, h: 0.8, kind: 'bed' },
+    { x: -5, z: 1.1, w: 2.4, d: 0.7, h: 1.9, kind: 'cabinet' },
+    // control room: a second bank of consoles facing the first
+    { x: 14, z: -4, w: 5, d: 1.1, h: 1.0, kind: 'console' }, { x: 15.2, z: -12.6, w: 3, d: 1.1, h: 1.0, kind: 'console' },
+    // west labs: lockers along the outer wall, a bench in the far lab
+    { x: -17.2, z: -20, w: 0.7, d: 1.0, h: 1.9, kind: 'locker' }, { x: -17.2, z: -22, w: 0.7, d: 1.0, h: 1.9, kind: 'locker' }, { x: -17.2, z: -26.5, w: 0.7, d: 1.0, h: 1.9, kind: 'locker' },
+    { x: -6, z: -27.5, w: 3.2, d: 1.1, h: 1.0, kind: 'desk' },
   ],
   art: [
+    // signs above the doors that mean something: the medical bay and the control room
+    { kind: 'sign', x: -1.75, z: -9, h: 2.5, rot: Math.PI / 2, color: '#e23a34' },
+    { kind: 'sign', x: 1.75, z: -13, h: 2.5, w: 0.9, rot: -Math.PI / 2, color: '#58c6ff' },
     { kind: 'roof', x: 0, z: -20, w: 36.6, d: 44.6, h: H + 0.05 },
     { kind: 'tower', x: -16, z: 16, h: 7 },
     { kind: 'floodlight', x: -16, z: 16, h: 7.4, rot: -0.6 },

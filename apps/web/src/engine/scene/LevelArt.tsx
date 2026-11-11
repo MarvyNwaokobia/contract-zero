@@ -48,7 +48,7 @@ function Instanced({ items, material, cast = true, geometry }: { items: Inst[]; 
 
 const UNIT = new THREE.BoxGeometry(1, 1, 1);
 /** Small or flat pieces whose shadows nobody reads: skipping them keeps the shadow pass cheap. */
-const NO_SHADOW = ['glass', 'panel', 'lampHead', 'redLed', 'screen', 'road', 'yellow', 'steel', 'frame', 'case', 'stripe', 'skirting', 'wood'];
+const NO_SHADOW = ['glass', 'panel', 'lampHead', 'redLed', 'screen', 'road', 'yellow', 'steel', 'frame', 'case', 'stripe', 'skirting', 'wood', 'signBar'];
 const CYL = new THREE.CylinderGeometry(0.5, 0.5, 1, 20);
 const WHEEL = new THREE.CylinderGeometry(0.5, 0.5, 1, 14).rotateZ(Math.PI / 2);
 
@@ -269,6 +269,10 @@ export function LevelArt({ level, minimal = false, lit = true, night: nightProp,
       lampHead: new THREE.MeshStandardMaterial({ color: '#000', emissive: night ? '#d8e6ff' : '#ffbe73', emissiveIntensity: 4 }),
       panel: new THREE.MeshStandardMaterial({ color: '#000', emissive: '#e8f0ff', emissiveIntensity: 2.2 }),
       redLed: new THREE.MeshBasicMaterial({ color: '#ff3b30' }),
+      // Painted drums take their colour per instance; sign marks are unlit so they read at night.
+      drum: new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.55, metalness: 0.5 }),
+      signBar: new THREE.MeshBasicMaterial({ color: '#ffffff' }),
+      mattress: new THREE.MeshStandardMaterial({ color: '#cfd6dc', roughness: 0.9 }),
     };
   }, [corrugated, plate, concrete, plaster, planks, night, level.id]);
 
@@ -314,6 +318,12 @@ export function LevelArt({ level, minimal = false, lit = true, night: nightProp,
         case 'tank':
           add('tankCyl', { x, y: h / 2, z, sx: w, sy: h, sz: d });
           add('steel', { x, y: h + 0.05, z, sx: w * 0.7, sy: 0.1, sz: d * 0.7 });
+          // Weld seams, a safety band under the lip, a ladder with its cage, and a roof hatch.
+          for (const f of [0.33, 0.66]) add('pipeCyl', { x, y: h * f, z, sx: w + 0.1, sy: 0.1, sz: d + 0.1 });
+          add('hazardCyl', { x, y: h - 0.35, z, sx: w + 0.06, sy: 0.22, sz: d + 0.06 });
+          add('steel', { x: x + w / 2 + 0.04, y: h / 2, z, sx: 0.06, sy: h, sz: 0.5 });
+          for (let y = 2; y < h; y += 1.5) add('steel', { x: x + w / 2 + 0.2, y, z, sx: 0.04, sy: 0.04, sz: 0.62 });
+          add('hazard', { x, y: h + 0.14, z, sx: 0.9, sy: 0.1, sz: 0.9 });
           break;
         case 'booth':
           add('concrete', { x, y: 0.55, z, sx: w, sy: 1.1, sz: d });
@@ -387,6 +397,32 @@ export function LevelArt({ level, minimal = false, lit = true, night: nightProp,
           add('rust', { x: x - w * 0.2, y: 0.75, z, sx: w * 0.45, sy: 0.9, sz: d * 0.7 });
           add('pipeCyl', { x: x + w * 0.22, y: 0.7, z, sx: d * 0.6, sy: w * 0.4, sz: d * 0.6, rz: Math.PI / 2 });
           break;
+        case 'bed':
+          // A medical cot: frame, mattress and pillow.
+          add('steel', { x, y: 0.28, z, sx: w, sy: 0.1, sz: d });
+          for (const sx of [-1, 1]) for (const sz of [-1, 1]) add('steel', { x: x + (sx * (w - 0.1)) / 2, y: 0.14, z: z + (sz * (d - 0.1)) / 2, sx: 0.06, sy: 0.28, sz: 0.06 });
+          add('mattress', { x, y: 0.5, z, sx: w * 0.94, sy: 0.3, sz: d * 0.94 });
+          { const [px, pz] = fwd(-len / 2 + 0.3); add('mattress', { x: px, y: 0.72, z: pz, sx: alongZ ? wid * 0.7 : 0.4, sy: 0.14, sz: alongZ ? 0.4 : wid * 0.7 }); }
+          break;
+        case 'cabinet':
+          add('desk', { x, y: h / 2, z, sx: w, sy: h, sz: d });
+          add('frame', { x, y: h / 2, z: z + d / 2 + 0.005, sx: 0.03, sy: h * 0.96, sz: 0.01 });
+          add('redLed', { x, y: h * 0.72, z: z + d / 2 + 0.012, sx: 0.28, sy: 0.07, sz: 0.01 });
+          add('redLed', { x, y: h * 0.72, z: z + d / 2 + 0.012, sx: 0.07, sy: 0.28, sz: 0.01 });
+          break;
+        case 'console':
+          add('steel', { x, y: (h - 0.08) / 2, z, sx: w * 0.92, sy: h - 0.08, sz: d * 0.8 });
+          add('desk', { x, y: h - 0.04, z, sx: w, sy: 0.08, sz: d });
+          for (let t = -len / 2 + 0.7; t < len / 2 - 0.3; t += 1.2) { const [px, pz] = fwd(t); add('screen', { x: px, y: h + 0.34, z: pz, sx: alongZ ? 0.04 : 0.55, sy: 0.34, sz: alongZ ? 0.55 : 0.04 }); }
+          break;
+        case 'locker':
+          add('steel', { x, y: h / 2, z, sx: w, sy: h, sz: d });
+          for (let t = -len / 2 + 0.25; t < len / 2; t += 0.5) { const [px, pz] = fwd(t); add('frame', { x: px, y: h / 2, z: pz, sx: alongZ ? w + 0.02 : 0.02, sy: h * 0.94, sz: alongZ ? 0.02 : d + 0.02 }); }
+          break;
+        case 'drum':
+          add('drumCyl', { x, y: h / 2, z, sx: w, sy: h, sz: d, color: (Math.round(x * 7 + z * 3) & 1) ? '#7a2f22' : '#2f4a63' });
+          add('frame', { x, y: h * 0.82, z, sx: w + 0.03, sy: 0.05, sz: d + 0.03 });
+          break;
         default:
           add('concrete', { x, y: h / 2, z, sx: w, sy: h, sz: d });
       }
@@ -427,6 +463,25 @@ export function LevelArt({ level, minimal = false, lit = true, night: nightProp,
           for (let t = -len / 2; t <= len / 2 + 0.01; t += 4) add('steel', { x: along ? x : x + t, y: h / 2, z: along ? z + t : z, sx: 0.12, sy: h, sz: 0.12 });
           break;
         }
+        case 'sign': {
+          // Faces along z unless rotated a quarter turn. No width: a medical cross. A width: a banner.
+          const h = a.h ?? 2.5, side = Math.abs(Math.sin(a.rot ?? 0)) > 0.5;
+          const dim = (along: number, thick: number) => (side ? { sx: thick, sz: along } : { sx: along, sz: thick });
+          if (a.w) {
+            add('frame', { x, y: h, z, sy: 0.7, ...dim(a.w, 0.06) });
+            add('signBar', { x, y: h, z, sy: 0.4, color: a.color, ...dim(a.w * 0.96, 0.08) });
+          } else {
+            add('frame', { x, y: h, z, sy: 0.95, ...dim(0.95, 0.05) });
+            add('signBar', { x, y: h, z, sy: 0.18, color: a.color, ...dim(0.62, 0.07) });
+            add('signBar', { x, y: h, z, sy: 0.62, color: a.color, ...dim(0.18, 0.07) });
+          }
+          break;
+        }
+        case 'valve':
+          // A hand wheel on a stem, on the pipework.
+          add('pipeCyl', { x, y: a.h ?? 3.4, z, sx: 0.55, sy: 0.05, sz: 0.55 });
+          add('steel', { x, y: (a.h ?? 3.4) - 0.2, z, sx: 0.06, sy: 0.4, sz: 0.06 });
+          break;
         case 'camera':
           add('frame', { x, y: a.h ?? 3, z, sx: 0.18, sy: 0.18, sz: 0.4 });
           add('redLed', { x, y: (a.h ?? 3) + 0.05, z: z + 0.21, sx: 0.04, sy: 0.04, sz: 0.02 });
@@ -448,6 +503,8 @@ export function LevelArt({ level, minimal = false, lit = true, night: nightProp,
       {Object.entries(parts).map(([k, items]) =>
         k === 'tankCyl' ? <Instanced key={k} items={items} material={mats.tank} geometry={CYL} cast={cast} />
         : k === 'pipeCyl' ? <Instanced key={k} items={items} material={mats.pipe} geometry={CYL} cast={cast} />
+        : k === 'drumCyl' ? <Instanced key={k} items={items} material={mats.drum} geometry={CYL} cast={cast} />
+        : k === 'hazardCyl' ? <Instanced key={k} items={items} material={mats.hazard} geometry={CYL} cast={false} />
         : k === 'tire' ? <Instanced key={k} items={items} material={mats.tire} geometry={WHEEL} cast={false} />
         : k === 'fenceMesh' ? <Instanced key={k} items={items} material={mats.fence} cast={false} />
         : <Instanced key={k} items={items} material={(mats as Record<string, THREE.Material>)[k] ?? mats.concrete} cast={cast && !NO_SHADOW.includes(k)} />,

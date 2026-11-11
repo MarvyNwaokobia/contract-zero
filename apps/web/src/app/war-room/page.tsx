@@ -13,6 +13,7 @@ import { Procurement } from '@/components/market/Procurement'
 import { inboundFor, MerchantSummary, ReadinessSummary } from '@/components/world/Readiness'
 import { Operations } from '@/components/world/Operations'
 import { useMusicState } from '@/components/audio/AudioProvider'
+import { RadioFeed } from '@/components/audio/RadioFeed'
 import { WarTableSection } from '@/components/world/table/WarTableSection'
 import { FactionInsignia } from '@/components/ui/FactionInsignia'
 import { TradingPartners, useMarket } from '@/components/market/SupplyOrders'
@@ -277,6 +278,7 @@ export default function WarRoom() {
 
   return (
     <Shell title="War Room" back={{ href: '/', label: 'Hub' }} wide>
+      <RadioFeed />
       {v.isError && <p className="text-hostile">The economy server is not reachable.</p>}
       {d && (
         <div className="grid gap-4">

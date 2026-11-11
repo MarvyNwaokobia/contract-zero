@@ -11,6 +11,7 @@ import { api, RESOURCE_LABEL, type ActorView, type BoardEntry, type ResourceName
 import { fixedTier, loadSettings, type Quality } from '@/lib/settings'
 import { useProfile, useSession, useStash } from '@/lib/useSession'
 import { useMusicState } from '@/components/audio/AudioProvider'
+import { RadioFeed } from '@/components/audio/RadioFeed'
 import { WorldClockPanel } from '@/components/world/WorldClock'
 import { ReadinessSummary, useReadinessData } from '@/components/world/Readiness'
 import { describeGuardPlan } from '@/lib/presenter/economy'
@@ -102,6 +103,7 @@ export default function Hub() {
       <div className={`relative z-10 flex h-full flex-col ${clean ? 'hidden' : ''}`}>
         <TopBar />
         <Welcome />
+        <RadioFeed />
         <div className="grid flex-1 grid-cols-1 gap-6 overflow-y-auto p-4 sm:p-8 lg:grid-cols-[minmax(280px,360px)_1fr_minmax(340px,440px)]">
           {/* operator */}
           <div className="flex flex-col justify-end gap-4">

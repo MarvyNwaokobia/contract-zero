@@ -30,7 +30,7 @@ export function Tabs({ tabs, label, initial }: { tabs: TabDef[]; label: string; 
     if (to >= 0) { e.preventDefault(); pick(tabs[to].id, true) }
   }
   return (
-    <div>
+    <div className="min-w-0 max-w-full">
       <div role="tablist" aria-label={label} className="sticky top-0 z-10 -mx-1 mb-4 flex gap-1 overflow-x-auto border-b border-line bg-ink/95 px-1 backdrop-blur">
         {tabs.map((t, i) => (
           <button

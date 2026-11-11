@@ -52,7 +52,7 @@ export function WarTableSection({ war, market }: { war: WarRoomView; market: Mar
 
   return (
     <section className="grid items-start gap-4 lg:grid-cols-[1.35fr_1fr]" data-testid="war-table">
-      <div className="cz-panel p-3 lg:sticky lg:top-4">
+      <div className="cz-panel min-w-0 p-3 lg:sticky lg:top-4">
         <h2 className="cz-label mb-2">War Table</h2>
         <div className="overflow-x-auto" tabIndex={-1}>
           <WarTable model={model} status={status} selectedId={selectedId} onSelect={setPicked} tick={war.world.tick} />
@@ -68,7 +68,7 @@ export function WarTableSection({ war, market }: { war: WarRoomView; market: Mar
         </div>
         <p className="mt-2 text-xs text-dim">Select a facility on the map or from the list. Rings show faction readiness; a triangle means a production line is down; the number is contracts on offer; a diamond on the road is a shipment placed from the server&apos;s own arrival times.</p>
       </div>
-      <div className="cz-panel p-4">
+      <div className="cz-panel min-w-0 p-4">
         {intel ? <FacilityPanel intel={intel} merchant={market?.merchants.find((m) => m.id === intel.facility.owner)} tick={war.world.tick} /> : <p className="text-sm text-muted">The map has no facilities yet.</p>}
       </div>
     </section>

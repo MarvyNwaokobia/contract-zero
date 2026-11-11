@@ -12,6 +12,7 @@ import { Panel, Shell, Stat } from '@/components/ui/Shell'
 import { Procurement } from '@/components/market/Procurement'
 import { inboundFor, MerchantSummary, ReadinessSummary } from '@/components/world/Readiness'
 import { Operations } from '@/components/world/Operations'
+import { Tabs } from '@/components/ui/Tabs'
 import { ScreenTip } from '@/components/help/ScreenTip'
 import { AdvancedSwitch } from '@/components/help/AdvancedView'
 import { FactionDossier } from '@/components/world/FactionDossier'
@@ -298,7 +299,7 @@ export default function WarRoom() {
       <RadioFeed />
       {v.isError && <p className="text-hostile">The economy server is not reachable.</p>}
       {d && (
-        <div className="grid gap-4">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-4">
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-muted">
             <span className="font-display text-lg font-bold text-fog">{clock(d.world.tick)}</span>
             <span>{d.world.contracts.length} open contract{d.world.contracts.length === 1 ? '' : 's'} · {d.world.contracts_paid} paid out</span>
@@ -312,7 +313,15 @@ export default function WarRoom() {
             <p>A faction&apos;s voice describes its position; the economy engine makes the decisions, and every one is logged.</p>
           </ScreenTip>
           <div className="flex justify-end"><AdvancedSwitch /></div>
+          <Tabs label="War Room sections" tabs={[
+            { id: 'table', label: 'War Table', panel: <>
           <WarTableSection war={d} market={market.data} />
+
+            </> },
+            { id: 'powers', label: 'Powers', panel: <div className="grid gap-4">
+          <div className="grid gap-4 md:grid-cols-3">
+            {[...d.world.actors].sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'faction' ? -1 : 1)).map((a) => <ActorCard key={a.id} a={a} v={d} orders={market.data?.orders} merchant={a.kind === 'merchant' ? market.data?.merchants.find((x) => x.id === a.id) : undefined} />)}
+          </div>
 
           <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
             <Panel title="Vex Exchange prices">
@@ -332,14 +341,14 @@ export default function WarRoom() {
             </Panel>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-3">
-            {[...d.world.actors].sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'faction' ? -1 : 1)).map((a) => <ActorCard key={a.id} a={a} v={d} orders={market.data?.orders} merchant={a.kind === 'merchant' ? market.data?.merchants.find((x) => x.id === a.id) : undefined} />)}
-          </div>
-
+            </div> },
+            { id: 'supply', label: 'Operations and supply', panel: <div className="grid gap-4">
           <Operations />
           <Procurement />
           {market.data && <TradingPartners m={market.data} />}
 
+            </div> },
+            { id: 'decisions', label: 'Why the world changed', panel: <div className="grid gap-4">
           <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
             <section>
               <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -375,6 +384,8 @@ export default function WarRoom() {
           </div>
 
           <Observer />
+            </div> },
+          ]} />
         </div>
       )}
     </Shell>

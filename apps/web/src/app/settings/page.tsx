@@ -20,6 +20,7 @@ import {
 import { bindLabel } from '@/lib/keybinds'
 import { useSyncState } from '@/lib/preferencesSync'
 import { resetTips } from '@/lib/tutorial'
+import { useAdvanced } from '@/lib/advanced'
 import type { FpsAudio } from '@/engine/audio'
 import { acquireAudio, releaseAudio } from '@/engine/audio/shared'
 
@@ -414,6 +415,7 @@ function Controls({ s, set }: { s: Settings; set: SetFn }) {
 function Interface({ s, set }: { s: Settings; set: SetFn }) {
   const ui = s.interface
   const [tipsReset, setTipsReset] = useState(false)
+  const [advanced, setAdvanced] = useAdvanced()
   const ch = ui.crosshair
   const setUi = (patch: Partial<Settings['interface']>) => set((x) => ({ ...x, interface: { ...x.interface, ...patch } }))
   const setCh = (patch: Partial<Settings['interface']['crosshair']>) => set((x) => ({ ...x, interface: { ...x.interface, crosshair: { ...x.interface.crosshair, ...patch } } }))
@@ -454,6 +456,9 @@ function Interface({ s, set }: { s: Settings; set: SetFn }) {
         <Row label="First-time tips" hint="One short line, the first time you fight, pick something up, carry cargo, extract and finish a contract. Never covers the fight; fades on its own.">
           <Switch id="tips" checked={ui.tips} onChange={(v) => setUi({ tips: v })} label="First-time tips" />
           <Button onClick={() => { resetTips(); setTipsReset(true) }} testid="tips-reset">{tipsReset ? 'Will show again' : 'Replay tips'}</Button>
+        </Row>
+        <Row label="Advanced view" hint="On the Exchange and War Room, also show the order contract, transaction ids and the engine's validation record. The plain account always comes first.">
+          <Switch id="advanced-view" checked={advanced} onChange={setAdvanced} label="Advanced view" />
         </Row>
         <Row label="Interaction hints" hint={`The second line under a prompt (“${bindLabel(s.controls.binds, 'inspect')} · INSPECT”).`}>
           <Switch id="prompt-hints" checked={ui.promptHints} onChange={(v) => setUi({ promptHints: v })} label="Interaction hints" />

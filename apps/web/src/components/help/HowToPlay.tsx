@@ -10,16 +10,18 @@ import { desktopControls, FIELD_RULES, TOUCH_CONTROLS } from '@/lib/controls'
 import { useSettings } from '@/lib/settings'
 import { resetTips } from '@/lib/tutorial'
 import { KeyboardDiagram, TouchDiagram } from './ControlDiagrams'
+import { GLOSSARY } from '@/lib/glossary'
 
 export const PLAYER_GUIDE_URL = 'https://github.com/Psalmuel01/contract-zero/blob/main/docs/PLAYER_GUIDE.md'
 
-type Tab = 'basics' | 'desktop' | 'touch' | 'missions' | 'world'
+type Tab = 'basics' | 'desktop' | 'touch' | 'missions' | 'world' | 'glossary'
 const TABS: { id: Tab; label: string }[] = [
   { id: 'basics', label: 'Basics' },
   { id: 'desktop', label: 'Keyboard & mouse' },
   { id: 'touch', label: 'Touch' },
   { id: 'missions', label: 'Missions' },
   { id: 'world', label: 'The world' },
+  { id: 'glossary', label: 'Glossary' },
 ]
 
 export function HowToPlayButton({ className = '', label = 'How to play', initial }: { className?: string; label?: string; initial?: Tab }) {
@@ -71,6 +73,7 @@ export function HowToPlay({ onClose, initial }: { onClose: () => void; initial?:
           {tab === 'touch' && <><TouchDiagram /><ControlsTable groups={[{ group: 'Touch', rows: TOUCH_CONTROLS }]} touchNote /></>}
           {tab === 'missions' && <Missions />}
           {tab === 'world' && <World />}
+          {tab === 'glossary' && <Glossary />}
         </div>
         <div className="flex flex-wrap items-center gap-3 border-t border-line px-4 py-3 text-xs text-dim">
           <span>First-time tips appear in the field and fade on their own.</span>
@@ -146,6 +149,21 @@ function Missions() {
   )
 }
 
+function Glossary() {
+  return (
+    <div data-testid="glossary">
+      {GLOSSARY.map((g) => (
+        <section key={g.title} className="mt-5 first:mt-0">
+          <H>{g.title}</H>
+          <dl className="grid gap-1.5">
+            {g.terms.map((t) => <div key={t.term} className="grid gap-x-3 sm:grid-cols-[9rem_1fr]"><dt className="font-display text-xs font-bold uppercase tracking-wider text-fog">{t.term}</dt><dd className="m-0 text-muted">{t.means}</dd></div>)}
+          </dl>
+        </section>
+      ))}
+    </div>
+  )
+}
+
 function World() {
   return (
     <>
@@ -154,7 +172,7 @@ function World() {
       <H>Who acts</H>
       <p className="text-muted">Vanguard and the Ashen Compact are factions with treasuries and stock; Vex Exchange and Halcyon Logistics are merchants. When a faction runs short it posts a supply order, and both merchants compete to fill it. They act on their own, every in-game hour.</p>
       <H>Where to look</H>
-      <p className="text-muted"><b className="text-fog">Exchange</b>: sell your haul, buy supplies, or place your own supply order and take the best offer. <b className="text-fog">War Room</b>: why the world changed, from your raid to the faction&apos;s order to the next mission&apos;s guards, with every NEAR transaction. Only “Settled on NEAR” means a confirmed transaction.</p>
+      <p className="text-muted"><b className="text-fog">Exchange</b> (tabs: Trade, Supply orders, Trading partners, Armory): sell your haul, buy supplies, or place your own supply order and take the best offer. <b className="text-fog">War Room</b>: why the world changed, from your raid to the faction&apos;s order to the next mission&apos;s guards, with every NEAR transaction. Only “Settled on NEAR” means a confirmed transaction.</p>
     </>
   )
 }

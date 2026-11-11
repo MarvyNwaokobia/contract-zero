@@ -108,9 +108,127 @@ describe('pause and background holds', () => {
 describe('level meters', () => {
   it('report every channel and cost nothing until asked', () => {
     const ctx = inner(audio).ctx as FakeAudioContext
-    expect(ctx.nodesByKind.analyser ?? 0).toBe(0)
+    expect(ctx.nodesByKind.processor ?? 0).toBe(0)
     const lv = audio.levels()
     expect(Object.keys(lv).sort()).toEqual(['combat', 'environment', 'interactions', 'master', 'music', 'radio', 'ui'])
-    expect(ctx.nodesByKind.analyser).toBe(7)
+    expect(ctx.nodesByKind.processor).toBe(7)
+    expect(Object.keys(audio.peaks()).sort()).toEqual(Object.keys(lv).sort())
+    expect(ctx.nodesByKind.processor).toBe(7) // reading again builds nothing new
+  })
+})
+
+// ── Combat audio ────────────────────────────────────────────────────────────
+
+import { LEVELS } from '../../fps/levels'
+
+describe('indoor and outdoor acoustics follow the listener', () => {
+  it('builds two reverbs, and fades between them as the listener walks under the Blacksite roof', () => {
+    const a = inner(audio)
+    expect((a.ctx as FakeAudioContext).nodesByKind.convolver).toBe(2)
+    audio.setLevel(LEVELS.blacksite.art)
+    audio.setListener(LEVELS.blacksite.start[0], LEVELS.blacksite.start[1], 0)     // the gate: outside
+    expect(audio.isIndoors()).toBe(false)
+    expect(gain(a.openWet).value).toBeGreaterThan(0)
+    expect(gain(a.roomWet).value).toBe(0)
+    audio.setListener(0, -20, 0)                                                   // inside the building
+    expect(audio.isIndoors()).toBe(true)
+    expect(gain(a.roomWet).value).toBeGreaterThan(gain(a.openWet).value)
+    expect(gain(a.openWet).value).toBe(0)
+  })
+  it('with no level (training, endless) it is all open ground', () => {
+    audio.setLevel(null)
+    audio.setListener(0, -20, 0)
+    expect(audio.isIndoors()).toBe(false)
+  })
+})
+
+describe('enemy fire', () => {
+  const samples = () => { const a = inner(audio) as unknown as { rifle: unknown[] }; a.rifle = [{}] } // stand-in decoded shot
+  it('a round that misses but passes close is heard going by, even from a shooter too far to hear', () => {
+    samples()
+    audio.setListener(0, 0, 0)
+    const a = inner(audio)
+    const before = a.gunBus.inputs
+    // shooter 60 m away firing along z, passing 1 m to the side of the listener at head height
+    audio.enemyShot([1, 1.6, -60], { impact: [1, 1.6, 20], hit: false })
+    expect(a.gunBus.inputs).toBeGreaterThan(before)
+  })
+  it('a round that hits you, or passes wide, makes no whiz', () => {
+    samples()
+    audio.setListener(0, 0, 0)
+    const a = inner(audio)
+    const before = a.gunBus.inputs
+    audio.enemyShot([1, 1.6, -60], { impact: [1, 1.6, 20], hit: true })
+    audio.enemyShot([9, 1.6, -60], { impact: [9, 1.6, 20], hit: false })
+    expect(a.gunBus.inputs).toBe(before)
+  })
+  it('a near shot is immediate and single', () => {
+    samples()
+    audio.setListener(0, 0, 0)
+    const ctx = inner(audio).ctx as FakeAudioContext
+    ctx.starts.length = 0
+    audio.enemyShot([0, 1.6, -5])
+    const near = ctx.starts.filter((s) => s.kind === 'source')
+    expect(near).toHaveLength(1)
+    expect(near[0].t).toBe(0)
+  })
+  it('a far shot arrives late and comes back as an echo', () => {
+    const far = new FpsAudio()                       // a fresh budget: no cooldown from the shot above
+    far.unlock()
+    ;(far as unknown as { rifle: unknown[] }).rifle = [{}]
+    far.setListener(0, 0, 0)
+    const ctx = inner(far).ctx as FakeAudioContext
+    ctx.starts.length = 0
+    far.enemyShot([0, 1.6, -34])
+    const shots = ctx.starts.filter((s) => s.kind === 'source')
+    expect(shots).toHaveLength(2)
+    expect(shots[0].t).toBeGreaterThan(0.08)         // 34 m is 0.1 s of travel
+    expect(shots[1].t).toBeGreaterThan(shots[0].t)   // then it comes back off the ground
+    far.dispose()
+  })
+  it('guards walking within earshot are heard; distant ones are not', () => {
+    const a = inner(audio)
+    audio.setListener(0, 0, 0)
+    const before = a.impactBus.inputs
+    audio.enemyStep([6, 0, 0])
+    expect(a.impactBus.inputs).toBeGreaterThan(before)
+    const after = a.impactBus.inputs
+    audio.enemyStep([30, 0, 0])
+    expect(a.impactBus.inputs).toBe(after)
+  })
+})
+
+describe('alarm escalation', () => {
+  it('the last level is doubled with a second voice; the first is a single siren', () => {
+    const ctx = inner(audio).ctx as FakeAudioContext
+    const osc = () => ctx.nodesByKind.osc ?? 0
+    const o0 = osc()
+    audio.alarm(1, 1)
+    const single = osc() - o0
+    const o1 = osc()
+    audio.alarm(1, 3)
+    expect(osc() - o1).toBe(single + 1)
+  })
+})
+
+describe('extraction cues', () => {
+  it('the call, the warning and the success reach the Interface channel, not Combat', () => {
+    const a = inner(audio)
+    const u = a.uiBus.inputs, g = a.gunBus.inputs
+    audio.extractCall()
+    expect(a.uiBus.inputs).toBeGreaterThan(u)
+    expect(a.gunBus.inputs).toBe(g)
+  })
+  it('the ride-in engine is Environment, starts once and stops cleanly', () => {
+    const a = inner(audio)
+    const ctx = a.ctx as FakeAudioContext
+    const amb = a.ambBus.inputs
+    audio.setExtraction(true)
+    const oscs = ctx.nodesByKind.osc
+    expect(a.ambBus.inputs).toBeGreaterThan(amb)
+    audio.setExtraction(true)                       // a second call does not stack another engine
+    expect(ctx.nodesByKind.osc).toBe(oscs)
+    audio.setExtraction(false)
+    audio.setExtraction(false)                      // and stopping twice is harmless
   })
 })

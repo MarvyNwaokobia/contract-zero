@@ -143,6 +143,22 @@ describe('sabotage and recovery', () => {
     expect(f.record().charges).toEqual(['charge-1', 'charge-2']);
   });
 
+  it('reports how long the fuse has left (the audio escalates the alarm from it)', () => {
+    const f = new FieldRuntime(buildField('sabotage', lv.field, practiceManifest('sabotage', 40, 2), opts));
+    const pk = pockets();
+    expect(f.fuseLeft).toBe(-1);                       // nothing lit yet
+    holdOn(f, lv.points.charges[0], CHARGE_SECS + 0.2, pk);
+    expect(f.fuseLeft).toBe(-1);                       // one charge is not a fuse
+    holdOn(f, lv.points.charges[1], CHARGE_SECS + 0.2, pk);
+    expect(f.fuseLeft).toBeGreaterThan(0);
+    expect(f.fuseLeft).toBeLessThanOrEqual(FUSE_SECS);
+    const before = f.fuseLeft;
+    f.update(1, at([0, 0]), false, pk, clear);
+    expect(f.fuseLeft).toBeCloseTo(before - 1, 1);
+    for (let t = 0; t < FUSE_SECS + 1; t += 0.1) f.update(0.1, at([0, 0]), false, pk, clear);
+    expect(f.fuseLeft).toBe(-1);                       // detonated: no fuse
+  });
+
   it('a recovery delivers the seized case at the handover', () => {
     const f = new FieldRuntime(buildField('recovery', lv.field, practiceManifest('recovery', 30, 2), opts));
     const pk = pockets();

@@ -20,8 +20,11 @@ export class FakeNode {
   /** How many nodes have been connected INTO this one. */
   inputs = 0
   kind: string
-  constructor(kind: string) {
+  private ctx?: FakeAudioContext
+  buffer: unknown = null
+  constructor(kind: string, ctx?: FakeAudioContext) {
     this.kind = kind
+    this.ctx = ctx
     return new Proxy(this, {
       get: (t, p) => {
         if (p in t) return (t as unknown as Record<string | symbol, unknown>)[p]
@@ -32,7 +35,7 @@ export class FakeNode {
   }
   connect(dest: FakeNode) { if (dest) dest.inputs++; return dest }
   disconnect() {}
-  start() {}
+  start(t?: number) { this.ctx?.starts.push({ kind: this.kind, t: t ?? 0 }) }
   stop() {}
   getFloatTimeDomainData(a: Float32Array) { a.fill(0) }
 }
@@ -46,8 +49,10 @@ export class FakeAudioContext {
   resumeCalls = 0
   suspendCalls = 0
   nodesByKind: Record<string, number> = {}
+  /** Every start() call with the time it was scheduled for. */
+  starts: { kind: string; t: number }[] = []
   constructor() { FakeAudioContext.created++ }
-  private make(kind: string) { this.nodesByKind[kind] = (this.nodesByKind[kind] ?? 0) + 1; return new FakeNode(kind) }
+  private make(kind: string) { this.nodesByKind[kind] = (this.nodesByKind[kind] ?? 0) + 1; return new FakeNode(kind, this) }
   createGain() { return this.make('gain') }
   createDynamicsCompressor() { return this.make('compressor') }
   createBiquadFilter() { return this.make('filter') }
@@ -56,6 +61,8 @@ export class FakeAudioContext {
   createOscillator() { return this.make('osc') }
   createDelay() { return this.make('delay') }
   createAnalyser() { return this.make('analyser') }
+  createConvolver() { return this.make('convolver') }
+  createScriptProcessor() { return this.make('processor') }
   createBuffer(_c: number, n: number) { return { getChannelData: () => new Float32Array(n), length: n } }
   decodeAudioData() { return Promise.reject(new Error('no decode in tests')) }
   resume() { this.resumeCalls++; this.state = 'running'; return Promise.resolve() }

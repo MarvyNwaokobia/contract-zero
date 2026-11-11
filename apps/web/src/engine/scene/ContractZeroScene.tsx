@@ -1132,6 +1132,10 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
   const fieldToast = useRef<{ text: string; until: number; color: string }>({ text: '', until: 0, color: '#e9edf2' });
   const lastFieldHtml = useRef('');
   const lastBeep = useRef(-1);
+  // Audio cues that fire once per run, and where each guard last was (for footsteps).
+  const alertedRef = useRef(false);
+  const finalAlarmRef = useRef(false);
+  const enemyStepRef = useRef(new Map<number, { x: number; z: number; t: number }>());
   const lastHeartbeat = useRef(0);
   /** Guards' weapons still falling: field item id → its tumble physics. */
   const enemyDrops = useRef(new Map<string, DroppedWeapon>());
@@ -1460,6 +1464,8 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
   // Load this op's ambience bed (retunes the room tone + zone drone; the mission
   // remounts per op, so this fires whenever the zone changes).
   useEffect(() => { audio.setZone(ambienceKey(mission.zone, mission.level)); }, [audio, mission.zone, mission.level]);
+  // The level's roofs: indoors and outdoors sound different (reverb follows the listener).
+  useEffect(() => { audio.setLevel(LEVEL ? LEVEL.art : null); return () => audio.setLevel(null); }, [audio, LEVEL]);
   // The refinery runs while you fight in it.
   useEffect(() => { audio.setMachinery(mission.level === 'cinder_yard'); return () => audio.setMachinery(false); }, [audio, mission.level]);
 
@@ -2122,7 +2128,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
         const from = tmp2.set(ev.from[0], ev.from[1], ev.from[2]);
         spawnBeam(from, ev.impact, true);                          // the line from their gun to you
         spawnBullet(from, ev.impact, ev.hit, true, ev.normal);     // and the round travelling down it
-        audio.enemyShot(ev.from); // spatialised: you hear the direction
+        audio.enemyShot(ev.from, { impact: ev.impact, hit: ev.hit }); // spatialised, delayed and dulled when far; a miss that passes close is heard going by
       } else if (ev.kind === 'playerHit') {
         // A round landing should MOVE you: the head snaps, the view rolls, and
         // you're shoved off the axis you were shot from.
@@ -2909,7 +2915,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
         say('chargePlaced');
         if (fe.planted >= fe.total) {
           toast('BOTH CHARGES SET · FUSE LIT · GET CLEAR', '#ff8a5a');
-          audio.alarm(5);
+          audio.alarm(5, 2); // the fuse is lit
           sim.setRoomActive(1, true); sim.setRoomActive(2, true);
         } else toast(`CHARGE SET · ${fe.planted}/${fe.total}`, '#ff8a5a');
         break;
@@ -2929,14 +2935,17 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
         break;
       case 'extractCalled':
         say('extractCalled');
+        audio.extractCall(); audio.setExtraction(true);
         toast(FIELD.spec.exfil?.mode === 'handover' ? 'HANDOVER SIGNALLED · HOLD THE ZONE' : 'EXTRACTION CALLED · HOLD THE ZONE', '#5fe0a8');
         break;
       case 'extractLeft':
         say('extractBroken');
+        audio.extractLeft(); audio.setExtraction(false);
         toast('OUTSIDE THE ZONE · COUNTDOWN SLIPPING', '#ff6a5a');
         break;
       case 'extracted': {
         say('extractDone');
+        audio.setExtraction(false); audio.extractSuccess();
         const k = FIELD.spec.kind;
         const label = FIELD.spec.cargoLabel ?? '';
         const units = fe.carried.reduce((n, id) => n + (FIELD.items.get(id)?.units ?? 0), 0);
@@ -3306,6 +3315,22 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
         else if (e.ai !== 'hidden' && lvl < 1) lvl = 1;
       }
       audio.setMusicIntensity(lvl);
+      // A site raises the alarm the first time its guards open fire, and escalates when the fuse is
+      // down to its last seconds. Each fires once per run.
+      if (LEVEL && lvl >= 2 && !alertedRef.current) { alertedRef.current = true; audio.alarm(4, 1); }
+      const fuse = FIELD.fuseLeft;
+      if (fuse > 0 && fuse <= 8 && !finalAlarmRef.current) { finalAlarmRef.current = true; audio.alarm(Math.max(3, Math.ceil(fuse)), 3); }
+      // Guards on the move within earshot are heard: a step each time one has covered ground.
+      const stepNow = performance.now();
+      for (const e of snap.enemies) {
+        if (!e.alive || !e.active || e.ai === 'hidden') continue;
+        const last = enemyStepRef.current.get(e.id);
+        if (!last) { enemyStepRef.current.set(e.id, { x: e.x, z: e.z, t: stepNow }); continue; }
+        if (stepNow - last.t < 320) continue;
+        const moved = Math.hypot(e.x - last.x, e.z - last.z);
+        enemyStepRef.current.set(e.id, { x: e.x, z: e.z, t: stepNow });
+        if (moved > 0.45) audio.enemyStep([e.x, 0, e.z]);
+      }
     }
     // health bar + damage vignette (red flash on hit, and a base tint when low)
     if (h.healthFill) {

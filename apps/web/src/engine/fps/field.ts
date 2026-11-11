@@ -227,6 +227,8 @@ export class FieldRuntime {
   exfilProgress = 0;
   private wasInside = true;
   fuseAt = -1;
+  /** Seconds until the charges blow, or -1 when no fuse is burning. */
+  get fuseLeft(): number { return this.fuseAt > 0 && !this.detonated ? Math.max(0, this.fuseAt - this.time) : -1; }
   detonated = false;
   /** Current interaction target and how long E has been held on it. */
   target: Interactable | null = null;

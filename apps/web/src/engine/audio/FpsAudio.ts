@@ -3,6 +3,9 @@ import { spatialize } from './spatial';
 import type { GunShotAudio } from '../combat/GunFeel';
 import { MusicLayers } from './MusicLayers';
 import { VoiceBudget, type Channel } from './voices';
+import { alarmPattern, closestApproach, distanceClass, nearMissStrength, propagationDelay, type AlarmLevel, type Vec3 } from './combat';
+import { impulseResponse, INDOOR_IR, isIndoors, OUTDOOR_IR, spaceMix } from './acoustics';
+import type { Art } from '../fps/levels';
 import type { LevelId } from '../fps/levels';
 
 /**
@@ -110,12 +113,18 @@ export class FpsAudio {
   private ambDuck!: GainNode;
   private musicDuck!: GainNode;
   private interactDuck!: GainNode;
-  private meters: Record<string, AnalyserNode> | null = null;
+  /** The level's roofs, for telling indoors from outdoors; and two reverbs (a dense room, open ground). */
+  private roofs: readonly Art[] | null = null;
+  private indoors = false;
+  private reverbIn!: GainNode;
+  private roomWet!: GainNode;
+  private openWet!: GainNode;
+  private extractHum: { oscs: OscillatorNode[]; gain: GainNode } | null = null;
   /** How many sounds may play at once, and which give way first (voices.ts). */
   private budget = new VoiceBudget({
     max: 28,
     perChannel: { interactions: 6, ui: 6 },
-    cooldownMs: { impact: 28, 'enemy-shot': 45, footstep: 140, explosion: 250, hitmarker: 40, clack: 35, heartbeat: 400 },
+    cooldownMs: { impact: 28, 'enemy-shot': 45, footstep: 140, explosion: 250, hitmarker: 40, clack: 35, heartbeat: 400, whiz: 120, ricochet: 150, 'enemy-step': 90, extract: 300 },
   });
   private ambBus!: GainNode;
   private ambBaseVol = 0.05;
@@ -205,6 +214,24 @@ export class FpsAudio {
       this.interactBus.connect(this.interactDuck); this.interactDuck.connect(this.master);
       this.uiBus.connect(this.master);
       this.voiceBus.connect(this.master);
+      // Reverb: combat sound (after ducking) is sent to a dense room and to open ground; which one is
+      // heard depends on whether the listener is under a roof (setListener -> applySpace).
+      this.reverbIn = ctx.createGain();
+      this.roomWet = ctx.createGain();
+      this.openWet = ctx.createGain();
+      this.roomWet.gain.value = 0;
+      this.openWet.gain.value = 0;
+      this.combatDuck.connect(this.reverbIn);
+      for (const [spec, wet] of [[INDOOR_IR, this.roomWet], [OUTDOOR_IR, this.openWet]] as const) {
+        const conv = ctx.createConvolver();
+        const ir = ctx.createBuffer(2, Math.floor(ctx.sampleRate * spec.seconds), ctx.sampleRate);
+        for (let c = 0; c < 2; c++) ir.getChannelData(c).set(impulseResponse(ctx.sampleRate, spec, c));
+        conv.buffer = ir;
+        this.reverbIn.connect(conv);
+        conv.connect(wet);
+        wet.connect(this.master);
+      }
+      this.applySpace();
       this.applyMix();
       // The score only runs while it can be heard: a muted music slider costs nothing.
       this.syncMusic();
@@ -245,6 +272,34 @@ export class FpsAudio {
     this.lx = x;
     this.lz = z;
     this.lyaw = yaw;
+    // under a roof or not; a small margin so the doorway is already the room
+    const inside = isIndoors(this.roofs, x, z, 0.8);
+    if (inside !== this.indoors) {
+      this.indoors = inside;
+      this.applySpace();
+    }
+  }
+
+  /** The level being played, for indoor and outdoor acoustics. Null (training, endless) is all outdoors. */
+  setLevel(art: readonly Art[] | null): void {
+    this.roofs = art;
+    const inside = isIndoors(art, this.lx, this.lz, 0.8);
+    if (inside !== this.indoors) this.indoors = inside;
+    this.applySpace();
+  }
+
+  /** Fade the reverb to the space the listener is in. */
+  private applySpace(): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.roomWet) return;
+    const m = spaceMix(this.indoors);
+    this.roomWet.gain.setTargetAtTime(m.indoorWet, ctx.currentTime, 0.12);
+    this.openWet.gain.setTargetAtTime(m.outdoorWet, ctx.currentTime, 0.12);
+  }
+
+  /** Whether the listener is under a roof (probes). */
+  isIndoors(): boolean {
+    return this.indoors;
   }
 
   stats(): FpsAudioStats & { mix: Mix; backgroundMuted: boolean; masterGain: number | null; music: { playing: boolean; level: number; gain: number | null }; voices: { granted: number; refused: Record<string, number> } } {
@@ -280,6 +335,7 @@ export class FpsAudio {
   }
 
   dispose(): void {
+    this.setExtraction(false);
     this.music?.dispose();
     this.music = null;
     try { this.ctx?.close(); } catch { /* already closed */ }
@@ -398,6 +454,7 @@ export class FpsAudio {
       src.playbackRate.value = 0.95 + Math.random() * 0.12;
       src.connect(g);
       src.start(now);
+      if (Math.random() < 0.28 && this.allow('ricochet', 'combat', 35, 350)) this.ricochet(g, now);
     } else {
       // synth fallback until the impact sample decodes
       const tick = ctx.createBufferSource();
@@ -414,6 +471,23 @@ export class FpsAudio {
       tick.stop(now + 0.06);
     }
     this.stats_.impacts++;
+  }
+
+  /** A round glancing off hard cover: a thin whine that falls away, through the impact's own spatial chain. */
+  private ricochet(dest: AudioNode, now: number): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(2600 + Math.random() * 600, now + 0.01);
+    o.frequency.exponentialRampToValueAtTime(900, now + 0.3);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(0.07, now + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+    o.connect(g).connect(dest);
+    o.start(now);
+    o.stop(now + 0.32);
   }
 
   /** Crisp, centred confirmation your shot connected (audio-first kill-confirm). */
@@ -533,30 +607,136 @@ export class FpsAudio {
     this.duck(0.8, 0.6);
   }
 
-  /** A site alarm: a rising two-tone wail for a few seconds. */
-  alarm(secs = 4): void {
-    if (!this.allow('alarm', 'combat', 70, 1000)) return;
+  /** A site alarm. Level 1 is alerted, 2 is the fuse lit, 3 the final seconds: each faster, higher and
+   *  fuller than the last (combat/alarmPattern). */
+  alarm(secs = 4, level: AlarmLevel = 1): void {
     const ctx = this.ctx;
     if (!ctx) return;
+    if (!this.allow('alarm', 'combat', 70, 1000)) return;
+    const pat = alarmPattern(level);
     const now = ctx.currentTime;
-    const osc = ctx.createOscillator();
-    osc.type = 'sawtooth';
     const g = ctx.createGain();
     g.gain.setValueAtTime(0.0001, now);
-    g.gain.linearRampToValueAtTime(0.035, now + 0.3);
-    g.gain.setValueAtTime(0.035, now + secs - 0.4);
+    g.gain.linearRampToValueAtTime(pat.gain, now + 0.3);
+    g.gain.setValueAtTime(pat.gain, now + secs - 0.4);
     g.gain.linearRampToValueAtTime(0.0001, now + secs);
-    for (let t = 0; t < secs; t += 1) {
-      osc.frequency.setValueAtTime(520, now + t);
-      osc.frequency.linearRampToValueAtTime(780, now + t + 0.5);
-      osc.frequency.linearRampToValueAtTime(520, now + t + 1);
-    }
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
-    lp.frequency.value = 1800;
-    osc.connect(lp).connect(g).connect(this.gunBus);
-    osc.start(now);
-    osc.stop(now + secs);
+    lp.frequency.value = 1800 + level * 400;
+    lp.connect(g).connect(this.gunBus);
+    const voice = (type: OscillatorType, ratio: number, level_: number) => {
+      const osc = ctx.createOscillator();
+      osc.type = type;
+      for (let t = 0; t < secs; t += pat.periodS) {
+        osc.frequency.setValueAtTime(pat.loHz * ratio, now + t);
+        osc.frequency.linearRampToValueAtTime(pat.hiHz * ratio, now + t + pat.periodS / 2);
+        osc.frequency.linearRampToValueAtTime(pat.loHz * ratio, now + t + pat.periodS);
+      }
+      const og = ctx.createGain();
+      og.gain.value = level_;
+      osc.connect(og).connect(lp);
+      osc.start(now);
+      osc.stop(now + secs);
+    };
+    voice('sawtooth', 1, 1);
+    if (pat.second) voice('square', 1.5, 0.35); // the last seconds are doubled a fifth up
+  }
+
+  // ── Extraction ──
+
+  /** The extraction is called: a radio click and three rising notes. */
+  extractCall(): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.allow('extract', 'ui', 75, 600)) return;
+    this.noiseBand(1500, 0.08, 0.12);
+    const now = ctx.currentTime;
+    [660, 880, 1100].forEach((f, i) => {
+      const o = ctx.createOscillator();
+      o.type = 'triangle';
+      o.frequency.value = f;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, now + i * 0.11);
+      g.gain.exponentialRampToValueAtTime(0.08, now + i * 0.11 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.11 + 0.14);
+      o.connect(g).connect(this.uiBus);
+      o.start(now + i * 0.11);
+      o.stop(now + i * 0.11 + 0.16);
+    });
+  }
+
+  /** You left the zone: two falling notes, a warning and not a punishment. */
+  extractLeft(): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.allow('extract', 'ui', 75, 600)) return;
+    const now = ctx.currentTime;
+    [700, 520].forEach((f, i) => {
+      const o = ctx.createOscillator();
+      o.type = 'square';
+      o.frequency.value = f;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, now + i * 0.16);
+      g.gain.exponentialRampToValueAtTime(0.06, now + i * 0.16 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.16 + 0.2);
+      o.connect(g).connect(this.uiBus);
+      o.start(now + i * 0.16);
+      o.stop(now + i * 0.16 + 0.22);
+    });
+  }
+
+  /** Out: a resolved open fifth over a long low floor, the full stop after the countdown. */
+  extractSuccess(): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.allow('extract', 'ui', 80, 1800)) return;
+    const now = ctx.currentTime;
+    for (const [f, vol] of [[220, 0.16], [330, 0.14], [440, 0.1]] as const) {
+      const o = ctx.createOscillator();
+      o.type = 'triangle';
+      o.frequency.value = f;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.exponentialRampToValueAtTime(vol, now + 0.12);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 1.7);
+      o.connect(g).connect(this.uiBus);
+      o.start(now);
+      o.stop(now + 1.75);
+    }
+    this.musicGap(400);
+  }
+
+  /** The ride in: a low engine swelling while the countdown runs, fading when it ends or breaks. */
+  setExtraction(on: boolean): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    if (!on) {
+      const h = this.extractHum;
+      if (h) {
+        h.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.4);
+        setTimeout(() => h.oscs.forEach((o) => { try { o.stop(); } catch { /* stopped */ } }), 1800);
+        this.extractHum = null;
+      }
+      return;
+    }
+    if (this.extractHum) return;
+    const gain = ctx.createGain();
+    gain.gain.value = 0;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 170;
+    gain.connect(lp).connect(this.ambBus);
+    const oscs = [52, 79, 104].map((f, i) => {
+      const o = ctx.createOscillator();
+      o.type = i === 2 ? 'sine' : 'sawtooth';
+      // revving up as it approaches: where machinery masks the level (Cinder Yard), the rising pitch still reads
+      o.frequency.setValueAtTime(f * 0.7, ctx.currentTime);
+      o.frequency.exponentialRampToValueAtTime(f, ctx.currentTime + 5);
+      const g = ctx.createGain();
+      g.gain.value = i === 2 ? 0.14 : 0.24;
+      o.connect(g).connect(gain);
+      o.start();
+      return o;
+    });
+    gain.gain.setTargetAtTime(1, ctx.currentTime, 2.2); // it arrives slowly, like something approaching
+    this.extractHum = { oscs, gain };
   }
 
   /** Dry hammer click on an empty magazine. */
@@ -634,7 +814,9 @@ export class FpsAudio {
     bp.frequency.value = freq;
     bp.Q.value = 2.2;
     const g = ctx.createGain();
-    g.gain.setValueAtTime(vol, now);
+    // A narrow band of noise carries little energy (it measured about -50 dBFS at the authored levels,
+    // under the music), so the radio click is scaled up to sit where the cue can be heard.
+    g.gain.setValueAtTime(vol * 8, now);
     g.gain.exponentialRampToValueAtTime(0.001, now + dur);
     src.connect(bp).connect(g).connect(this.voiceBus ?? this.uiBus);
     src.start(now);
@@ -681,29 +863,92 @@ export class FpsAudio {
     this.stats_.footsteps++;
   }
 
-  /** An ENEMY's shot — the same real rifle crack, but spatialised from their
-   *  position so you can hear where the fire is coming from (slice 3). */
-  enemyShot(at: [number, number, number]): void {
-    if (!this.allow('enemy-shot', 'combat', 50, 500)) return;
+  /** An ENEMY's shot: the same crack as yours, spatialised from the shooter so you hear where the
+   *  fire is coming from. A shot beyond about 30 m arrives late (sound is slow), duller and with an
+   *  echo off the ground. If `info` says the round missed, and its path really passed near your
+   *  head, you hear it go by, before the crack, whether or not the shot itself is audible. */
+  enemyShot(at: [number, number, number], info?: { impact: Vec3; hit: boolean }): void {
     const ctx = this.ctx;
-    if (!ctx || this.rifle.length === 0) return;
+    if (!ctx) return;
+    if (info && !info.hit) {
+      const c = closestApproach(at, info.impact, [this.lx, 1.6, this.lz]);
+      const strength = nearMissStrength(c.dist);
+      if (strength > 0) this.whiz(c.point, strength);
+    }
+    if (this.rifle.length === 0) return;
     const sp = spatialize(this.lx, this.lz, this.lyaw, at[0], at[2]);
     if (sp.gain <= 0.001) return;
+    if (!this.allow('enemy-shot', 'combat', 50, 500)) return;
+    const dist = Math.hypot(at[0] - this.lx, at[2] - this.lz);
+    const cls = distanceClass(dist);
+    const delay = cls === 'near' ? 0 : propagationDelay(dist);
+    const play = (extraDelay: number, gain: number, lowpass: number) => {
+      const src = ctx.createBufferSource();
+      src.buffer = this.rifle[(Math.random() * this.rifle.length) | 0];
+      src.playbackRate.value = 0.9 + Math.random() * 0.14;
+      const pan = ctx.createStereoPanner();
+      pan.pan.value = sp.pan;
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = lowpass;
+      const g = ctx.createGain();
+      g.gain.value = gain;
+      src.connect(g);
+      g.connect(pan);
+      pan.connect(lp);
+      lp.connect(this.impactBus);
+      src.start(ctx.currentTime + delay + extraDelay);
+    };
+    play(0, sp.gain * 0.75 * (cls === 'far' ? 0.85 : 1), cls === 'far' ? Math.min(sp.lowpass, 1400) : sp.lowpass);
+    if (cls === 'far') play(0.21, sp.gain * 0.22, 900); // the shot coming back off the ground and the hills
+  }
+
+  /** A round passing close to your head: a short high band sweeping down, panned to the side it passed. */
+  private whiz(point: Vec3, strength: number): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.allow('whiz', 'combat', 85, 300)) return;
+    const sp = spatialize(this.lx, this.lz, this.lyaw, point[0], point[2]);
+    const now = ctx.currentTime;
     const src = ctx.createBufferSource();
-    src.buffer = this.rifle[(Math.random() * this.rifle.length) | 0];
-    src.playbackRate.value = 0.9 + Math.random() * 0.14;
+    src.buffer = this.noise(0.22);
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.Q.value = 3;
+    bp.frequency.setValueAtTime(5200, now);
+    bp.frequency.exponentialRampToValueAtTime(1700, now + 0.2);
+    const g = ctx.createGain();
+    // band-limited noise carries little energy: it needs a high gain to read as a close pass (measured)
+    g.gain.setValueAtTime(1.6 * strength, now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
     const pan = ctx.createStereoPanner();
     pan.pan.value = sp.pan;
+    src.connect(bp).connect(g).connect(pan).connect(this.gunBus);
+    src.start(now);
+    src.stop(now + 0.24);
+  }
+
+  /** Someone walking nearby: a low thud from their position, only within earshot. */
+  enemyStep(at: [number, number, number]): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const dist = Math.hypot(at[0] - this.lx, at[2] - this.lz);
+    if (dist > 12) return;
+    if (!this.allow('enemy-step', 'combat', 45, 160)) return;
+    const sp = spatialize(this.lx, this.lz, this.lyaw, at[0], at[2]);
+    const now = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise(0.06);
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
-    lp.frequency.value = sp.lowpass;
+    lp.frequency.value = Math.min(sp.lowpass, 240 + Math.random() * 80);
     const g = ctx.createGain();
-    g.gain.value = sp.gain * 0.75; // sit a touch behind your own gun
-    src.connect(g);
-    g.connect(pan);
-    pan.connect(lp);
-    lp.connect(this.impactBus);
-    src.start();
+    g.gain.setValueAtTime(0.22 * sp.gain * (1 - dist / 14), now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+    const pan = ctx.createStereoPanner();
+    pan.pan.value = sp.pan;
+    src.connect(lp).connect(g).connect(pan).connect(this.impactBus);
+    src.start(now);
+    src.stop(now + 0.09);
   }
 
   /** You got hit — a low body thud + a sharp sting, centred. */
@@ -834,25 +1079,71 @@ export class FpsAudio {
     return this.holds.size > 0;
   }
 
-  /** The level (RMS, 0..1) of each channel as the listener hears it, after ducking. The analysers
-   *  are built on first use, so normal play pays nothing. For probes and the dev bench. */
-  levels(): Record<string, number> {
+  /** Per-channel accumulators, filled in the audio thread between reads. */
+  private meterAcc: Record<string, { sumsq: number; n: number; peak: number }> | null = null;
+
+  /** Build the taps on first use, so normal play pays nothing. They accumulate on the audio thread
+   *  (an AudioWorklet), because a polled analyser only ever sees the tail of each rendered block and a
+   *  short sound can fall between two reads, and a main-thread tap drops blocks whenever a heavy
+   *  frame holds the page. Where worklets are missing it falls back to a ScriptProcessor. For probes
+   *  and the dev bench, never the shipped mix path. Readings are zero until the worklet has loaded. */
+  private ensureMeters(): void {
     const ctx = this.ctx;
-    if (!ctx) return {};
-    if (!this.meters) {
-      const tap = (name: string, node: AudioNode) => { const a = ctx.createAnalyser(); a.fftSize = 1024; node.connect(a); return [name, a] as const; };
-      this.meters = Object.fromEntries([
-        tap('combat', this.combatDuck), tap('environment', this.ambDuck), tap('music', this.musicDuck), tap('interactions', this.interactDuck),
-        tap('ui', this.uiBus), tap('radio', this.voiceBus), tap('master', this.master),
-      ]);
-    }
-    const buf = new Float32Array(1024);
-    return Object.fromEntries(Object.entries(this.meters).map(([k, a]) => {
-      a.getFloatTimeDomainData(buf);
-      let sum = 0;
-      for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
-      return [k, Math.sqrt(sum / buf.length)];
-    }));
+    if (!ctx || this.meterAcc) return;
+    const acc: Record<string, { sumsq: number; n: number; peak: number }> = {};
+    this.meterAcc = acc;
+    const taps: [string, AudioNode][] = [
+      ['combat', this.combatDuck], ['environment', this.ambDuck], ['music', this.musicDuck], ['interactions', this.interactDuck],
+      ['ui', this.uiBus], ['radio', this.voiceBus], ['master', this.master],
+    ];
+    for (const [name] of taps) acc[name] = { sumsq: 0, n: 0, peak: 0 };
+    const sink = ctx.createGain();
+    sink.gain.value = 0;
+    sink.connect(ctx.destination);
+    const fallback = () => {
+      for (const [name, node] of taps) {
+        const m = acc[name];
+        const proc = ctx.createScriptProcessor(1024, 1, 1);
+        proc.onaudioprocess = (e) => {
+          const d = e.inputBuffer.getChannelData(0);
+          for (let i = 0; i < d.length; i++) { const v = d[i]; m.sumsq += v * v; const av = v < 0 ? -v : v; if (av > m.peak) m.peak = av; }
+          m.n += d.length;
+        };
+        node.connect(proc);
+        proc.connect(sink);
+      }
+    };
+    const hasWorklet = !!ctx.audioWorklet && typeof AudioWorkletNode !== 'undefined' && typeof Blob !== 'undefined' && typeof URL?.createObjectURL === 'function';
+    if (!hasWorklet) { fallback(); return; }
+    const code = 'class M extends AudioWorkletProcessor{constructor(){super();this.s=0;this.n=0;this.p=0}process(i){const c=i[0]&&i[0][0];if(c){for(let k=0;k<c.length;k++){const v=c[k];this.s+=v*v;const a=v<0?-v:v;if(a>this.p)this.p=a}this.n+=c.length;if(this.n>=2048){this.port.postMessage([this.s,this.n,this.p]);this.s=0;this.n=0;this.p=0}}return true}}registerProcessor("cz-meter",M)';
+    const url = URL.createObjectURL(new Blob([code], { type: 'application/javascript' }));
+    ctx.audioWorklet.addModule(url).then(() => {
+      for (const [name, node] of taps) {
+        const w = new AudioWorkletNode(ctx, 'cz-meter');
+        w.port.onmessage = (e: MessageEvent<number[]>) => { const m = acc[name]; m.sumsq += e.data[0]; m.n += e.data[1]; if (e.data[2] > m.peak) m.peak = e.data[2]; };
+        node.connect(w);
+        w.connect(sink);
+      }
+    }).catch(fallback).finally(() => URL.revokeObjectURL(url));
+  }
+
+  /** The RMS level (0..1) of each channel since the last read, after ducking. The first call only
+   *  starts the meters. For probes and the dev bench. */
+  levels(): Record<string, number> {
+    if (!this.ctx) return {};
+    this.ensureMeters();
+    const out: Record<string, number> = {};
+    for (const [k, m] of Object.entries(this.meterAcc!)) { out[k] = m.n ? Math.sqrt(m.sumsq / m.n) : 0; m.sumsq = 0; m.n = 0; }
+    return out;
+  }
+
+  /** The loudest single sample (0..1) of each channel since the last read: what a short sound reaches. */
+  peaks(): Record<string, number> {
+    if (!this.ctx) return {};
+    this.ensureMeters();
+    const out: Record<string, number> = {};
+    for (const [k, m] of Object.entries(this.meterAcc!)) { out[k] = m.peak; m.peak = 0; }
+    return out;
   }
 
   private applyMix(): void {

@@ -1,5 +1,6 @@
 'use client'
 
+import { useMusicState } from '@/components/audio/AudioProvider'
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -166,6 +167,7 @@ function Row({ p, canTrade, busy, onQuote }: { p: ExchangePrice; canTrade: boole
 }
 
 export default function Exchange() {
+  useMusicState('table')
   const qc = useQueryClient()
   const { session, loading } = useSession()
   const [ticket, setTicket] = useState<Ticket | null>(null)

@@ -314,3 +314,70 @@ describe('every radio voice has its own signature', () => {
     expect(new Set(Object.values(built)).size).toBeGreaterThan(1)    // not one signature for everyone
   })
 })
+
+// ── The score across the game ───────────────────────────────────────────────
+
+describe('adaptive music', () => {
+  const music = () => (inner(audio) as unknown as { music: { current: string; targets(): Record<string, number> } | null }).music!
+  it('is silent until a screen asks for something, then follows the screen', () => {
+    expect(audio.stats().music.state).toBe('silent')
+    audio.setMusicState('hub')
+    expect(audio.stats().music.state).toBe('hub')
+    expect(music().current).toBe('hub')
+    audio.setMusicState('table')
+    expect(music().current).toBe('table')
+  })
+  it('the fight drives the states from the guards, and the extraction overrides then hands back', () => {
+    audio.setMusicIntensity(0); expect(music().current).toBe('infiltration')
+    audio.setMusicIntensity(1); expect(music().current).toBe('detection')
+    audio.setMusicIntensity(2); expect(music().current).toBe('combat')
+    audio.setExtraction(true);  expect(music().current).toBe('extraction')
+    expect(music().targets().riser).toBeGreaterThan(0)
+    audio.setMusicIntensity(1); expect(music().current).toBe('extraction')   // the fight cannot take the countdown's score away
+    audio.setExtraction(false); expect(music().current).toBe('detection')    // and it returns to what the fight was doing
+    expect(music().targets().riser).toBe(0)
+  })
+  it('one score for the whole app: changing state never builds a second one', () => {
+    const ctx = inner(audio).ctx as FakeAudioContext
+    audio.setMusicState('hub')
+    const drones = ctx.nodesByKind.osc ?? 0
+    for (const s of ['prep', 'infiltration', 'combat', 'table', 'hub'] as const) audio.setMusicState(s)
+    expect(ctx.nodesByKind.osc ?? 0).toBe(drones)  // layers cross-fade; no oscillator is added or restarted
+  })
+  it('results sound a resolution once on entry and not again while you stay', () => {
+    const ctx = inner(audio).ctx as FakeAudioContext
+    audio.setMusicState('combat')
+    const before = ctx.nodesByKind.osc ?? 0
+    audio.setMusicState('results')
+    expect((ctx.nodesByKind.osc ?? 0) - before).toBe(3)   // the open fifth
+    audio.setMusicState('results')
+    expect((ctx.nodesByKind.osc ?? 0) - before).toBe(3)
+  })
+  it('a state set before audio is unlocked is waiting for it', () => {
+    const early = new FpsAudio()
+    early.setMusicState('hub')
+    expect(early.stats().music.state).toBe('hub')
+    early.unlock()
+    expect((early as unknown as { music: { current: string } }).music.current).toBe('hub')
+    early.dispose()
+  })
+  it('a muted music slider builds no score at all', () => {
+    const quiet = new FpsAudio()
+    quiet.setMix({ master: 0.9, music: 0, effects: 1, voice: 1, ambience: 0.8, ui: 0.8, interactions: 1 })
+    quiet.unlock()
+    quiet.setMusicState('hub')
+    expect(quiet.stats().music.playing).toBe(false)
+    quiet.dispose()
+  })
+})
+
+describe('no room tone off a site', () => {
+  it('the Hub has none; a site has its own; leaving takes it away', () => {
+    const a = inner(audio)
+    expect(gain(a.ambBus).value).toBe(0)
+    audio.setZone('CINDER_YARD')
+    expect(gain(a.ambBus).value).toBeGreaterThan(0)
+    audio.setZone('NONE')
+    expect(gain(a.ambBus).value).toBe(0)
+  })
+})

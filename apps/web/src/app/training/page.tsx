@@ -9,6 +9,7 @@
 //    with a local object list instead of the server's.
 //  - Endless: the procedural room chain, wave after wave.
 
+import { useMusicState } from '@/components/audio/AudioProvider'
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
@@ -96,6 +97,7 @@ function Practice({ onPlay }: { onPlay: (c: ConvoyContract) => void }) {
 }
 
 export default function TrainingPage() {
+  useMusicState('prep')
   const settings = useSettings();
   const k = (a: Action) => bindLabel(settings.controls.binds, a);
   const [mode, setMode] = useState<Mode>('menu');

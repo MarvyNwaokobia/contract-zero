@@ -20,7 +20,8 @@ import {
 import { bindLabel } from '@/lib/keybinds'
 import { useSyncState } from '@/lib/preferencesSync'
 import { resetTips } from '@/lib/tutorial'
-import { FpsAudio } from '@/engine/audio'
+import type { FpsAudio } from '@/engine/audio'
+import { acquireAudio, releaseAudio } from '@/engine/audio/shared'
 
 type Cat = 'display' | 'audio' | 'controls' | 'keys' | 'interface' | 'access' | 'account'
 const CATS: { id: Cat; code: string; label: string; blurb: string; icon: ReactNode }[] = [
@@ -332,24 +333,25 @@ const MIX: { key: keyof AudioMix; label: string; hint: string }[] = [
 function Audio({ s, set }: { s: Settings; set: SetFn }) {
   const audio = useRef<FpsAudio | null>(null)
   const musicStop = useRef<ReturnType<typeof setTimeout> | null>(null)
-  useEffect(() => () => { audio.current?.dispose(); if (musicStop.current) clearTimeout(musicStop.current) }, [])
+  // The app's one audio engine, shared with every other screen: Test plays through it, so what you hear is the real mix.
+  useEffect(() => () => { if (audio.current) { audio.current.setMusicOverride(null); audio.current.setZone('NONE'); releaseAudio() } if (musicStop.current) clearTimeout(musicStop.current) }, [])
   useEffect(() => { audio.current?.setMix(s.audio) }, [s.audio])
   const test = (k: keyof AudioMix) => {
-    audio.current ??= new FpsAudio()
+    audio.current ??= acquireAudio()
     const a = audio.current
     a.unlock()
     if (k === 'music') {
-      // A few bars of the score at combat intensity, then quiet again.
+      // A few bars of the score at combat intensity, then back to whatever this screen plays (nothing).
       a.setMix(s.audio)
-      a.setMusicIntensity(2)
+      a.setMusicOverride('combat')
       if (musicStop.current) clearTimeout(musicStop.current)
-      musicStop.current = setTimeout(() => a.setMix({ ...s.audio, music: 0 }), 6000)
+      musicStop.current = setTimeout(() => a.setMusicOverride(null), 6000)
       return
     }
-    a.setMix({ ...s.audio, music: 0 })
+    a.setMusicOverride(null)
     if (k === 'effects' || k === 'master') a.explosion([0, 1, -6])
     else if (k === 'voice') a.vo('dyn-settings-test', 'handler')
-    else if (k === 'ambience') a.setZone('CINDER_YARD')
+    else if (k === 'ambience') { a.setZone('CINDER_YARD'); setTimeout(() => a.setZone('NONE'), 4000) }
     else if (k === 'interactions') { a.reloadStart(); setTimeout(() => a.reloadDone(), 450) }
     else a.beep(true)
   }

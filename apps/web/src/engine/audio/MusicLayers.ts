@@ -18,6 +18,8 @@
  *   D4 · F4 · A4 · G4 ·· D4 · F4 · C5 · A4
  */
 
+import { ENTRY_STINGER, rising, STATE_TARGETS, stateForIntensity, type MusicState } from './musicState';
+
 const BPM = 70;
 const BEAT = 60 / BPM;          // 0.857s
 const CYCLE = 16;               // beats per loop
@@ -32,20 +34,16 @@ const MOTIF: number[] = [
 ];
 const PULSE_BEATS = new Set([0, 4, 8, 12]);
 
-// Per-layer target gains at each intensity level.
-const LAYER_GAINS: Array<[number, number, number, number]> = [
-  [0.16, 0.16, 0.16, 0.18], // drone
-  [0, 0.5, 0.5, 0.6],       // pulse
-  [0, 0, 0.42, 0.5],        // motif
-];
+// Per-layer target gains now live in musicState.ts (STATE_TARGETS), by state rather than by intensity.
 const SWELL_TAU = 1.1;  // slow in
 const RELAX_TAU = 0.35; // fast out
 
 export class MusicLayers {
   private ctx: AudioContext;
   private out: GainNode;           // master music gain (gap() mutes this)
-  private layers: GainNode[] = [];
-  private intensity = 0;
+  private layers: GainNode[] = [];   // drone, pulse, motif, riser
+  private state: MusicState = 'infiltration';
+  private riserFilter: BiquadFilterNode | null = null;
 
   private droneNodes: AudioScheduledSourceNode[] = [];
   private motifDelay: DelayNode | null = null;
@@ -61,7 +59,7 @@ export class MusicLayers {
     this.out.gain.value = 1;
     this.out.connect(destination);
 
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 4; i++) {
       const g = ctx.createGain();
       g.gain.value = 0;
       g.connect(this.out);
@@ -83,17 +81,34 @@ export class MusicLayers {
     if (this.running) return;
     this.running = true;
     this.startDrone();
-    this.applyIntensity(true);
+    this.startRiser();
+    this.applyState(true, true);
     this.nextBeatTime = this.ctx.currentTime + 0.1;
     this.beat = 0;
     this.timer = setInterval(() => this.schedule(), TICK_MS);
   }
 
+  /** The fight's intensity, as a state (kept for the scene's per-frame call). */
   setIntensity(level: 0 | 1 | 2 | 3) {
-    if (level === this.intensity) return;
-    this.intensity = level;
-    this.applyIntensity(false);
+    this.setState(stateForIntensity(level));
   }
+
+  /** Move the layers toward a state's targets: layered and crossfaded, never restarted. Swells in
+   *  slowly, relaxes quickly, so walking away from a fight audibly eases off. */
+  setState(next: MusicState) {
+    if (next === this.state) return;
+    const was = this.state;
+    this.state = next;
+    this.applyState(false, rising(was, next));
+    if (next === 'extraction') this.climbRiser(); else if (was === 'extraction') this.resetRiser();
+    if (ENTRY_STINGER[next] === 'resolve') this.resolve();
+  }
+
+  /** The state the score is in (probes, tests). */
+  get current(): MusicState { return this.state; }
+
+  /** Current layer targets: drone, pulse, motif, riser (probes, tests). */
+  targets() { return STATE_TARGETS[this.state]; }
 
   /** Hard score silence for `ms` — the room the big beats land in. */
   gap(ms: number) {
@@ -114,14 +129,70 @@ export class MusicLayers {
 
   // ── Internals ──────────────────────────────────────────────────────────────
 
-  private applyIntensity(immediate: boolean) {
+  private applyState(immediate: boolean, swelling: boolean) {
     const t = this.ctx.currentTime;
-    this.layers.forEach((layer, i) => {
-      const target = LAYER_GAINS[i][this.intensity];
-      const rising = target > layer.gain.value;
+    const tg = STATE_TARGETS[this.state];
+    [tg.drone, tg.pulse, tg.motif, tg.riser].forEach((target, i) => {
+      const layer = this.layers[i];
       if (immediate) layer.gain.setValueAtTime(target, t);
-      else layer.gain.setTargetAtTime(target, t, rising ? SWELL_TAU : RELAX_TAU);
+      else layer.gain.setTargetAtTime(target, t, swelling && target > layer.gain.value ? SWELL_TAU : RELAX_TAU);
     });
+  }
+
+  /** Layer 3: a saw pair under a lowpass that opens while the extraction countdown runs. */
+  private startRiser() {
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 200;
+    filter.Q.value = 2;
+    filter.connect(this.layers[3]);
+    this.riserFilter = filter;
+    for (const [freq, detune] of [[110, 5], [164.81, -4]] as const) {
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.value = freq;
+      osc.detune.value = detune;
+      const g = this.ctx.createGain();
+      g.gain.value = 0.3;
+      osc.connect(g).connect(filter);
+      osc.start();
+      this.droneNodes.push(osc);
+    }
+  }
+
+  /** Open the riser's filter over the length of a countdown. */
+  private climbRiser() {
+    const f = this.riserFilter;
+    if (!f) return;
+    const t = this.ctx.currentTime;
+    f.frequency.cancelScheduledValues(t);
+    f.frequency.setValueAtTime(200, t);
+    f.frequency.exponentialRampToValueAtTime(2200, t + 9);
+  }
+
+  private resetRiser() {
+    const f = this.riserFilter;
+    if (!f) return;
+    const t = this.ctx.currentTime;
+    f.frequency.cancelScheduledValues(t);
+    f.frequency.setTargetAtTime(200, t, 0.4);
+  }
+
+  /** The resolution: a D open fifth swelling and fading, the full stop after the run. */
+  private resolve() {
+    const t = this.ctx.currentTime + 0.05;
+    for (const [freq, vol] of [[146.83, 0.2], [220, 0.18], [293.66, 0.14]] as const) {
+      const osc = this.ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.value = freq;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.001, t);
+      g.gain.exponentialRampToValueAtTime(vol, t + 0.15);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 1.8);
+      osc.connect(g).connect(this.out);
+      osc.start(t);
+      osc.stop(t + 1.85);
+    }
   }
 
   /** Layer 0: two detuned saws + a fifth, breathing through a slow filter LFO. */

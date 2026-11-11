@@ -6,6 +6,7 @@ import ErrorBoundary from '@/components/ui/ErrorBoundary'
 import { useSession } from '@/lib/useSession'
 import { usePreferencesSync } from '@/lib/preferencesSync'
 import { useSettings } from '@/lib/settings'
+import { AudioProvider } from '@/components/audio/AudioProvider'
 
 /** Signed in, the portable settings follow the account between devices. */
 function PreferencesSync() {
@@ -30,7 +31,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <ErrorBoundary>
-      <QueryClientProvider client={queryClient}><PreferencesSync /><MotionSync />{children}</QueryClientProvider>
+      <QueryClientProvider client={queryClient}><PreferencesSync /><MotionSync /><AudioProvider>{children}</AudioProvider></QueryClientProvider>
     </ErrorBoundary>
   )
 }

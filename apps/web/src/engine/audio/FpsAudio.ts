@@ -3,6 +3,7 @@ import { spatialize } from './spatial';
 import type { GunShotAudio } from '../combat/GunFeel';
 import { MusicLayers } from './MusicLayers';
 import { VoiceBudget, type Channel } from './voices';
+import { effectiveState, stateForIntensity, type MusicState } from './musicState';
 import { alarmPattern, closestApproach, distanceClass, nearMissStrength, propagationDelay, type AlarmLevel, type Vec3 } from './combat';
 import { impulseResponse, INDOOR_IR, isIndoors, OUTDOOR_IR, spaceMix } from './acoustics';
 import type { LevelDef } from '../fps/levels';
@@ -78,6 +79,7 @@ export function ambienceKey(zone: string, level?: LevelId): string {
 // Per-zone ambience bed: how dark the room tone is (lowpass), how loud, and an
 // optional low drone — the Rift gets an ominous sub hum, Survival a tense one.
 const ZONE_AMB: Record<string, { lp: number; vol: number; drone?: number }> = {
+  NONE: { lp: 300, vol: 0 },                        // not on a site (the Hub, the tables): no room tone
   DUSTLINE: { lp: 520, vol: 0.05 },
   'REDYARD': { lp: 360, vol: 0.045 },        // colder, quieter, institutional
   'BLACKSITE': { lp: 240, vol: 0.06, drone: 44 },     // the dark place hums under you
@@ -134,13 +136,15 @@ export class FpsAudio {
   /** The Environment channel's own gain, for the positional sounds of the site. `ambBus` is the room-tone level (a
    *  few hundredths), which would swallow them. */
   private envBus!: GainNode;
-  private ambBaseVol = 0.05;
+  private ambBaseVol = 0; // no site until a mission sets a zone: the Hub has no room tone
   /** The player's mix (Settings → Audio) and whether the tab is in the background. */
   private mix: Mix = { master: 0.9, music: 0.5, effects: 1, voice: 1, ambience: 0.8, ui: 0.8, interactions: 1 };
   /** The adaptive score (MusicLayers) on its own bus, under the music slider. */
   private musicBus!: GainNode;
   private music: MusicLayers | null = null;
-  private musicLevel: 0 | 1 | 2 | 3 = 0;
+  /** What the score plays: the base state (the screen, or the fight's intensity) unless an override (the extraction) is set. */
+  private musicBase: MusicState = 'silent';
+  private musicOverride: MusicState | null = null;
   private backgroundMuted = false;
   private voiceBus!: GainNode;
   /** The ambience level after the player's ambience slider. */
@@ -150,14 +154,14 @@ export class FpsAudio {
   /** A refinery's machinery: a pump hum and steam vents letting go now and then. */
   private machineryOn = false;
   private machinery: { oscs: OscillatorNode[]; gain: GainNode; hiss: number } | null = null;
-  private zone = 'DUSTLINE';
+  private zone = 'NONE';
 
   // Listener pose (camera), updated each frame.
   private lx = 0;
   private lz = 0;
   private lyaw = 0;
 
-  private stats_: FpsAudioStats = { shots: 0, impacts: 0, reloads: 0, footsteps: 0, unlocked: false, samples: 0, zone: 'DUSTLINE' };
+  private stats_: FpsAudioStats = { shots: 0, impacts: 0, reloads: 0, footsteps: 0, unlocked: false, samples: 0, zone: 'NONE' };
 
   // Real gunshot samples, decoded into this context's graph.
   private rifle: AudioBuffer[] = [];
@@ -320,18 +324,33 @@ export class FpsAudio {
     return this.indoors;
   }
 
-  stats(): FpsAudioStats & { mix: Mix; backgroundMuted: boolean; masterGain: number | null; music: { playing: boolean; level: number; gain: number | null }; voices: { granted: number; refused: Record<string, number> } } {
+  stats(): FpsAudioStats & { mix: Mix; backgroundMuted: boolean; masterGain: number | null; music: { playing: boolean; state: MusicState; gain: number | null }; voices: { granted: number; refused: Record<string, number> } } {
     return {
       voices: { granted: this.budget.granted, refused: { ...this.budget.refused } },
       ...this.stats_, mix: { ...this.mix }, backgroundMuted: this.backgroundMuted, masterGain: this.master ? this.master.gain.value : null,
-      music: { playing: !!this.music, level: this.musicLevel, gain: this.musicBus ? this.musicBus.gain.value : null },
+      music: { playing: !!this.music, state: effectiveState(this.musicBase, this.musicOverride), gain: this.musicBus ? this.musicBus.gain.value : null },
     };
   }
 
-  /** Combat intensity for the score: 0 calm, 1 alert, 2 engaged, 3 boss. */
+  /** Combat intensity for the score: 0 calm, 1 alert, 2 engaged, 3 boss. The fight's own call, every frame. */
   setMusicIntensity(level: 0 | 1 | 2 | 3): void {
-    this.musicLevel = level;
-    this.music?.setIntensity(level);
+    this.setMusicState(stateForIntensity(level));
+  }
+
+  /** What the score does on this screen: hub, prep, table, results... Layered and crossfaded, never restarted. */
+  setMusicState(state: MusicState): void {
+    this.musicBase = state;
+    this.applyMusicState();
+  }
+
+  /** A state that wins over the base (the extraction countdown); null returns to the base. */
+  setMusicOverride(state: MusicState | null): void {
+    this.musicOverride = state;
+    this.applyMusicState();
+  }
+
+  private applyMusicState(): void {
+    this.music?.setState(effectiveState(this.musicBase, this.musicOverride));
   }
 
   /** A beat of silence in the score, for a kill or a catch to land in. */
@@ -345,7 +364,7 @@ export class FpsAudio {
     if (this.mix.music > 0 && !this.music) {
       this.music = new MusicLayers(ctx, this.musicBus);
       this.music.start();
-      this.music.setIntensity(this.musicLevel);
+      this.applyMusicState();
     } else if (this.mix.music <= 0 && this.music) {
       this.music.dispose();
       this.music = null;
@@ -725,6 +744,7 @@ export class FpsAudio {
 
   /** The ride in: a low engine swelling while the countdown runs, fading when it ends or breaks. */
   setExtraction(on: boolean): void {
+    this.setMusicOverride(on ? 'extraction' : null);   // the score climbs with the countdown (even before audio is unlocked)
     const ctx = this.ctx;
     if (!ctx) return;
     if (!on) {

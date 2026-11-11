@@ -23,7 +23,8 @@ import { linesFor, reinforcementLine, SPEAKER_META, type PresenceLine, type Pres
 import { GUN_FEEL } from '../combat/GunFeel';
 import { STARTER_GUN_ID, getGun, type GunId } from '../combat/GunStats';
 import type { AmmoId, AttachmentId, AttachmentSlot } from '../combat/Loadout';
-import { FpsAudio, ambienceKey } from '../audio';
+import { ambienceKey, type FpsAudio } from '../audio';
+import { acquireAudio, releaseAudio } from '../audio/shared';
 import { computeEdgeArrow } from '../verb/threatArrow';
 import { useGunPrototypes, ALL_GUN_IDS, GUN_LENGTH } from './gunModels';
 import { OperatorRig, type OperatorApi } from './OperatorRig';
@@ -4179,8 +4180,9 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
   // Mobile is a first-class target: a left move-stick, a right
   // look-pad, and fire/ADS/reload buttons write into this, read by FpsWorld.
   const controls = useRef<Controls>({ moveX: 0, moveY: 0, lookX: 0, lookY: 0, lookSens: loadLookSens(), fire: false, ads: false, crouch: false, reload: false, fireMode: false, swap: false, interact: false, heal: false, toggle: null, lockCycle: false, tapAimX: null, tapAimY: null });
-  const audio = useMemo(() => new FpsAudio(), []);
-  useEffect(() => () => audio.dispose(), [audio]);
+  // The app's one audio engine (a click anywhere has already unlocked it); this screen takes a reference.
+  const audio = useMemo(() => acquireAudio(), []);
+  useEffect(() => () => { audio.setMusicState('silent'); audio.setExtraction(false); audio.setZone('NONE'); releaseAudio(); }, [audio]);
 
   // ── Mission campaign (slice 8): run CAMPAIGN[missionIndex]; complete → next ──
   // A `startMission` (from the external Operations list) wins over the resume slot.

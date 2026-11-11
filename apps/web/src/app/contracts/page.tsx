@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Panel, Shell, Stat } from '@/components/ui/Shell'
 import { api, RESOURCE_LABEL, type BoardEntry } from '@/lib/api'
 import { WorldClockPanel } from '@/components/world/WorldClock'
+import { useMusicState } from '@/components/audio/AudioProvider'
 import { describeGuardPlan } from '@/lib/presenter/economy'
 
 const PHASE_WORD = { day: 'by day', dusk: 'at dusk', night: 'at night' } as const
@@ -42,6 +43,7 @@ const KIND: Record<string, { label: string; badge: string; title: (e: BoardEntry
 }
 
 export default function ContractBoard() {
+  useMusicState('prep')
   const world = useQuery({ queryKey: ['world'], queryFn: api.world, refetchInterval: 5_000 })
   const board = world.data?.board ?? []
 

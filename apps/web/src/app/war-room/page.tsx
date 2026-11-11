@@ -12,6 +12,7 @@ import { Panel, Shell, Stat } from '@/components/ui/Shell'
 import { Procurement } from '@/components/market/Procurement'
 import { inboundFor, MerchantSummary, ReadinessSummary } from '@/components/world/Readiness'
 import { Operations } from '@/components/world/Operations'
+import { useMusicState } from '@/components/audio/AudioProvider'
 import { WarTableSection } from '@/components/world/table/WarTableSection'
 import { FactionInsignia } from '@/components/ui/FactionInsignia'
 import { TradingPartners, useMarket } from '@/components/market/SupplyOrders'
@@ -263,6 +264,7 @@ function Observer() {
 // ── page ──
 
 export default function WarRoom() {
+  useMusicState('table')
   const v = useQuery({ queryKey: ['warroom'], queryFn: () => api.warRoom(96), refetchInterval: 5_000 })
   const t = useQuery({ queryKey: ['timeline'], queryFn: () => api.timeline(30), refetchInterval: 5_000 })
   const [filter, setFilter] = useState<'strategic' | 'all' | 'llm' | 'operations'>('strategic')

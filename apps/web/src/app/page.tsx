@@ -10,6 +10,7 @@ import { TopBar } from '@/components/ui/Shell'
 import { api, RESOURCE_LABEL, type ActorView, type BoardEntry, type ResourceName } from '@/lib/api'
 import { fixedTier, loadSettings, type Quality } from '@/lib/settings'
 import { useProfile, useSession, useStash } from '@/lib/useSession'
+import { useMusicState } from '@/components/audio/AudioProvider'
 import { WorldClockPanel } from '@/components/world/WorldClock'
 import { ReadinessSummary, useReadinessData } from '@/components/world/Readiness'
 import { describeGuardPlan } from '@/lib/presenter/economy'
@@ -72,6 +73,7 @@ function NextOperation({ e, others, signedIn }: { e: BoardEntry; others: BoardEn
 }
 
 export default function Hub() {
+  useMusicState('hub')
   const { session, loading } = useSession()
   const { profile, loading: profileLoading } = useProfile()
   const stash = useStash()

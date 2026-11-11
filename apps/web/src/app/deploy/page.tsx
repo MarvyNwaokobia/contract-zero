@@ -18,6 +18,7 @@ import { api, RESOURCE_LABEL, type OpKind, type BoardEntry, type MissionResult, 
 import { OperationIntel } from '@/components/world/OperationIntel'
 import { ReadinessSummary, useReadinessData } from '@/components/world/Readiness'
 import { ConsequencePanel } from '@/components/world/Consequence'
+import { useMusicState } from '@/components/audio/AudioProvider'
 import { WorldClockPanel } from '@/components/world/WorldClock'
 import { MissionStream } from '@/lib/missionStream'
 import { ItemInspector } from '@/components/inspect/ItemInspector'
@@ -90,6 +91,8 @@ function Deploy() {
   const [gun, setGun] = useState<GunId>('assault_rifle')
   const armory = useQuery({ queryKey: ['armory', player], queryFn: () => api.exchange(player).then((e) => e.armory ?? []), enabled: !!player })
   const [phase, setPhase] = useState<Phase>({ kind: 'intel' })
+  // The score follows the flow: preparation up to the fight, the fight drives its own, results resolve it.
+  useMusicState(phase.kind === 'fighting' || phase.kind === 'reporting' || phase.kind === 'error' ? null : phase.kind === 'results' ? 'results' : 'prep')
   const [inspect, setInspect] = useState<InspectItem | null>(null)
   const world = useQuery({ queryKey: ['world'], queryFn: api.world, refetchInterval: 10_000, enabled: phase.kind === 'intel' })
   const entry = world.data?.board.find((b) => b.kind === kind && b.target === target && b.resource === resource)

@@ -1,81 +1,111 @@
 'use client'
 
-// The War Room's procurement record: per supply order, the causal chain from the raid
-// that caused a shortage to the mission that now looks different, with every merchant's
-// answer, the commander's choice and the on-chain settlement. All read from records.
+// The War Room's supply-order record as a seven-stage timeline:
+//   shortage → order → bids → winner → settlement → supply arrives → readiness
+// Each stage has its own mark, a one-line plain-language account, and the evidence behind
+// it on demand. All of it is read from what the server recorded (lib/presenter/procurement
+// holds the rules: a lone offer is not competition, a pending settlement is not settled).
 
 import { useQuery } from '@tanstack/react-query'
-import { api, type ProcurementChain } from '@/lib/api'
+import { api, type MarketOrder, type ProcurementChain } from '@/lib/api'
+import { describeProcurement, type StageKey, type StageState, type TimelineStage } from '@/lib/presenter/procurement'
+import { worldClock } from '@/lib/presenter/consequence'
 
-const RES: Record<string, string> = { ammo: 'ammunition', med: 'medical supplies', fuel: 'fuel' }
+/** One accent per stage so each reads as its own beat, not a row in a list. */
+const ACCENT: Record<StageKey, string> = {
+  shortage: 'var(--color-amber)', order: 'var(--color-steel)', bids: 'var(--color-fog)', winner: 'var(--color-friendly)',
+  settlement: 'var(--color-steel)', arrival: 'var(--color-amber)', readiness: 'var(--color-friendly)',
+}
+const STATE_WORD: Record<StageState, string> = { done: 'recorded', pending: 'waiting', failed: 'failed', skipped: 'did not happen', none: 'not recorded' }
 
-function Step({ n, label, done = true, children }: { n: number; label: string; done?: boolean; children: React.ReactNode }) {
+function Icon({ k }: { k: StageKey }) {
+  const p = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.7, strokeLinecap: 'square' as const, strokeLinejoin: 'round' as const }
   return (
-    <li className="grid grid-cols-[1.5rem_1fr] gap-2">
-      <span className={`mt-0.5 grid h-5 w-5 place-items-center font-mono text-[10px] font-bold ${done ? 'bg-amber/20 text-amber-hi' : 'bg-line text-dim'}`}>{n}</span>
+    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden {...p}>
+      {k === 'shortage' && <><path d="M12 3l10 18H2z" /><path d="M12 10v5M12 18v.5" /></>}
+      {k === 'order' && <><path d="M6 3h9l4 4v14H6z" /><path d="M9 11h7M9 15h7" /></>}
+      {k === 'bids' && <><path d="M4 9h13l-3-3M20 15H7l3 3" /></>}
+      {k === 'winner' && <><circle cx="12" cy="12" r="9" /><path d="M7.5 12.5l3 3 6-7" /></>}
+      {k === 'settlement' && <><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></>}
+      {k === 'arrival' && <><path d="M3 8l9-5 9 5v8l-9 5-9-5z" /><path d="M3 8l9 5 9-5M12 13v8" /></>}
+      {k === 'readiness' && <><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z" /><path d="M9 12l2.2 2.2L15.5 10" /></>}
+    </svg>
+  )
+}
+
+function Mark({ s }: { s: TimelineStage }) {
+  const c = s.state === 'failed' ? 'var(--color-hostile)' : s.state === 'done' ? ACCENT[s.key] : 'var(--color-dim)'
+  const solid = s.state === 'done' || s.state === 'failed'
+  return (
+    <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border-2" style={{ color: c, borderColor: c, background: solid ? 'color-mix(in srgb, currentColor 14%, transparent)' : 'transparent', borderStyle: s.state === 'skipped' || s.state === 'none' ? 'dashed' : 'solid' }}>
+      <Icon k={s.key} />
+    </span>
+  )
+}
+
+function Stage({ s, last }: { s: TimelineStage; last: boolean }) {
+  return (
+    <li className="relative grid grid-cols-[1.75rem_1fr] gap-3 pb-4" data-testid={`stage-${s.key}`} data-state={s.state}>
+      {!last && <span className="absolute left-[0.8rem] top-7 h-[calc(100%-1.75rem)] w-px bg-line-strong" aria-hidden />}
+      <Mark s={s} />
       <div className="min-w-0">
-        <div className="font-display text-[11px] font-bold uppercase tracking-[0.2em] text-steel">{label}</div>
-        <div className="text-sm text-fog">{children}</div>
+        <div className="flex flex-wrap items-baseline gap-x-2">
+          <span className="font-display text-[12px] font-bold uppercase tracking-[0.18em]" style={{ color: s.state === 'done' ? ACCENT[s.key] : undefined }}>{s.title}</span>
+          <span className={`text-[10px] uppercase tracking-widest ${s.state === 'failed' ? 'text-hostile' : s.state === 'pending' ? 'text-amber-hi' : 'text-dim'}`}>{STATE_WORD[s.state]}</span>
+          {s.tick != null && <span className="text-[11px] text-dim">{worldClock(s.tick)}</span>}
+        </div>
+        <p className={`text-sm ${s.state === 'done' || s.state === 'failed' ? 'text-fog' : 'text-muted'}`}>{s.summary}</p>
+        {s.evidence.length > 0 && (
+          <details className="mt-0.5 text-xs text-muted">
+            <summary className="cursor-pointer text-steel hover:text-fog">Evidence</summary>
+            <dl className="mt-1 grid gap-0.5">
+              {s.evidence.map((e, i) => <div key={i} className="grid grid-cols-[minmax(0,10rem)_1fr] gap-2 border-b border-line/50 py-0.5"><dt className="truncate">{e.label}</dt><dd className="break-words text-fog">{e.value}</dd></div>)}
+            </dl>
+          </details>
+        )}
       </div>
     </li>
   )
 }
 
-function Chain({ c }: { c: ProcurementChain }) {
-  const buy = c.side === 'buy'
-  const proposed = c.answers.filter((a) => a.proposed)
-  const declined = c.answers.filter((a) => !a.proposed)
-  const choice = c.choices.find((x) => x.validation === 'accepted')
-  const onChain = c.settlement.filter((s) => s.settled_on_chain)
-  const status = c.status.status
-  let n = 0
+function Chain({ c, order }: { c: ProcurementChain; order: MarketOrder | undefined }) {
+  const t = describeProcurement(c, order?.proposals)
+  const tone = c.status.status === 'filled' ? 'text-friendly' : c.status.status === 'open' ? 'text-amber-hi' : 'text-dim'
   return (
-    <details className="border border-line bg-ink-2/60 p-3 open:bg-ink-2" open={false} data-testid={`proc-${c.order}`}>
-      <summary className="flex cursor-pointer flex-wrap items-baseline gap-x-3 gap-y-1">
-        <span className="font-display text-sm font-bold uppercase tracking-wider text-fog">{c.requester_name}</span>
-        <span className="text-sm text-muted">{buy ? 'needs' : 'sells'} {c.qty} {RES[c.resource]}</span>
-        {c.fills.length > 0 && <span className="text-sm text-fog">→ {c.fills.map((f) => f.merchant_name).join(' + ')}</span>}
-        <span className={`ml-auto text-[11px] font-bold uppercase tracking-wider ${status === 'filled' ? 'text-friendly' : status === 'open' ? 'text-amber-hi' : 'text-dim'}`}>{status}</span>
+    <details className="border border-line bg-ink-2/60 p-3 open:bg-ink-2" data-testid={`proc-${c.order}`}>
+      <summary className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="font-display text-sm font-bold uppercase tracking-wider text-fog">{t.headline}</span>
+        {c.fills.length > 0 && <span className="text-sm text-muted">→ {c.fills.map((f) => f.merchant_name).join(' + ')}</span>}
+        {/* the whole story at a glance: one pip per stage */}
+        <span className="flex items-center gap-1" role="img" aria-label={t.stages.map((s) => `${s.title}: ${STATE_WORD[s.state]}`).join('; ')}>
+          {t.stages.map((s) => <span key={s.key} title={`${s.title}: ${STATE_WORD[s.state]}`} className="h-2 w-4" style={{ background: s.state === 'done' ? ACCENT[s.key] : s.state === 'failed' ? 'var(--color-hostile)' : 'transparent', border: `1px ${s.state === 'skipped' || s.state === 'none' ? 'dashed' : 'solid'} ${s.state === 'done' ? ACCENT[s.key] : s.state === 'failed' ? 'var(--color-hostile)' : 'var(--color-dim)'}` }} />)}
+        </span>
+        <span className={`ml-auto text-[11px] font-bold uppercase tracking-wider ${tone}`}>{t.status}</span>
       </summary>
-      <ol className="mt-3 grid gap-2">
-        {c.raid && <Step n={++n} label="Player operation">{c.raid.player} ran a {c.raid.kind} on {c.requester_name}&apos;s {RES[c.raid.resource] ?? c.raid.resource} ({c.raid.outcome}{c.raid.units ? `, ${c.raid.units} units taken` : ''}).</Step>}
-        {c.shortage && <Step n={++n} label={buy ? 'Shortage' : 'Surplus'}>{c.shortage.trigger}: {c.shortage.context.filter(([k]) => ['have', 'target', 'urgency', 'budget'].includes(k)).map(([k, v]) => `${k} ${v}`).join(' · ')}</Step>}
-        <Step n={++n} label="Supply order">{c.shortage?.rationale ?? `${buy ? 'Buy' : 'Sell'} ${c.qty} ${RES[c.resource]}, limit ${c.limit_total} cr.`}</Step>
-        <Step n={++n} label="Merchant proposals" done={c.answers.length > 0}>
-          {c.answers.length === 0 ? 'No answers recorded.' : (
-            <ul className="grid gap-0.5">
-              {proposed.map((a, i) => <li key={`p${i}`}><span className="text-steel">{a.merchant_name}:</span> {a.rationale}</li>)}
-              {declined.map((a, i) => <li key={`d${i}`} className="text-muted"><span className="text-dim">{a.merchant_name} declined:</span> {a.rationale}</li>)}
-            </ul>
-          )}
-        </Step>
-        <Step n={++n} label="Winning quote" done={!!choice}>{choice ? choice.rationale : c.choices[0]?.rationale ?? (status === 'expired' ? 'No acceptable offer before the deadline; the escrow went back.' : 'Not chosen yet.')}</Step>
-        <Step n={++n} label="Settlement on NEAR" done={onChain.length > 0}>
-          <ul className="grid gap-0.5 font-mono text-xs">
-            {c.settlement.map((s) => (
-              <li key={s.op_id}>{s.op_id} · <span className={s.settled_on_chain ? 'text-friendly' : 'text-amber-hi'}>{s.settled_on_chain ? 'settled' : s.status}</span>{s.tx_hashes.map((h, i) => <a key={h} href={s.explorer[i]} target="_blank" rel="noreferrer" className="ml-2 text-steel underline">{h.slice(0, 8)}…</a>)}</li>
-            ))}
-            {c.settlement.length === 0 && <li className="text-dim">Not queued (settlement off or pending).</li>}
-          </ul>
-          <div className="mt-1 text-[11px] text-dim">{c.execution_path.label}. Not an official NEAR Intents transaction.</div>
-        </Step>
-        <Step n={++n} label="Supplies updated" done={c.delivered > 0}>{c.delivered > 0 ? `${c.delivered} ${RES[c.resource]} ${buy ? 'delivered' : 'sold'} for ${c.paid} cr${c.next_mission ? `; ${c.requester_name} now holds ${c.next_mission.stock_now}` : ''}.` : 'Nothing delivered.'}</Step>
-        {c.next_mission && <Step n={++n} label="Mission consequence">The next raid on {c.requester_name}&apos;s {c.next_mission.depot} depot faces {c.next_mission.guards} guards ({c.next_mission.rifles} rifles, {c.next_mission.sidearms} sidearms) at defense L{c.next_mission.defense}.</Step>}
-      </ol>
+      <ol className="mt-4 grid">{t.stages.map((s, i) => <Stage key={s.key} s={s} last={i === t.stages.length - 1} />)}</ol>
+      <p className="text-[11px] text-dim">
+        {c.settlement.length > 0 ? `${c.execution_path.label}.` : 'CONTRACT ZERO supply order, executed in the game economy. No on-chain settlement is recorded for it.'} Not an official NEAR Intents transaction.
+      </p>
+      <details className="mt-2 text-xs text-muted">
+        <summary className="cursor-pointer text-steel hover:text-fog">Advanced evidence (the raw recorded chain)</summary>
+        <pre className="mt-1 max-h-72 overflow-auto bg-ink p-2 font-mono text-[11px] text-fog">{JSON.stringify(c, null, 2)}</pre>
+      </details>
     </details>
   )
 }
 
 export function Procurement() {
   const q = useQuery({ queryKey: ['procurement'], queryFn: () => api.procurement(10), refetchInterval: 10_000 })
+  // The structured offers (quantity and price) live on the market's orders; join them by order id.
+  const market = useQuery({ queryKey: ['market'], queryFn: api.market, refetchInterval: 15_000 })
   const chains = q.data ?? []
   return (
     <section className="mt-6" data-testid="procurement">
       <div className="mb-2 flex flex-wrap items-baseline gap-3">
-        <h2 className="cz-label">Supply orders and competition</h2>
-        <span className="text-xs text-dim">raid → shortage → order → proposals → winner → settlement → supplies → next mission</span>
+        <h2 className="cz-label">Supply orders: from shortage to readiness</h2>
+        <span className="text-xs text-dim">shortage → order → bids → winner → settlement → arrival → readiness</span>
       </div>
-      <div className="grid gap-2">{chains.length ? chains.map((c) => <Chain key={c.order} c={c} />) : <p className="text-sm text-muted">No supply orders yet.</p>}</div>
+      <div className="grid gap-2">{chains.length ? chains.map((c) => <Chain key={c.order} c={c} order={market.data?.orders.find((o) => o.id === c.order)} />) : <p className="text-sm text-muted">No supply orders yet.</p>}</div>
     </section>
   )
 }

@@ -55,7 +55,7 @@ for (const [name, vp] of [['desktop', { width: 1280, height: 900 }], ['phone', {
     const first = await page.$('[data-testid^=proc-]');
     await first.click();
     const text = await first.textContent();
-    check('a procurement chain shows proposals, the winner and settlement', /Merchant proposals/.test(text) && /Winning quote/.test(text) && /Settlement on NEAR/.test(text), text.slice(0, 200));
+    check('a procurement chain shows proposals, the winner and settlement', /Merchants bid/.test(text) && /Winning offer accepted/.test(text) && /Settlement on NEAR/.test(text), text.slice(0, 200));
     check('the execution path says it is not NEAR Intents', /Not an official NEAR Intents transaction/.test(text));
     // Expand a filled one for the screenshot.
     for (const el of await page.$$('[data-testid^=proc-]')) {

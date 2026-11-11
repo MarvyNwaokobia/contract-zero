@@ -261,3 +261,61 @@ mod tests {
         }
     }
 }
+
+// ── What the world is doing at a site, right now ─────────────────────────────
+
+/// A production line at a site that is down (sabotaged), and until when.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LineDown {
+    pub resource: Resource,
+    /// The site's own name for the line ("fractionation unit").
+    pub line: String,
+    /// The tick it comes back.
+    pub until: u64,
+}
+
+/// A shipment of the site owner's that is about to arrive, or just did.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Delivery {
+    pub resource: Resource,
+    pub units: i64,
+    pub arrives_at: u64,
+    /// "arriving" (on the road, in its last stretch) or "arrived" (within the last hours).
+    pub state: String,
+}
+
+/// The state of a site's economy the fight can show. Read from the world at one tick, and fixed
+/// for a mission when it starts, like the rest of its plan.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorldCues {
+    pub tick: u64,
+    pub lines_down: Vec<LineDown>,
+    pub deliveries: Vec<Delivery>,
+}
+
+/// A shipment counts as "arriving" for this many ticks before it lands, and as "arrived" for
+/// this many after.
+pub const DELIVERY_WINDOW_TICKS: u64 = 3;
+pub const ARRIVED_WINDOW_TICKS: u64 = 6;
+
+/// What is really happening at `site`: which of its production lines are down, and whether the
+/// owner has a shipment landing or just landed. Nothing here is estimated.
+pub fn world_cues(w: &crate::World, site: &Site) -> WorldCues {
+    let mut cues = WorldCues { tick: w.tick, ..Default::default() };
+    let Some(owner) = w.actors.get(site.owner) else { return cues };
+    for r in Resource::ALL {
+        let line = site.lines[r.idx()];
+        if !line.is_empty() && owner.disrupted_until[r.idx()] > w.tick {
+            cues.lines_down.push(LineDown { resource: r, line: line.to_string(), until: owner.disrupted_until[r.idx()] });
+        }
+    }
+    for c in w.convoys.values().filter(|c| c.owner == site.owner) {
+        let state = match c.status {
+            crate::ConvoyStatus::InTransit if c.arrives_at.saturating_sub(w.tick) <= DELIVERY_WINDOW_TICKS => "arriving",
+            crate::ConvoyStatus::Arrived if w.tick.saturating_sub(c.arrives_at) < ARRIVED_WINDOW_TICKS => "arrived",
+            _ => continue,
+        };
+        cues.deliveries.push(Delivery { resource: c.resource, units: c.units, arrives_at: c.arrives_at, state: state.to_string() });
+    }
+    cues
+}

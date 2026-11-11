@@ -51,6 +51,8 @@ pub fn mission_json(w: &World, plan: &RaidPlan, raid_id: Option<u64>) -> Value {
         "site": site_json(plan),
         "conditions": cz_economy::site::conditions(w.tick),
         "field": mission::field_manifest(w, plan),
+        // What the site's economy is doing right now (lines down, deliveries landing), fixed with the plan.
+        "cues": cz_economy::site::world_cues(w, plan.site()),
     })
 }
 

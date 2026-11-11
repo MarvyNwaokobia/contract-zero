@@ -267,10 +267,14 @@ function Deploy() {
             targetBrief={targetActor ? <ReadinessSummary a={targetActor} inbound={readiness.inbound(targetActor.id)} ammoForGuards={entry.guards.ammo_available} /> : undefined}
           />
         )}
-        <button onClick={accept} disabled={!entry || phase.kind === 'starting'} className="cz-btn cz-btn-primary mt-6 px-6 py-3" data-testid="accept-contract">
-          {phase.kind === 'starting' ? 'Locking in the contract…' : 'Accept and get briefed'}
-        </button>
-        <p className="mt-2 text-xs text-dim">Accepting locks this plan in and opens a 30-minute deployment window. You choose your weapon after the briefing.</p>
+        <div className="sticky bottom-0 z-20 -mx-4 mt-6 border-t border-line-strong bg-ink/95 px-4 py-3 backdrop-blur sm:-mx-0" data-testid="accept-bar">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            <button onClick={accept} disabled={!entry || phase.kind === 'starting'} className="cz-btn cz-btn-primary px-6 py-3" data-testid="accept-contract">
+              {phase.kind === 'starting' ? 'Locking in the contract…' : 'Accept and get briefed'}
+            </button>
+            <p className="min-w-0 flex-1 text-xs text-dim">Accepting locks this plan in and opens a 30-minute deployment window. You choose your weapon after the briefing.</p>
+          </div>
+        </div>
       </Shell>
     )
   }

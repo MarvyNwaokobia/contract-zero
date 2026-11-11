@@ -13,6 +13,8 @@ import { useSettings } from '@/lib/settings'
 import { HowToPlayButton } from '@/components/help/HowToPlay'
 import { bindLabel } from '@/lib/keybinds'
 import { worldClock } from '@/engine/fps/lineProps'
+import { FactionInsignia } from '@/components/ui/FactionInsignia'
+import { factionColor, IDENTITY } from '@/lib/factions'
 
 const PHASE_LABEL = { day: 'Day', dusk: 'Dusk', night: 'Night' } as const
 
@@ -40,6 +42,9 @@ export function OperationIntel({ contract, kind, reward, practice = false, targe
   const rifles = enemies.filter((e) => !e.dmgMult).length
   const reinforce = mission.objectives.find((o) => (o.reinforceCount ?? 0) > 0)
   const label = CARGO[contract.cargo.resource]
+  const t = contract.target.toLowerCase()
+  const holder = IDENTITY[t] ?? Object.values(IDENTITY).find((i) => t.includes(i.id) || t.includes(i.name.toLowerCase()))
+  const payTotal = (reward?.fee ?? 0) + (kind === 'raid' ? reward?.cargoValue ?? 0 : 0)
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_340px]" data-testid="operation-intel">
       <div className="grid content-start gap-4">
@@ -47,7 +52,15 @@ export function OperationIntel({ contract, kind, reward, practice = false, targe
           <div className="cz-label !text-[10px] text-amber">{practice ? 'Practice · unscored' : 'Location'}</div>
           <div className="mt-1 font-display text-2xl font-bold uppercase tracking-wide" data-testid="intel-site">{site?.name ?? mission.site?.name}</div>
           <div className="text-sm text-muted">{[site?.region, site?.environment].filter(Boolean).join(' · ')}</div>
-          <div className="mt-2 text-sm">Target: <span className="text-fog">the {site?.facility ?? 'depot'}</span>, held by {contract.target}</div>
+          <div className="mt-2 flex items-center gap-3 text-sm">
+            {holder && <span style={{ color: factionColor(holder.id) }}><FactionInsignia id={holder.id} className="h-10 w-10" title={holder.name} /></span>}
+            <span>Target: <span className="text-fog">the {site?.facility ?? 'depot'}</span>, held by <span style={{ color: holder ? factionColor(holder.id) : undefined }}>{holder?.name ?? contract.target}</span></span>
+          </div>
+          <dl className="mt-3 grid grid-cols-3 gap-3 border-t border-line pt-3" data-testid="intel-figures">
+            <div><dt className="cz-label !text-[10px]">Pays</dt><dd className="cz-num font-display text-xl font-bold text-amber-hi">{practice ? '—' : `${payTotal} cr`}</dd><dd className="text-[11px] text-muted">{practice ? 'practice is unscored' : kind === 'raid' ? 'bounty + cargo at Vex' : 'the fee'}</dd></div>
+            <div><dt className="cz-label !text-[10px]">Guards</dt><dd className="cz-num font-display text-xl font-bold">{enemies.length}</dd><dd className="text-[11px] text-muted">{rifles} rifle · {enemies.length - rifles} sidearm</dd></div>
+            <div><dt className="cz-label !text-[10px]">Conditions</dt><dd className="font-display text-xl font-bold">{PHASE_LABEL[cond.phase]}</dd><dd className="text-[11px] text-muted">sight {cond.sight_m} m</dd></div>
+          </dl>
           {site?.shared_layout && <p className="mt-2 text-xs text-amber-400">This site&apos;s own map isn&apos;t built yet; it plays on the Dustline Depot layout.</p>}
         </section>
 
@@ -78,12 +91,15 @@ export function OperationIntel({ contract, kind, reward, practice = false, targe
               <li key={i} className="flex gap-3"><span className="w-5 shrink-0 text-right font-display font-bold text-amber">{i + 1}</span><span className="text-slate-200">{o.text}</span></li>
             ))}
           </ol>
-          <p className="mt-3 text-xs text-muted">
+          <details className="mt-3 text-xs">
+            <summary className="cursor-pointer text-steel hover:text-fog">How the operation works</summary>
+          <p className="mt-2 text-xs text-muted">
             {kind === 'raid' && `${contract.cargo.units} units packed in ${cases} case${cases === 1 ? '' : 's'}. ${hold} ${use} on a case to take it; you can carry ${CARRY_MAX}, and each one slows you. Only cases you carry through a completed extraction count.`}
             {kind === 'sabotage' && `${hold} ${use} for five seconds on each target to set a charge. The fuse is short once both are set. Extraction opens after the second charge.`}
             {kind === 'recovery' && `One sealed case, heavy enough to slow you. ${hold} ${use} to free it, then carry it to the handover.`}
             {` At the zone, press ${use} to call it in, then stay inside for ${EXTRACT_SECS} seconds. Leaving the zone bleeds the countdown back; going down drops what you carry.`}
           </p>
+          </details>
           <HowToPlayButton label="Controls and field rules" className="mt-2 text-xs text-steel underline hover:text-fog" />
         </section>
 
@@ -91,7 +107,11 @@ export function OperationIntel({ contract, kind, reward, practice = false, targe
           <div className="cz-panel p-4">
             <div className="cz-label !text-[10px]">Expected resistance</div>
             <div className="mt-1 text-sm text-slate-200" data-testid="intel-resistance">{enemies.length} guards · {rifles} rifle{rifles === 1 ? '' : 's'}, {enemies.length - rifles} sidearm{enemies.length - rifles === 1 ? '' : 's'}</div>
-            <div className="text-xs text-muted">Defense level {contract.defense} · guard health {enemies[0]?.hp ?? '–'}</div>
+            <div className="mt-2 flex flex-wrap gap-1" role="img" aria-label={`${rifles} rifle guards and ${enemies.length - rifles} sidearm guards`} data-testid="guard-pips">
+              {enemies.map((e, i) => <span key={i} className={`h-3 w-3 ${e.dmgMult ? 'border border-hostile' : 'bg-hostile'}`} />)}
+            </div>
+            <div className="mt-1 text-[11px] text-dim">filled: rifle · outlined: sidearm (hits for less)</div>
+            <div className="mt-1 text-xs text-muted">Defense level {contract.defense} · guard health {enemies[0]?.hp ?? '–'}</div>
             <div className="text-xs text-muted">{reinforce ? `${reinforce.reinforceCount} reinforcement${reinforce.reinforceCount === 1 ? '' : 's'} every ${reinforce.reinforceEvery}s while you work` : 'No reinforcements (no medicine to patch them up)'}</div>
           </div>
           <div className="cz-panel p-4">
@@ -120,7 +140,7 @@ export function OperationIntel({ contract, kind, reward, practice = false, targe
           <div className="text-xs text-muted">Way out: {field.exfil?.label}.</div>
         </section>
       </div>
-      <section className="cz-panel p-3">
+      <section className="cz-panel p-3 lg:sticky lg:top-4 lg:self-start">
         <div className="cz-label mb-2 !text-[10px]">Site map</div>
         <SiteMap layout={mission.level!} mission={mission} className="aspect-[3/4] w-full" />
       </section>

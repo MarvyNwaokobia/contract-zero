@@ -24,7 +24,7 @@ const call = async (method, path, body) => {
   const c = r.headers.get('set-cookie'); if (c) cookie = c.split(';')[0]
   return { status: r.status, body: await r.json().catch(() => ({})) }
 }
-await call('POST', '/auth/dev', { account_id: 'wraith.testnet' })
+await call('POST', '/auth/dev', { account_id: `e2e-${Date.now()}.testnet` })
 
 const before = (await call('GET', '/world')).body
 const vgAmmo0 = before.actors.find((a) => a.id === 'vanguard').holdings.ammo

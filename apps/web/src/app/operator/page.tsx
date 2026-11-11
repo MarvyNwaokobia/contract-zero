@@ -97,13 +97,14 @@ function ServiceRecord({ c }: { c: Career }) {
 export default function Operator() {
   const router = useRouter()
   const qc = useQueryClient()
-  const { session, loading, signOut } = useSession()
+  const { session, loading, failed, refresh, signOut } = useSession()
   const { profile } = useProfile()
   const [callsign, setCallsign] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   useEffect(() => { if (profile?.callsign) setCallsign(profile.callsign) }, [profile?.callsign])
-  useEffect(() => { if (!loading && !session) router.replace('/signin') }, [loading, session, router])
+  // Only a definite "not signed in" sends you to sign-in; a failed check does not (see useSession).
+  useEffect(() => { if (!loading && !failed && !session) router.replace('/signin') }, [loading, failed, session, router])
 
   const career = useQuery({ queryKey: ['career', session?.account], queryFn: api.career, enabled: !!session })
   const first = !profile?.callsign
@@ -123,6 +124,7 @@ export default function Operator() {
     }
   }
 
+  if (failed) return <Shell title="Operator" back={{ href: '/', label: 'Hub' }}><p className="text-muted" role="alert">We couldn&apos;t check your sign-in just now (the server didn&apos;t answer). You are not signed out. <button className="text-amber-hi underline" onClick={() => refresh()} data-testid="session-retry">Try again</button></p></Shell>
   if (!session) return <Shell title="Operator"><p className="text-muted">Checking your sign-in…</p></Shell>
 
   return (

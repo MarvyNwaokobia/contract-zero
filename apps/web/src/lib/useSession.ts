@@ -11,6 +11,8 @@ export function useSession() {
   return {
     session: q.data ?? null,
     loading: q.isLoading,
+    /** The check itself failed (network, server error). That is not the same as being signed out. */
+    failed: q.isError && !q.data,
     refresh: () => qc.invalidateQueries({ queryKey: ['session'] }),
     /** Revokes quick trade on chain first (if this browser holds a key), then ends
      *  the session. Resolves with a warning if the revocation couldn't be confirmed. */

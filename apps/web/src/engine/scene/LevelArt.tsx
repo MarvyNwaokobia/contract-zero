@@ -219,17 +219,17 @@ function DeliveryBeacon({ x, z, y }: { x: number; z: number; y: number }) {
   );
 }
 
-export function LevelArt({ level, minimal = false, lit = true, night: nightProp, calm = false, cues }: { level: LevelDef; minimal?: boolean; lit?: boolean; night?: boolean; calm?: boolean; /** What the site's economy is doing (lines down, deliveries). */ cues?: WorldCues | null }) {
+export function LevelArt({ level, minimal = false, colourOnly = false, lit = true, night: nightProp, calm = false, cues }: { level: LevelDef; minimal?: boolean; /** Load colour maps only (touch and minimal tiers). */ colourOnly?: boolean; lit?: boolean; night?: boolean; calm?: boolean; /** What the site's economy is doing (lines down, deliveries). */ cues?: WorldCues | null }) {
   // What the economy says is down or arriving: shown, never invented.
   const idle = useMemo(() => idleProps(level, cues), [level, cues]);
   const delivering = isDelivering(cues);
   // Night look (glowing windows, cool lamps) follows the hour, not the map.
   const night = nightProp ?? level.id === 'blacksite';
-  const corrugated = usePbr('corrugated_iron_02', [1, 1], HANGAR);
-  const plate = usePbr('metal_plate', [1, 1], HANGAR);
-  const concrete = usePbr('concrete_floor_worn_001', [1, 1], HANGAR);
-  const plaster = usePbr('damaged_plaster', [1, 1]);
-  const planks = usePbr('black_painted_planks', [1, 1]);
+  const corrugated = usePbr('corrugated_iron_02', [1, 1], HANGAR, colourOnly);
+  const plate = usePbr('metal_plate', [1, 1], HANGAR, colourOnly);
+  const concrete = usePbr('concrete_floor_worn_001', [1, 1], HANGAR, colourOnly);
+  const plaster = usePbr('damaged_plaster', [1, 1], undefined, colourOnly);
+  const planks = usePbr('black_painted_planks', [1, 1], undefined, colourOnly);
 
   const mats = useMemo(() => {
     const tri = (maps: { map: THREE.Texture; normalMap: THREE.Texture; roughnessMap: THREE.Texture }, o: THREE.MeshStandardMaterialParameters) =>
@@ -450,7 +450,13 @@ export function LevelArt({ level, minimal = false, lit = true, night: nightProp,
         case 'catwalk': {
           const h = a.h ?? 4.5, w = a.w ?? 20, d = a.d ?? 1.2;
           add('steel', { x, y: h, z, sx: w, sy: 0.08, sz: d });
-          add('steel', { x, y: h + 1, z: z + d / 2, sx: w, sy: 0.05, sz: 0.05 });
+          // Rails and toe boards on both edges, so a walkway you can climb reads as one.
+          for (const side of [-1, 1]) {
+            add('steel', { x, y: h + 1, z: z + (side * d) / 2, sx: w, sy: 0.05, sz: 0.05 });
+            add('steel', { x, y: h + 0.5, z: z + (side * d) / 2, sx: w, sy: 0.04, sz: 0.04 });
+            add('hazard', { x, y: h + 0.1, z: z + (side * d) / 2, sx: w, sy: 0.14, sz: 0.04 });
+            for (let t = -w / 2; t <= w / 2 + 0.01; t += 2.75) add('steel', { x: x + t, y: h + 0.5, z: z + (side * d) / 2, sx: 0.05, sy: 1, sz: 0.05 });
+          }
           for (let t = -w / 2; t <= w / 2; t += 3) add('steel', { x: x + t, y: h / 2, z, sx: 0.12, sy: h, sz: 0.12 });
           break;
         }
@@ -487,6 +493,28 @@ export function LevelArt({ level, minimal = false, lit = true, night: nightProp,
           add('redLed', { x, y: (a.h ?? 3) + 0.05, z: z + 0.21, sx: 0.04, sy: 0.04, sz: 0.02 });
           break;
         default:
+      }
+    }
+    // Stairs: a stringer slab, a tread every 0.45 m, and a rail up each side.
+    for (const st of level.stairs ?? []) {
+      const alongX = st.rise.endsWith('x'), len = alongX ? st.w : st.d, wid = alongX ? st.d : st.w;
+      const dir = st.rise.startsWith('+') ? 1 : -1;
+      const ang = Math.atan2(st.h, len), slope = Math.hypot(len, st.h);
+      // The point a distance t from the foot, along the climb, at the stair's surface.
+      const foot = alongX ? st.x - dir * len / 2 : st.z - dir * len / 2;
+      const at = (t: number, lat = 0): [number, number, number] => alongX ? [foot + dir * t, (t / len) * st.h, st.z + lat] : [st.x + lat, (t / len) * st.h, foot + dir * t];
+      const [mx, my, mz] = at(len / 2);
+      // Euler signs: about Z a positive angle raises +x; about X it raises -z. So +x and -z take +angle, -x and +z take -angle.
+      const tilt = (alongX ? dir : -dir) * ang;
+      add('steel', alongX ? { x: mx, y: my - 0.06, z: mz, sx: slope, sy: 0.12, sz: wid, rz: tilt } : { x: mx, y: my - 0.06, z: mz, sx: wid, sy: 0.12, sz: slope, rx: tilt });
+      for (let t = 0.3; t < len; t += 0.45) {
+        const [tx, ty, tz] = at(t);
+        add('hazard', alongX ? { x: tx, y: ty + 0.02, z: tz, sx: 0.28, sy: 0.04, sz: wid * 0.94 } : { x: tx, y: ty + 0.02, z: tz, sx: wid * 0.94, sy: 0.04, sz: 0.28 });
+      }
+      for (const side of [-1, 1]) {
+        const [rx, ry, rz] = at(len / 2, (side * wid) / 2);
+        add('steel', alongX ? { x: rx, y: ry + 1, z: rz, sx: slope, sy: 0.05, sz: 0.05, rz: tilt } : { x: rx, y: ry + 1, z: rz, sx: 0.05, sy: 0.05, sz: slope, rx: tilt });
+        for (let t = 0; t <= len + 0.01; t += 2) { const [px, py, pz] = at(Math.min(t, len), (side * wid) / 2); add('steel', { x: px, y: py + 0.5, z: pz, sx: 0.05, sy: 1, sz: 0.05 }); }
       }
     }
     return out;

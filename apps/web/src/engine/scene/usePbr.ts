@@ -29,12 +29,22 @@ export type PbrMaps = {
   roughnessMap: THREE.Texture;
 };
 
-export function usePbr(base: string, repeat: [number, number], dir: string = T): PbrMaps {
-  const maps = useTexture({
-    map: `${dir}/${base}_diff_1k.jpg`,
-    normalMap: `${dir}/${base}_nor_gl_1k.jpg`,
-    roughnessMap: `${dir}/${base}_rough_1k.jpg`,
-  }) as unknown as PbrMaps;
+/** Neutral stand-ins for a skipped map: a flat normal and full roughness. 1x1, so they cost nothing. */
+let FLAT_NORMAL: THREE.DataTexture | null = null, FULL_ROUGH: THREE.DataTexture | null = null;
+const flat = (r: number, g: number, b: number) => { const t = new THREE.DataTexture(new Uint8Array([r, g, b, 255]), 1, 1); t.needsUpdate = true; return t; };
+export const placeholderMaps = () => ({ normalMap: (FLAT_NORMAL ??= flat(128, 128, 255)), roughnessMap: (FULL_ROUGH ??= flat(255, 255, 255)) });
+
+/**
+ * `colourOnly` loads just the colour map and stands a flat normal and full roughness in for the
+ * other two. That is two thirds of a surface's texture memory, for the tiers that are short of
+ * it (touch devices, the minimal desktop tier). The tier is fixed for a session, so the hook's
+ * shape never changes between renders.
+ */
+export function usePbr(base: string, repeat: [number, number], dir: string = T, colourOnly = false): PbrMaps {
+  const loaded = useTexture(colourOnly
+    ? { map: `${dir}/${base}_diff_1k.jpg` }
+    : { map: `${dir}/${base}_diff_1k.jpg`, normalMap: `${dir}/${base}_nor_gl_1k.jpg`, roughnessMap: `${dir}/${base}_rough_1k.jpg` }) as unknown as Partial<PbrMaps> & { map: THREE.Texture };
+  const maps: PbrMaps = colourOnly ? { map: loaded.map, ...placeholderMaps() } : (loaded as PbrMaps);
 
   /**
    * Anisotropic filtering, as much of it as the GPU will give (capped at 16, past

@@ -22,6 +22,7 @@
 
 import type { CoverBox } from './FpsSim'
 import { CINDER_YARD } from './cinderYard'
+import type { Deck, Stair } from './decks'
 
 export type LevelId = 'dustline_depot' | 'blacksite' | 'cinder_yard'
 
@@ -69,6 +70,9 @@ export interface LevelDef {
   field: FieldLayout
   /** Distance the sun's shadow camera must cover. */
   shadowHalf: number
+  /** Raised walkways the player can climb to (see fps/decks). Guards stay on the ground. */
+  decks?: Deck[]
+  stairs?: Stair[]
 }
 
 /** An extraction or handover zone, and the vehicle waiting at it (if any). */

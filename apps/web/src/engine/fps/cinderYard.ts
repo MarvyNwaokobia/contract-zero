@@ -87,11 +87,11 @@ export const CINDER_YARD: LevelDef = {
     { kind: 'road', x: 0, z: 2, w: 7, d: 36 },
     { kind: 'stripe', x: 0, z: 12.2, w: 8, d: 0.25 },
     { kind: 'light_pole', x: -12, z: 9 }, { kind: 'light_pole', x: 11, z: -15 }, { kind: 'light_pole', x: -2, z: -40 },
-    { kind: 'pipe', x: 0, z: -30, w: 11, h: 7 }, { kind: 'pipe', x: 0, z: -31.2, w: 11, h: 9.5 },
+    { kind: 'pipe', x: 0, z: -30, w: 11, h: 8.6 }, { kind: 'pipe', x: 0, z: -31.2, w: 11, h: 10.4 },
     { kind: 'pipe', x: -20, z: -2.5, w: 0.6, d: 4, h: 4.5 }, { kind: 'pipe', x: 17, z: -2.5, w: 0.6, d: 5, h: 4 },
     { kind: 'pipe', x: -13, z: -3, w: 7, h: 3.2 }, { kind: 'pipe', x: 11, z: 0, w: 6, h: 3.2 },
-    { kind: 'catwalk', x: 0, z: -28.5, w: 11, h: 5.5, d: 1.2 },
-    { kind: 'catwalk', x: -7, z: -24, w: 1.2, h: 5.5, d: 8 },
+    // the walkway between the columns: walkable (decks/stairs below), reached by the stair on the lane
+    { kind: 'catwalk', x: 0, z: -28.5, w: 11, h: 4.8, d: 1.2 },
     { kind: 'roof', x: 0, z: -46.5, w: 14, d: 11, h: 6.5 },
     { kind: 'roof', x: -24, z: -45, w: 12.4, d: 14.4, h: 3.4 },
     { kind: 'roof', x: 23, z: -43, w: 14.4, d: 14.4, h: 3.4 },
@@ -130,4 +130,7 @@ export const CINDER_YARD: LevelDef = {
   },
   floor: { kind: 'concrete' },
   shadowHalf: 50,
+  // The catwalk between the fractionation columns, and the stair that climbs to it from the lane.
+  decks: [{ x: 0, z: -28.5, w: 11, d: 1.2, h: 4.8 }],
+  stairs: [{ x: 3, z: -24.2, w: 2, d: 7.6, h: 4.8, rise: '-z' }],
 }

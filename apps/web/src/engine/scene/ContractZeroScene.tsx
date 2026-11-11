@@ -30,6 +30,7 @@ import { computeEdgeArrow } from '../verb/threatArrow';
 import { useGunPrototypes, ALL_GUN_IDS, GUN_LENGTH } from './gunModels';
 import { OperatorRig, type OperatorApi } from './OperatorRig';
 import { LEVELS } from '../fps/levels';
+import { groundHeight, railedMove } from '../fps/decks';
 import { LevelArt } from './LevelArt';
 import { FieldProps } from './FieldProps';
 import { ItemInspector } from '@/components/inspect/ItemInspector';
@@ -899,6 +900,8 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
   const adsCur = useRef(0);
   const leanCur = useRef(0);
   const crouchCur = useRef(0);
+  /** How high the floor under the player is: 0 on the ground, up to a catwalk's height on stairs and decks (fps/decks). */
+  const floorY = useRef(0);
   const bobPhase = useRef(0);
   const footstepAt = useRef(0);
   const swayT = useRef(0); // bodycam handheld drift (slice 7)
@@ -907,10 +910,12 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
   // decides anything — the materials below are triplanar and derive their texture
   // coordinates from world position — but it is still what a non-triplanar reader
   // of these maps would get, so it stays truthful.
-  const floorMaps = usePbr('burned_ground_01', [12, 20]);
-  const brickMaps = usePbr('broken_brick_wall', [7, 1.6]);
-  const plasterMaps = usePbr('damaged_plaster', [4, 1.4]);
-  const plankMaps = usePbr('black_painted_planks', [1, 1]);
+  // Touch and minimal tiers load colour maps only (two thirds less texture memory; see usePbr).
+  const colourOnly = lowSpec || minimal;
+  const floorMaps = usePbr('burned_ground_01', [12, 20], undefined, colourOnly);
+  const brickMaps = usePbr('broken_brick_wall', [7, 1.6], undefined, colourOnly);
+  const plasterMaps = usePbr('damaged_plaster', [4, 1.4], undefined, colourOnly);
+  const plankMaps = usePbr('black_painted_planks', [1, 1], undefined, colourOnly);
 
   /**
    * World-space materials for the level shell.
@@ -1545,6 +1550,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
       pitch: +staggerP.current.toFixed(4), yaw: +staggerY.current.toFixed(4), shake: +shake.current.toFixed(4),
     });
     w.__czColliders = () => COLLIDERS;
+    w.__czFloor = () => ({ floor: +floorY.current.toFixed(3), x: +pos.current.x.toFixed(2), z: +pos.current.z.toFixed(2), eye: +camera.position.y.toFixed(3) });
     w.__czCam = () => ({ x: +camera.position.x.toFixed(3), z: +camera.position.z.toFixed(3), fov: +(camera as THREE.PerspectiveCamera).fov.toFixed(1), roll: +camera.rotation.z.toFixed(4), pitch: +pitch.current.toFixed(4), yaw: +yaw.current.toFixed(4) });
     // Draw calls and triangles per frame, counted across every pass (post-processing
     // resets the renderer's counters each pass, so the default reading is the last quad).
@@ -1611,8 +1617,8 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
     };
     return () => {
       delete w.__czState; delete w.__czKillAll; delete w.__czKillRoom; delete w.__czKillPlayer; delete w.__czAim; delete w.__czAudio;
-      delete w.__czMission; delete w.__czEndless; delete w.__czWarp; delete w.__czSkipBriefing;
-      delete w.__czXp; delete w.__czSetXp; delete w.__czStory; delete w.__czVo; delete w.__czAudio; delete w.__czRig; delete w.__czPlayer; delete w.__czColliders; delete w.__czCam; delete w.__czStagger; delete w.__czHurtBoss; delete w.__czWakeRoom; delete w.__czSwitch; delete w.__czFire; delete w.__czToggle;
+      delete w.__czMission; delete w.__czEndless; delete w.__czWarp; delete w.__czSkipBriefing; delete w.__czFloor;
+      delete w.__czXp; delete w.__czSetXp; delete w.__czStory; delete w.__czVo; delete w.__czAudio; delete w.__czRig; delete w.__czPlayer; delete w.__czColliders; delete w.__czFloor; delete w.__czCam; delete w.__czStagger; delete w.__czHurtBoss; delete w.__czWakeRoom; delete w.__czSwitch; delete w.__czFire; delete w.__czToggle;
       delete w.__czRevive; delete w.__czResupply; delete w.__czWaveSkip; delete w.__czPerf; delete w.__czField; delete w.__czPath; delete w.__czRender; delete w.__czDrawStats;
     };
   }, [sim, audio]);
@@ -1712,7 +1718,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
     {
       const cam = frame.camera;
       const vw = frame.size.width, vh = frame.size.height;
-      const eyeY = THREE.MathUtils.lerp(EYE_STAND, EYE_CROUCH, crouchCur.current);
+      const eyeY = floorY.current + THREE.MathUtils.lerp(EYE_STAND, EYE_CROUCH, crouchCur.current);
       const px = pos.current.x, pz = pos.current.z;
 
       const project = (ex: number, ez: number): { x: number; y: number } | null => {
@@ -1799,7 +1805,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
     const assist = cs?.access.aimAssist ?? 'touch';
     const assistOn = assist === 'always' || (assist === 'touch' && lowSpec);
     if (assistOn && lockTarget.current == null && (ct.fire || actHeld('fire') || mouseBtn.current.has(0) || adsCur.current > 0.35)) {
-      const eyeApprox = THREE.MathUtils.lerp(EYE_STAND, EYE_CROUCH, crouchCur.current);
+      const eyeApprox = floorY.current + THREE.MathUtils.lerp(EYE_STAND, EYE_CROUCH, crouchCur.current);
       const px = pos.current.x, pz = pos.current.z;
       let bestDiff = 0.3; // ~17° acquisition cone
       let tYaw = 0, tPitch = 0, found = false;
@@ -1862,7 +1868,14 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
     const swayYaw = Math.sin(swayT.current * 0.63) * 0.0038 * swayAmt;
     const swayRoll = Math.sin(swayT.current * 0.51) * 0.0075 * swayAmt;
 
-    const eyeY = THREE.MathUtils.lerp(EYE_STAND, EYE_CROUCH, crouchCur.current)
+    // The floor follows stairs and decks (steeply up, a little slower on the way down).
+    {
+      const want = LEVEL ? groundHeight(LEVEL, pos.current.x, pos.current.z) : 0;
+      const k = want > floorY.current ? 16 : 9;
+      floorY.current += (want - floorY.current) * Math.min(1, dt * k);
+      if (Math.abs(want - floorY.current) < 0.002) floorY.current = want;
+    }
+    const eyeY = floorY.current + THREE.MathUtils.lerp(EYE_STAND, EYE_CROUCH, crouchCur.current)
       + Math.sin(swayT.current * 2.1) * 0.011 * swayAmt;
     const lean = leanCur.current;
     const cam = camera as THREE.PerspectiveCamera;
@@ -3015,7 +3028,9 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
    *  because blocking has to know which face the body is entering (see slideMove). */
   function clampAndSlide(ox: number, oz: number, x: number, z: number): { x: number; z: number } {
     // Swept slide against every wall + crate — solid, no tunnelling on a slow frame.
-    let [cx, cz] = slideMove(ox, oz, x, z, PLAYER_R, COLLIDERS);
+    // On a deck, low cover below your feet no longer blocks you.
+    const solid = floorY.current > 0.4 ? COLLIDERS.filter((c) => (c.h ?? 3) > floorY.current - 0.3) : COLLIDERS;
+    let [cx, cz] = slideMove(ox, oz, x, z, PLAYER_R, solid);
     if (endless) {
       // The endless chain runs toward -Z without end, so the authored arena box below
       // would pin the player at z = -17.6 and stall them in room 1. Bound them to the
@@ -3047,6 +3062,8 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
     }
     // Being shoved off a body (or clamped) must not leave us inside a wall.
     ({ x: cx, z: cz } = ejectFromGeometry(cx, cz));
+    // Up on a catwalk or stair the railings keep you on it (you come down by the stair).
+    if (LEVEL) [cx, cz] = railedMove(LEVEL, floorY.current, ox, oz, cx, cz);
     return { x: cx, z: cz };
   }
 
@@ -3714,7 +3731,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
           off the FRONT of this list, which shifts every later index and would make
           React re-render every wall in the world on each room advance — a hitch per
           doorway. Keyed this way, the walls that didn't change keep their identity. */}
-      {LEVEL && <LevelArt level={LEVEL} cues={mission.cues} minimal={minimal} lit={mission.zone !== 'DUSTLINE'} night={mission.conditions ? mission.conditions.phase === 'night' : undefined} calm={settingsRef?.current.access.reduceFlashes} />}
+      {LEVEL && <LevelArt level={LEVEL} cues={mission.cues} minimal={minimal} colourOnly={colourOnly} lit={mission.zone !== 'DUSTLINE'} night={mission.conditions ? mission.conditions.phase === 'night' : undefined} calm={settingsRef?.current.access.reduceFlashes} />}
       {!LEVEL && LEVEL_WALLS.map((c, i) => (
         <group key={`w${c.x}_${c.z}_${c.w}_${c.d}`}>
           {/* Every wall SHARES one unit cube and is scaled to size. Authoring a fresh

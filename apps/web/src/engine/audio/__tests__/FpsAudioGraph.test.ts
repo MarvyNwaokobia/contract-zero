@@ -23,6 +23,7 @@ describe('seven channels reach the right buses', () => {
     expect(gain(a.gunBus).value).toBeCloseTo(0.9 * 0.4)      // Combat
     expect(gain(a.impactBus).value).toBeCloseTo(0.9 * 0.4)   // Combat
     expect(gain(a.voiceBus).value).toBeCloseTo(0.3)          // Radio
+    expect(gain(a.envBus).value).toBeCloseTo(0.2)            // Environment (the site's positional sounds)
     expect(gain(a.uiBus).value).toBeCloseTo(0.1)             // Interface
     expect(gain(a.interactBus).value).toBeCloseTo(0.7)       // Interactions
     expect(gain(a.musicBus).value).toBeCloseTo(0)            // Music
@@ -125,7 +126,7 @@ describe('indoor and outdoor acoustics follow the listener', () => {
   it('builds two reverbs, and fades between them as the listener walks under the Blacksite roof', () => {
     const a = inner(audio)
     expect((a.ctx as FakeAudioContext).nodesByKind.convolver).toBe(2)
-    audio.setLevel(LEVELS.blacksite.art)
+    audio.setLevel(LEVELS.blacksite)
     audio.setListener(LEVELS.blacksite.start[0], LEVELS.blacksite.start[1], 0)     // the gate: outside
     expect(audio.isIndoors()).toBe(false)
     expect(gain(a.openWet).value).toBeGreaterThan(0)
@@ -230,5 +231,69 @@ describe('extraction cues', () => {
     expect(ctx.nodesByKind.osc).toBe(oscs)
     audio.setExtraction(false)
     audio.setExtraction(false)                      // and stopping twice is harmless
+  })
+})
+
+// ── The sounds of a site ────────────────────────────────────────────────────
+
+import { emittersFor, MAX_CONTINUOUS, SPEC } from '../soundscape'
+
+describe('soundscape voices', () => {
+  const cinder = LEVELS.cinder_yard
+  const pump = emittersFor(cinder).find((e) => e.kind === 'pump')!
+  const scape = () => audio.soundscape!
+
+  it('voices the nearest few emitters when you stand among them, never more than the cap', () => {
+    audio.setLevel(cinder)
+    scape().update(pump.x + 1, pump.z, 0, 1000)
+    expect(scape().activeCount()).toBeGreaterThan(0)
+    expect(scape().activeCount()).toBeLessThanOrEqual(MAX_CONTINUOUS)
+  })
+  it('goes silent when you are far from everything, and nothing is held without a level', () => {
+    audio.setLevel(cinder)
+    scape().update(pump.x, pump.z, 0, 1000)
+    expect(scape().activeCount()).toBeGreaterThan(0)
+    scape().update(9999, 9999, 0, 2000)
+    expect(scape().activeCount()).toBe(0)
+    scape().update(pump.x, pump.z, 0, 3000)
+    expect(scape().activeCount()).toBeGreaterThan(0)
+    audio.setLevel(null)
+    expect(scape().activeCount()).toBe(0)
+  })
+  it('does its work about ten times a second however often it is called', () => {
+    audio.setLevel(cinder)
+    const ctx = inner(audio).ctx as FakeAudioContext
+    scape().update(pump.x, pump.z, 0, 5000)
+    const nodes = Object.values(ctx.nodesByKind).reduce((a, b) => a + b, 0)
+    for (let i = 0; i < 50; i++) scape().update(pump.x, pump.z, 0, 5000 + i)   // 50 calls inside 50 ms
+    expect(Object.values(ctx.nodesByKind).reduce((a, b) => a + b, 0)).toBe(nodes)
+  })
+  it('fires its periodic sounds when they are due and only if the source is within range', () => {
+    audio.setLevel(cinder)
+    const ctx = inner(audio).ctx as FakeAudioContext
+    const steam = emittersFor(cinder).find((e) => e.kind === 'steam')!
+    ctx.currentTime = 500                                          // long past every schedule
+    ctx.starts.length = 0
+    scape().update(steam.x + 2, steam.z, 0, 8000)                  // beside a steam vent
+    expect(ctx.starts.length).toBeGreaterThan(0)
+    // a listener far from every source: periodic sounds are due but none is audible
+    audio.setLevel(cinder)
+    ctx.currentTime = 1000
+    ctx.starts.length = 0
+    scape().update(9999, 9999, 0, 9000)
+    expect(ctx.starts.filter((s) => s.kind === 'source').length).toBe(0)
+  })
+  it('every continuous kind has a voice builder', () => {
+    // one single-emitter level per kind, on a strictly increasing clock (the runner throttles to 10 Hz)
+    let clock = 20000
+    for (const kind of Object.entries(SPEC).filter(([, s]) => s.continuous).map(([k]) => k)) {
+      const box = kind === 'engine' ? { kind: 'truck' } : kind === 'server' ? { kind: 'server' } : kind === 'pump' ? { kind: 'pump' } : kind === 'tank' ? { kind: 'tank' } : null
+      const art = kind === 'lamp' ? { kind: 'lamp' } : kind === 'stack' ? { kind: 'stack' } : null
+      const lvl = { ...cinder, id: 'cinder_yard', walls: box ? [{ x: 0, z: 0, w: 1, d: 1, h: 3, ...box }] : [], cover: [], art: art ? [{ x: 0, z: 0, ...art }] : [] } as unknown as typeof cinder
+      audio.setLevel(lvl)
+      clock += 500
+      scape().update(1, 0, 0, clock)
+      expect(scape().activeCount(), kind).toBe(1)
+    }
   })
 })

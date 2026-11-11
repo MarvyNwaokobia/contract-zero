@@ -5,7 +5,8 @@ import { MusicLayers } from './MusicLayers';
 import { VoiceBudget, type Channel } from './voices';
 import { alarmPattern, closestApproach, distanceClass, nearMissStrength, propagationDelay, type AlarmLevel, type Vec3 } from './combat';
 import { impulseResponse, INDOOR_IR, isIndoors, OUTDOOR_IR, spaceMix } from './acoustics';
-import type { Art } from '../fps/levels';
+import type { LevelDef } from '../fps/levels';
+import { SoundscapeRunner } from './soundscapeRunner';
 import type { LevelId } from '../fps/levels';
 
 /**
@@ -114,7 +115,10 @@ export class FpsAudio {
   private musicDuck!: GainNode;
   private interactDuck!: GainNode;
   /** The level's roofs, for telling indoors from outdoors; and two reverbs (a dense room, open ground). */
-  private roofs: readonly Art[] | null = null;
+  private roofs: LevelDef['art'] | null = null;
+  private level: LevelDef | null = null;
+  /** Positional sounds of the site (soundscape.ts): engines, hums, steam, a PA. */
+  soundscape: SoundscapeRunner | null = null;
   private indoors = false;
   private reverbIn!: GainNode;
   private roomWet!: GainNode;
@@ -127,6 +131,9 @@ export class FpsAudio {
     cooldownMs: { impact: 28, 'enemy-shot': 45, footstep: 140, explosion: 250, hitmarker: 40, clack: 35, heartbeat: 400, whiz: 120, ricochet: 150, 'enemy-step': 90, extract: 300 },
   });
   private ambBus!: GainNode;
+  /** The Environment channel's own gain, for the positional sounds of the site. `ambBus` is the room-tone level (a
+   *  few hundredths), which would swallow them. */
+  private envBus!: GainNode;
   private ambBaseVol = 0.05;
   /** The player's mix (Settings → Audio) and whether the tab is in the background. */
   private mix: Mix = { master: 0.9, music: 0.5, effects: 1, voice: 1, ambience: 0.8, ui: 0.8, interactions: 1 };
@@ -209,7 +216,9 @@ export class FpsAudio {
       this.gunBus.connect(this.combatDuck);
       this.impactBus.connect(this.combatDuck);
       this.combatDuck.connect(this.master);
-      this.ambBus.connect(this.ambDuck); this.ambDuck.connect(this.master);
+      this.envBus = ctx.createGain();
+      this.envBus.gain.value = this.mix.ambience;
+      this.ambBus.connect(this.ambDuck); this.envBus.connect(this.ambDuck); this.ambDuck.connect(this.master);
       this.musicBus.connect(this.musicDuck); this.musicDuck.connect(this.master);
       this.interactBus.connect(this.interactDuck); this.interactDuck.connect(this.master);
       this.uiBus.connect(this.master);
@@ -232,6 +241,9 @@ export class FpsAudio {
         wet.connect(this.master);
       }
       this.applySpace();
+      // the sounds of the site, on the Environment channel
+      this.soundscape = new SoundscapeRunner(ctx, this.envBus, (s) => this.noise(s), (key, pri, ms) => this.allow(key, 'environment', pri, ms));
+      this.soundscape.setLevel(this.level);
       this.applyMix();
       // The score only runs while it can be heard: a muted music slider costs nothing.
       this.syncMusic();
@@ -278,14 +290,17 @@ export class FpsAudio {
       this.indoors = inside;
       this.applySpace();
     }
+    this.soundscape?.update(x, z, yaw, typeof performance !== 'undefined' ? performance.now() : Date.now());
   }
 
-  /** The level being played, for indoor and outdoor acoustics. Null (training, endless) is all outdoors. */
-  setLevel(art: readonly Art[] | null): void {
-    this.roofs = art;
-    const inside = isIndoors(art, this.lx, this.lz, 0.8);
+  /** The level being played: indoor and outdoor acoustics, and the sounds of the site. Null (training, endless) is all outdoors and silent of emitters. */
+  setLevel(level: LevelDef | null): void {
+    this.level = level;
+    this.roofs = level ? level.art : null;
+    const inside = isIndoors(this.roofs, this.lx, this.lz, 0.8);
     if (inside !== this.indoors) this.indoors = inside;
     this.applySpace();
+    this.soundscape?.setLevel(level);
   }
 
   /** Fade the reverb to the space the listener is in. */
@@ -296,6 +311,9 @@ export class FpsAudio {
     this.roomWet.gain.setTargetAtTime(m.indoorWet, ctx.currentTime, 0.12);
     this.openWet.gain.setTargetAtTime(m.outdoorWet, ctx.currentTime, 0.12);
   }
+
+  /** The level being played (probes). */
+  get currentLevel(): LevelDef | null { return this.level; }
 
   /** Whether the listener is under a roof (probes). */
   isIndoors(): boolean {
@@ -336,6 +354,8 @@ export class FpsAudio {
 
   dispose(): void {
     this.setExtraction(false);
+    this.soundscape?.dispose();
+    this.soundscape = null;
     this.music?.dispose();
     this.music = null;
     try { this.ctx?.close(); } catch { /* already closed */ }
@@ -1158,6 +1178,7 @@ export class FpsAudio {
     set(this.interactBus, this.mix.interactions);
     set(this.voiceBus, this.mix.voice);
     set(this.ambBus, this.ambTarget);
+    set(this.envBus, this.mix.ambience);
     // MusicLayers is mixed hot (it was written to sit alone); 0.6 seats it under the fight.
     set(this.musicBus, 0.6 * this.mix.music);
   }

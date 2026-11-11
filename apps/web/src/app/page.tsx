@@ -13,6 +13,7 @@ import { useProfile, useSession, useStash } from '@/lib/useSession'
 import { WorldClockPanel } from '@/components/world/WorldClock'
 import { ReadinessSummary, useReadinessData } from '@/components/world/Readiness'
 import { describeGuardPlan } from '@/lib/presenter/economy'
+import { ICON_COLOR, ResourceIcon, type IconKind } from '@/components/ui/ResourceIcon'
 
 const HangarScene = dynamic(() => import('@/components/hub/HangarScene'), { ssr: false })
 
@@ -126,8 +127,8 @@ export default function Hub() {
                 <div className="text-xs text-muted">Assault rifle · sidearm</div>
                 {stash && (
                   <div className="mt-4 grid grid-cols-4 gap-2 border-t border-line pt-3">
-                    {([['Credits', stash.credits], ['Ammo', stash.ammo], ['Med', stash.med], ['Fuel', stash.fuel]] as const).map(([k, v]) => (
-                      <div key={k}><div className="cz-label !text-[9px]">{k}</div><div className="cz-num font-display text-lg font-bold">{v}</div></div>
+                    {([['Credits', 'credits', stash.credits], ['Ammo', 'ammo', stash.ammo], ['Med', 'med', stash.med], ['Fuel', 'fuel', stash.fuel]] as [string, IconKind, number][]).map(([k, kind, v]) => (
+                      <div key={k}><div className="cz-label flex items-center gap-1 !text-[9px]"><span style={{ color: ICON_COLOR[kind] }}><ResourceIcon kind={kind} className="h-3 w-3" /></span>{k}</div><div className="cz-num font-display text-lg font-bold">{v}</div></div>
                     ))}
                   </div>
                 )}

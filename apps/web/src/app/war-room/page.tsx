@@ -13,6 +13,7 @@ import { Procurement } from '@/components/market/Procurement'
 import { inboundFor, MerchantSummary, ReadinessSummary } from '@/components/world/Readiness'
 import { Operations } from '@/components/world/Operations'
 import { WarTableSection } from '@/components/world/table/WarTableSection'
+import { FactionInsignia } from '@/components/ui/FactionInsignia'
 import { TradingPartners, useMarket } from '@/components/market/SupplyOrders'
 import { api, RESOURCE_LABEL, type CausalChain, type MarketMerchant, type MarketOrder, type ChainTx, type ResourceName, type SimulationView, type WarActor, type WarRoomView } from '@/lib/api'
 
@@ -79,9 +80,12 @@ function ActorCard({ a, v, orders, merchant }: { a: WarActor; v: WarRoomView; or
   return (
     <Panel className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-2">
-        <div>
+        <div className="flex items-center gap-2.5">
+          <FactionInsignia id={a.id} className="h-9 w-9 shrink-0" title={a.name} />
+          <div>
           <div className="font-display text-lg font-bold uppercase tracking-wider" style={{ color: color(a.id) }}>{a.name}</div>
           <div className="text-xs text-muted">{stance} · {a.kind === 'faction' ? `income ${a.income_per_day} cr/day` : 'runs the Exchange'}</div>
+          </div>
         </div>
         {a.kind === 'faction' && (
           <div className="text-right">

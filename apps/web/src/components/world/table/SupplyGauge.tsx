@@ -3,6 +3,7 @@
 
 import type { ResourceName } from '@/lib/api'
 import { supplySlots } from '@/lib/world/table'
+import { ICON_COLOR, ResourceIcon } from '@/components/ui/ResourceIcon'
 
 const COLOR: Record<ResourceName, string> = { ammo: 'var(--color-amber)', med: 'var(--color-friendly)', fuel: 'var(--color-steel)' }
 const LABEL: Record<ResourceName, string> = { ammo: 'Ammunition', med: 'Medicine', fuel: 'Fuel' }
@@ -20,7 +21,7 @@ export function SupplyGauge({ resource, stock, target, compact = false }: { reso
   const short = target > 0 && stock < target
   return (
     <div className="grid grid-cols-[5.5rem_1fr_auto] items-center gap-2 text-xs" data-testid={`gauge-${resource}`}>
-      <span className="text-muted">{LABEL[resource]}</span>
+      <span className="flex items-center gap-1.5 text-muted"><span style={{ color: ICON_COLOR[resource] }}><ResourceIcon kind={resource} className="h-3.5 w-3.5" /></span>{LABEL[resource]}</span>
       <span className="flex items-center gap-0.5" role="img" aria-label={`${LABEL[resource]}: ${stock} held, target ${target}`}>
         {Array.from({ length: s.slots }, (_, i) => <Glyph key={i} r={resource} on={i < s.filled} />)}
         {s.overflow && <span className="ml-1 text-[10px] text-dim">+</span>}

@@ -6,6 +6,7 @@
 // The server only applies a step to the game after reading it back from the chain.
 
 import { MerchantSummary } from '@/components/world/Readiness'
+import { FactionInsignia } from '@/components/ui/FactionInsignia'
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type MarketMerchant, type MarketOrder, type MarketView, type OrderProposal, type ResourceName } from '@/lib/api'
@@ -34,7 +35,7 @@ function PartnerCard({ x }: { x: MarketMerchant }) {
   return (
     <div className="border border-line bg-ink-2 p-3" data-testid={`partner-${x.id}`}>
       <div className="flex items-baseline justify-between gap-2">
-        <div className="font-display text-lg font-bold uppercase tracking-wider text-fog">{x.name}</div>
+        <div className="flex items-center gap-2 font-display text-lg font-bold uppercase tracking-wider text-fog"><FactionInsignia id={x.id} className="h-7 w-7" title={x.name} />{x.name}</div>
         <div className="font-mono text-xs text-steel">{x.margin_bp / 100}% margin</div>
       </div>
       <div className="mt-0.5 text-xs text-dim">{x.instant_market ? 'Also runs the instant market. ' : ''}Commits up to {x.max_commit_bp / 100}% of a shelf per order · never below {x.min_margin_bp / 100}% over cost</div>

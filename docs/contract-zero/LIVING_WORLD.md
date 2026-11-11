@@ -101,7 +101,11 @@ Deliberately **not** claimed: that fuel idles factory machinery, that low credit
 - **Motion**: functional only; honour reduced motion; no ambient loops on data screens.
 - **Banned**: bloom, neon, glassmorphism, holographic clutter, text under 11px.
 
-### Factions (identity brief; assets not yet drawn)
+### Interface tokens, marks and the identity sheet (built)
+
+`globals.css` now carries interface tokens in a plain `:root` (Tailwind drops `@theme` variables nothing references): motion durations (`--dur-instant/fast/base/slow`), depth (`--depth-raised/recessed/lit/floating`), one focus ring (`--focus-*`) and a touch target (`--tap-min`, applied only on coarse pointers so desktop layouts are unchanged). Two facts shaped them: panels and cut-corner buttons use `clip-path`, which also clips outer shadows and outside outlines, so depth is inset light and shade and the focus ring is drawn inside (previously those buttons showed no keyboard focus at all). Reduce motion, from the OS or Settings (the app sets `data-reduce-motion` on `<html>`), zeroes every duration. The marks are original SVG: `ResourceIcon` (ammunition, medicine, fuel, credits) and `FactionInsignia` (Vanguard's chevron shield, the Ashen Compact's riveted weld-plate with a slash, Vex's chalked ticket, Halcyon's hex ring and pallet line; an unknown faction gets a neutral plate). `/dev/identity` is a living style guide (`docs/media/identity-sheet.png`). Verified in a browser: focus ring computed as a solid 2px amber outline inside the button, the duration token 220 ms normally and 0 ms under either reduce-motion source, and the marks in place in the real War Room, facility panel and Exchange with no page errors. Not yet: insignia on the Hub, briefing and radio; faction-specific materials and map art; contrast of every token pair was not audited.
+
+### Factions (identity brief)
 
 | | Voice | Material and colour | Equipment |
 |---|---|---|---|

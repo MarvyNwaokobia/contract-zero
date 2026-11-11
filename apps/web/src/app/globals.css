@@ -66,6 +66,37 @@
   --ease-spring:    cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
+/* Interface tokens live in a plain :root (not @theme): Tailwind drops @theme variables that
+   no utility class references, and these are read directly by var() and by tests. */
+:root {
+  --ease-standard:  cubic-bezier(0.2, 0, 0, 1);
+
+  /* ── Motion: durations. Everything that moves in the interface uses these, so
+        reduced motion can zero them in one place (see the override below). ───── */
+  --dur-instant: 80ms;
+  --dur-fast: 120ms;
+  --dur-base: 220ms;
+  --dur-slow: 420ms;
+
+  /* ── Depth. Panels and buttons are clipped to the cut-corner shape, and clip-path
+        also clips outer shadows, so depth is built from INSET light and shade. ──── */
+  --depth-raised: inset 0 1px 0 rgb(255 255 255 / 0.05), inset 0 -22px 30px -24px rgb(0 0 0 / 0.6);
+  --depth-recessed: inset 0 2px 10px rgb(0 0 0 / 0.5), inset 0 -1px 0 rgb(255 255 255 / 0.03);
+  --depth-lit: inset 0 0 0 1px rgb(240 160 60 / 0.35), inset 0 0 24px -10px rgb(240 160 60 / 0.25);
+  /* For elements that are NOT clipped (menus, popovers): a real drop shadow. */
+  --depth-floating: 0 12px 32px rgb(0 0 0 / 0.55), 0 2px 6px rgb(0 0 0 / 0.4);
+
+  /* ── Focus. One ring everywhere, 3:1 or better on every panel colour. ───────── */
+  --focus-color: var(--color-amber-hi);
+  --focus-width: 2px;
+  --focus-offset: 2px;
+  /* Inside the box, for clipped elements (the ring would be cut off outside it). */
+  --focus-offset-inset: -4px;
+
+  /* ── Touch ─────────────────────────────────────────────────────────────────── */
+  --tap-min: 44px;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -457,6 +488,28 @@ body {
   .app-shell > main { padding-bottom: 2rem; }
 }
 
+/* ── Focus and motion (tokens above) ────────────────────────────────────── */
+:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: var(--focus-offset);
+}
+/* Cut-corner shapes clip an outside outline: draw the ring inside instead. */
+.cz-btn:focus-visible,
+.cz-panel:focus-visible,
+[data-clipped]:focus-visible {
+  outline-offset: var(--focus-offset-inset);
+}
+/* Reduced motion: from the OS, or from Settings (set on <html> by the app). */
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-instant: 0ms; --dur-fast: 0ms; --dur-base: 0ms; --dur-slow: 0ms; }
+}
+:root[data-reduce-motion='true'] { --dur-instant: 0ms; --dur-fast: 0ms; --dur-base: 0ms; --dur-slow: 0ms; }
+:root[data-reduce-motion='true'] .cz-rise { animation: none; }
+/* Touch: buttons meet the minimum target size. Desktop layouts are untouched. */
+@media (pointer: coarse) {
+  .cz-btn { min-height: var(--tap-min); }
+}
+
 /* ── CONTRACT ZERO components ───────────────────────────────────────────── */
 @layer components {
   /* A panel with one cut corner: the system's signature shape. */
@@ -466,7 +519,10 @@ body {
     border: 1px solid var(--color-line);
     clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
     backdrop-filter: blur(6px);
+    box-shadow: var(--depth-raised);
   }
+  .cz-panel-recessed { box-shadow: var(--depth-recessed); background: var(--color-ink-2); }
+  .cz-panel-lit { box-shadow: var(--depth-raised), var(--depth-lit); }
   .cz-panel::before {
     content: '';
     position: absolute; top: 0; left: 0; width: 42px; height: 2px;
@@ -486,7 +542,7 @@ body {
     letter-spacing: 0.12em;
     text-transform: uppercase;
     clip-path: polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%);
-    transition: background-color 120ms, color 120ms, opacity 120ms;
+    transition: background-color var(--dur-fast), color var(--dur-fast), opacity var(--dur-fast);
   }
   .cz-btn-primary { background: var(--color-amber); color: #1a1206; }
   .cz-btn-primary:hover { background: var(--color-amber-hi); }
@@ -500,7 +556,7 @@ body {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.cz-rise { animation: cz-rise 420ms var(--ease-out-expo) both; }
+.cz-rise { animation: cz-rise var(--dur-slow) var(--ease-out-expo) both; }
 
 @media (prefers-reduced-motion: reduce) {
   .cz-rise { animation: none; }

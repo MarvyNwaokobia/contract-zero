@@ -166,7 +166,7 @@ function Deploy() {
       codename: `${kind.toUpperCase()} · ${target.toUpperCase()}`, location: start.mission.zone ?? 'DUSTLINE', time: '', source: 'authored', radio: {},
       briefing: [{ id: 'fallback', speaker: 'handler', text: `${start.mission.cargo.units} units of ${RESOURCE_LABEL[resource].toLowerCase()} at ${target}'s site. Get in, do the job, get out.` }],
     }
-    return <Briefing story={shown} pending={!story} actionLabel="Choose loadout" onDeploy={() => setPhase({ kind: 'loadout', start, before, story: shown })} />
+    return <Briefing story={shown} pending={!story} contract={start.mission} kind={kind} pay={(before.board?.find((b) => b.target === target && b.resource === resource && b.kind === kind)?.bounty?.amount ?? 0) + (kind === 'raid' ? before.board?.find((b) => b.target === target && b.resource === resource && b.kind === kind)?.market_value.bid ?? 0 : 0)} actionLabel="Choose loadout" onDeploy={() => setPhase({ kind: 'loadout', start, before, story: shown })} />
   }
 
   if (phase.kind === 'fighting' && mission) {

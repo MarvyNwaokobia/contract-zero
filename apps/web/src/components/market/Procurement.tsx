@@ -94,6 +94,15 @@ function Chain({ c, order }: { c: ProcurementChain; order: MarketOrder | undefin
   )
 }
 
+/** One order's seven-stage record on the Exchange, from the same recorded chain the War Room reads.
+ *  Shown only when the server has that chain (it keeps the most recent); never reconstructed. */
+export function OrderChain({ order }: { order: MarketOrder }) {
+  const q = useQuery({ queryKey: ['procurement'], queryFn: () => api.procurement(10), refetchInterval: 10_000 })
+  const c = q.data?.find((x) => x.order === order.id)
+  if (!c) return null
+  return <div className="mt-2" data-testid={`order-chain-${order.id}`}><Chain c={c} order={order} /></div>
+}
+
 export function Procurement() {
   const q = useQuery({ queryKey: ['procurement'], queryFn: () => api.procurement(10), refetchInterval: 10_000 })
   // The structured offers (quantity and price) live on the market's orders; join them by order id.

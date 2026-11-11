@@ -7,6 +7,7 @@
 import { FactionInsignia } from '@/components/ui/FactionInsignia'
 import { ICON_COLOR, ICON_LABEL, ResourceIcon, type IconKind } from '@/components/ui/ResourceIcon'
 import { FACTION_COLOR } from '@/lib/factions'
+import { FactionDossier } from '@/components/world/FactionDossier'
 
 const FACTIONS: { id: string; name: string; line: string }[] = [
   { id: 'vanguard', name: 'Vanguard', line: 'Disciplined military logistics, professional command.' },
@@ -49,6 +50,11 @@ export default function Identity() {
             ))}
             <li className="flex items-center gap-3"><FactionInsignia id="stranger" className="h-14 w-14 shrink-0" title="Unknown" /><div className="text-xs text-muted">An unknown faction gets a neutral plate, never another faction&apos;s mark.</div></li>
           </ul>
+        </Block>
+        <Block title="Portraits and dossiers (gear-defined silhouettes, no faces)">
+          <div className="grid gap-3">
+            {['handler', 'vanguard', 'ashen', 'vex', 'halcyon'].map((id) => <FactionDossier key={id} id={id} />)}
+          </div>
         </Block>
         <Block title="Depth">
           <div className="grid grid-cols-3 gap-3 text-center text-xs text-muted">

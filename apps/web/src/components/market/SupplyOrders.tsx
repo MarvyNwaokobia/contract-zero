@@ -6,6 +6,10 @@
 // The server only applies a step to the game after reading it back from the chain.
 
 import { MerchantSummary } from '@/components/world/Readiness'
+import { FactionDossier } from '@/components/world/FactionDossier'
+import { OrderChain } from '@/components/market/Procurement'
+import { describeMerchant } from '@/lib/presenter/merchant'
+import { merchantRemark } from '@/lib/presenter/remarks'
 import { FactionInsignia } from '@/components/ui/FactionInsignia'
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -40,6 +44,10 @@ function PartnerCard({ x }: { x: MarketMerchant }) {
       </div>
       <div className="mt-0.5 text-xs text-dim">{x.instant_market ? 'Also runs the instant market. ' : ''}Commits up to {x.max_commit_bp / 100}% of a shelf per order · never below {x.min_margin_bp / 100}% over cost</div>
       <div className="mt-2"><MerchantSummary m={x} /></div>
+      <details className="mt-2 text-xs">
+        <summary className="cursor-pointer text-steel hover:text-fog">Who runs it</summary>
+        <div className="mt-2"><FactionDossier id={x.id} remark={merchantRemark(x.id, describeMerchant(x))} compact /></div>
+      </details>
       <table className="mt-2 w-full text-sm">
         <thead><tr className="text-left text-[11px] uppercase tracking-wider text-dim"><th className="font-normal">Shelf</th><th className="font-normal">Stock</th><th className="font-normal">Sells at</th><th className="font-normal">Buys at</th></tr></thead>
         <tbody>
@@ -224,6 +232,7 @@ function OrderCard({ o, m, session, onDone }: { o: MarketOrder; m: MarketView; s
       {open && !ranked.length && <div className="mt-1 text-xs text-dim">Waiting for trading partners…</div>}
       {session && open && <button disabled={!!busy} onClick={cancel} className="mt-2 text-xs text-muted underline hover:text-fog" data-testid={`cancel-${o.id}`}>{busy === 'cancel' ? 'Cancelling…' : 'Cancel order'}</button>}
       {err && <p className="mt-1 text-sm text-[#ff8a8d]">{err}</p>}
+      <OrderChain order={o} />
       {o.settlement.length > 0 && (
         <details className="mt-1">
           <summary className="cursor-pointer text-[11px] uppercase tracking-wider text-dim hover:text-fog">Transaction details</summary>

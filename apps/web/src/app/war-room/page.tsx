@@ -12,6 +12,10 @@ import { Panel, Shell, Stat } from '@/components/ui/Shell'
 import { Procurement } from '@/components/market/Procurement'
 import { inboundFor, MerchantSummary, ReadinessSummary } from '@/components/world/Readiness'
 import { Operations } from '@/components/world/Operations'
+import { FactionDossier } from '@/components/world/FactionDossier'
+import { describeFaction } from '@/lib/presenter/economy'
+import { describeMerchant } from '@/lib/presenter/merchant'
+import { factionRemark, merchantRemark } from '@/lib/presenter/remarks'
 import { useMusicState } from '@/components/audio/AudioProvider'
 import { RadioFeed } from '@/components/audio/RadioFeed'
 import { WarTableSection } from '@/components/world/table/WarTableSection'
@@ -73,6 +77,13 @@ function Bar({ have, need, c }: { have: number; need: number; c: string }) {
   )
 }
 
+function dossierRemark(a: WarActor, v: WarRoomView, orders?: MarketOrder[], merchant?: MarketMerchant): string | undefined {
+  if (merchant) return merchantRemark(a.id, describeMerchant(merchant))
+  if (a.kind !== 'faction') return undefined
+  const inbound = inboundFor(a.id, orders, v.world.convoys)
+  return factionRemark(a.id, describeFaction(a, inbound), inbound.length > 0)
+}
+
 function ActorCard({ a, v, orders, merchant }: { a: WarActor; v: WarRoomView; orders?: MarketOrder[]; merchant?: MarketMerchant }) {
   const credits = v.history.map((h) => h.holdings[a.id]?.credits).filter((x): x is number => x != null)
   const against = v.world.contracts.filter((c) => c.target === a.id)
@@ -98,6 +109,10 @@ function ActorCard({ a, v, orders, merchant }: { a: WarActor; v: WarRoomView; or
       </div>
       <ReadinessSummary a={a} inbound={inboundFor(a.id, orders, v.world.convoys)} />
       {merchant && <MerchantSummary m={merchant} />}
+      <details className="text-xs">
+        <summary className="cursor-pointer text-steel hover:text-fog">Who they are</summary>
+        <div className="mt-2"><FactionDossier id={a.id} remark={dossierRemark(a, v, orders, merchant)} compact /></div>
+      </details>
       <div className="flex items-end justify-between">
         <Stat label="Treasury" value={`${a.holdings.credits.toLocaleString()} cr`} hint={`reserve ${a.credit_reserve.toLocaleString()}`} />
         <Spark values={credits} stroke={color(a.id)} w={120} />

@@ -248,7 +248,7 @@ function Observer() {
           <select value={days} onChange={(e) => setDays(+e.target.value)} className="border border-line bg-panel px-2 py-1">{[3, 7, 14].map((d) => <option key={d} value={d}>{d}</option>)}</select></label>
         <label className="grid gap-1"><span className="cz-label !text-[10px]">Raid chance / hour</span>
           <select value={raids} onChange={(e) => setRaids(+e.target.value)} className="border border-line bg-panel px-2 py-1">{[0, 4, 8, 20].map((d) => <option key={d} value={d}>{d}%</option>)}</select></label>
-        <label className="flex items-center gap-2"><input type="checkbox" checked={fresh} onChange={(e) => setFresh(e.target.checked)} /> From a fresh world (seed 2026) instead of now</label>
+        <label className="flex items-center gap-2"><input type="checkbox" className="h-6 w-6" checked={fresh} onChange={(e) => setFresh(e.target.checked)} /> From a fresh world (seed 2026) instead of now</label>
         <button className="cz-btn cz-btn-ghost px-4 py-1.5" onClick={() => sim.mutate()} disabled={sim.isPending}>{sim.isPending ? 'Simulating…' : 'Run simulation'}</button>
       </div>
       {sim.isError && <p className="mt-3 text-sm text-hostile">{(sim.error as Error).message}</p>}

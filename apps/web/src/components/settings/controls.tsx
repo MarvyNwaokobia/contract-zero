@@ -64,7 +64,7 @@ export function Slider({ id, value, min, max, step, onChange, format, valueText,
     <>
       <input id={id} type="range" min={min} max={max} step={step} value={value}
         onChange={(e) => onChange(Number(e.currentTarget.value))}
-        className={`h-2 min-w-[10rem] flex-1 cursor-pointer accent-amber ${focusRing}`}
+        className={`h-6 min-w-[10rem] flex-1 cursor-pointer accent-amber ${focusRing}`}
         aria-valuetext={(valueText ?? format)(value)} data-testid={testid ?? id} />
       <output htmlFor={id} className="w-16 shrink-0 text-right font-mono text-sm tabular-nums text-steel">{format(value)}</output>
     </>
@@ -76,7 +76,7 @@ export function Switch({ id, checked, onChange, label, testid }: { id: string; c
   return (
     <span className="inline-flex items-center gap-3">
       <input id={id} type="checkbox" role="switch" checked={checked} onChange={(e) => onChange(e.currentTarget.checked)} aria-label={label}
-        className={`relative h-5 w-10 shrink-0 cursor-pointer appearance-none border border-line-strong bg-ink-2 transition-colors checked:border-amber checked:bg-amber/25 before:absolute before:left-0.5 before:top-0.5 before:h-3.5 before:w-3.5 before:bg-muted before:transition-transform checked:before:translate-x-5 checked:before:bg-amber-hi ${focusRing}`}
+        className={`relative h-6 w-11 shrink-0 cursor-pointer appearance-none border border-line-strong bg-ink-2 transition-colors checked:border-amber checked:bg-amber/25 before:absolute before:left-1 before:top-1 before:h-3.5 before:w-3.5 before:bg-muted before:transition-transform checked:before:translate-x-6 checked:before:bg-amber-hi ${focusRing}`}
         data-testid={testid ?? id} />
       <span className={`font-display text-xs font-bold uppercase tracking-[0.18em] ${checked ? 'text-amber-hi' : 'text-dim'}`} aria-hidden>{checked ? 'On' : 'Off'}</span>
     </span>

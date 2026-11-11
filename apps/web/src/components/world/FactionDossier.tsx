@@ -25,12 +25,14 @@ export function FactionDossier({ id, remark, compact = false }: { id: string; re
         {remark && <blockquote className="mt-1.5 border-l-2 pl-2 text-sm italic text-fog" style={{ borderColor: c }} data-testid="remark">“{remark}”</blockquote>}
         <p className="mt-1 text-[11px] text-dim">{remark ? 'Describes the position as it stands; the economy engine makes the decisions.' : 'A voice, not a decision-maker: the economy engine decides.'}</p>
         {!compact && (
+          <>
           <dl className="mt-2 grid gap-0.5 text-xs">
             {([['Is', who.role], ['Looks', who.materials], ['Equipment', who.equipment], ['Speaks', who.voice]] as const).map(([k, v]) => (
               <div key={k} className="grid grid-cols-[4.5rem_1fr] gap-2"><dt className="text-dim">{k}</dt><dd className="text-muted">{v}</dd></div>
             ))}
-            <div className="mt-1 flex flex-wrap gap-1.5" aria-label="Palette">{who.palette.map(([label, css]) => <span key={label} title={label} className="inline-flex items-center gap-1 text-[10px] text-dim"><span className="h-3 w-3 border border-line-strong" style={{ background: css }} />{label}</span>)}</div>
           </dl>
+          <div role="group" aria-label="Palette" className="mt-2 flex flex-wrap gap-1.5">{who.palette.map(([label, css]) => <span key={label} title={label} className="inline-flex items-center gap-1 text-[10px] text-dim"><span className="h-3 w-3 border border-line-strong" style={{ background: css }} />{label}</span>)}</div>
+          </>
         )}
       </div>
     </section>

@@ -65,7 +65,7 @@ export function ReadinessSummary({ a, inbound, compact = false, ammoForGuards }:
       <ul className="grid gap-1">
         {issues.map((s) => (
           <li key={s.topic} className="flex items-start gap-2 text-xs">
-            <span className={`mt-1 h-2 w-2 shrink-0 ${DOT[s.severity]}`} aria-label={SEV_WORD[s.severity]} />
+            <span role="img" className={`mt-1 h-2 w-2 shrink-0 ${DOT[s.severity]}`} aria-label={SEV_WORD[s.severity]} />
             <span><span className="font-display font-bold tracking-wider text-fog">{s.headline}</span> <span className="text-muted">· {s.effect}</span></span>
           </li>
         ))}
@@ -119,7 +119,7 @@ export function MerchantSummary({ m }: { m: MarketMerchant }) {
         <ul className="grid gap-1">
           {p.statements.map((s) => (
             <li key={`${s.topic}-${s.headline}`} className="flex items-start gap-2 text-xs">
-              <span className={`mt-1 h-2 w-2 shrink-0 ${DOT[s.severity]}`} aria-label={SEV_WORD[s.severity]} />
+              <span role="img" className={`mt-1 h-2 w-2 shrink-0 ${DOT[s.severity]}`} aria-label={SEV_WORD[s.severity]} />
               <span><span className="font-display font-bold tracking-wider text-fog">{s.headline}</span> <span className="text-muted">· {s.effect}</span></span>
             </li>
           ))}

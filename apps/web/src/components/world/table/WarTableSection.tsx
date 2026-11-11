@@ -62,7 +62,7 @@ export function WarTableSection({ war, market }: { war: WarRoomView; market: Mar
           {model.facilities.map((f) => (
             <button key={f.id} type="button" aria-pressed={f.id === selectedId} onClick={() => setPicked(f.id)}
               className={`border px-2.5 py-1.5 text-left text-xs ${f.id === selectedId ? 'border-amber bg-amber/10 text-amber-hi' : 'border-line text-muted hover:text-fog'}`}>
-              <span className="font-display font-bold uppercase tracking-wider">{f.name}</span>{status[f.id] && <span className="ml-1.5 text-[10px] uppercase tracking-widest opacity-80">{status[f.id].label}</span>}
+              <span className="font-display font-bold uppercase tracking-wider">{f.name}</span>{status[f.id] && <span className="ml-1.5 text-[10px] uppercase tracking-widest">{status[f.id].label}</span>}
             </button>
           ))}
         </div>

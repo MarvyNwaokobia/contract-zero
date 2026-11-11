@@ -9,7 +9,7 @@ export function AdvancedSwitch() {
   const [on, set] = useAdvanced()
   return (
     <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-muted" title="Show contracts, tokens, transaction ids and the engine's validation records">
-      <input type="checkbox" checked={on} onChange={(e) => set(e.target.checked)} data-testid="advanced-switch" />
+      <input type="checkbox" className="h-6 w-6" checked={on} onChange={(e) => set(e.target.checked)} data-testid="advanced-switch" />
       Advanced view
     </label>
   )

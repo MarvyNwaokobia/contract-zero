@@ -561,3 +561,11 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .cz-rise { animation: none; }
 }
+
+/* Touch: every control is at least 24x24 CSS px (WCAG 2.2 AA 2.5.8). Inline links inside a sentence are
+   exempt and unaffected (min-height does not apply to inline boxes); flex and grid items, toggles and
+   tabs are the ones that get it. */
+@media (pointer: coarse) {
+  summary, button, [role='tab'], a { min-height: 24px; }
+  summary { padding-block: 3px; }
+}

@@ -48,7 +48,7 @@ export function TopBar() {
                 <div className="cz-num font-display text-base font-bold text-amber-hi">{stash.credits.toLocaleString()}</div>
               </div>
             )}
-            <Link href="/operator" className="font-display text-sm font-bold tracking-widest text-fog hover:text-amber-hi">
+            <Link href="/operator" className="inline-flex min-h-6 items-center font-display text-sm font-bold tracking-widest text-fog hover:text-amber-hi">
               {profile?.callsign ?? 'NEW OPERATOR'}
             </Link>
           </>
@@ -68,7 +68,7 @@ export function Shell({ title, children, back, wide = false }: { title: string; 
       <div className={`mx-auto px-4 py-8 sm:px-8 ${wide ? 'max-w-7xl' : 'max-w-5xl'}`}>
         <header className="mb-6 flex items-end justify-between gap-4">
           <h1 className="font-display text-3xl font-bold uppercase tracking-[0.12em] text-fog">{title}</h1>
-          {back && <Link href={back.href} className="cz-label hover:text-fog">← {back.label}</Link>}
+          {back && <Link href={back.href} className="cz-label inline-flex min-h-6 items-center hover:text-fog">← {back.label}</Link>}
         </header>
         <div className="cz-rise">{children}</div>
       </div>

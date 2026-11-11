@@ -68,14 +68,14 @@ function Stage({ s, last }: { s: TimelineStage; last: boolean }) {
   )
 }
 
-function Chain({ c, order }: { c: ProcurementChain; order: MarketOrder | undefined }) {
+function Chain({ c, order, inOrder = false }: { c: ProcurementChain; order: MarketOrder | undefined; inOrder?: boolean }) {
   const t = describeProcurement(c, order?.proposals)
   const tone = c.status.status === 'filled' ? 'text-friendly' : c.status.status === 'open' ? 'text-amber-hi' : 'text-dim'
   return (
     <details className="border border-line bg-ink-2/60 p-3 open:bg-ink-2" data-testid={`proc-${c.order}`}>
       <summary className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="font-display text-sm font-bold uppercase tracking-wider text-fog">{t.headline}</span>
-        {c.fills.length > 0 && <span className="text-sm text-muted">→ {c.fills.map((f) => f.merchant_name).join(' + ')}</span>}
+        <span className={inOrder ? 'text-sm text-steel' : 'font-display text-sm font-bold uppercase tracking-wider text-fog'}>{inOrder ? 'Follow this order' : t.headline}</span>
+        {!inOrder && c.fills.length > 0 && <span className="text-sm text-muted">→ {c.fills.map((f) => f.merchant_name).join(' + ')}</span>}
         {/* the whole story at a glance: one pip per stage */}
         <span className="flex items-center gap-1" role="img" aria-label={t.stages.map((s) => `${s.title}: ${STATE_WORD[s.state]}`).join('; ')}>
           {t.stages.map((s) => <span key={s.key} title={`${s.title}: ${STATE_WORD[s.state]}`} className="h-2 w-4" style={{ background: s.state === 'done' ? ACCENT[s.key] : s.state === 'failed' ? 'var(--color-hostile)' : 'transparent', border: `1px ${s.state === 'skipped' || s.state === 'none' ? 'dashed' : 'solid'} ${s.state === 'done' ? ACCENT[s.key] : s.state === 'failed' ? 'var(--color-hostile)' : 'var(--color-dim)'}` }} />)}
@@ -100,7 +100,7 @@ export function OrderChain({ order }: { order: MarketOrder }) {
   const q = useQuery({ queryKey: ['procurement'], queryFn: () => api.procurement(10), refetchInterval: 10_000 })
   const c = q.data?.find((x) => x.order === order.id)
   if (!c) return null
-  return <div className="mt-2" data-testid={`order-chain-${order.id}`}><Chain c={c} order={order} /></div>
+  return <div className="mt-2" data-testid={`order-chain-${order.id}`}><Chain c={c} order={order} inOrder /></div>
 }
 
 export function Procurement() {

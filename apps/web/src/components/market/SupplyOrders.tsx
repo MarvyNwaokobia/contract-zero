@@ -5,6 +5,7 @@
 // signed in their own wallet (or within a quick-trade budget): place, accept, cancel.
 // The server only applies a step to the game after reading it back from the chain.
 
+import { countOrders, defaultFilter, FILTER_LABEL, filterOrders, type OrderFilter } from '@/lib/market/orders'
 import { MerchantSummary } from '@/components/world/Readiness'
 import { FactionDossier } from '@/components/world/FactionDossier'
 import { OrderChain } from '@/components/market/Procurement'
@@ -141,9 +142,27 @@ export function NewSupplyOrder({ m, session, onDone }: { m: MarketView; session:
 }
 
 /** Orders in the market: yours first, then every faction's. */
+const PAGE = 6
+
+function Filters({ orders, value, onChange }: { orders: MarketOrder[]; value: OrderFilter; onChange: (f: OrderFilter) => void }) {
+  const n = countOrders(orders)
+  return (
+    <div role="group" aria-label="Order status" className="mb-2 flex flex-wrap gap-1" data-testid="order-filters">
+      {(['open', 'filled', 'closed', 'all'] as OrderFilter[]).map((f) => (
+        <button key={f} type="button" aria-pressed={value === f} onClick={() => onChange(f)} data-testid={`order-filter-${f}`} className={`cz-label !text-[11px] border px-3 py-1.5 ${value === f ? 'border-amber bg-amber/15 !text-amber-hi' : 'border-line hover:border-line-strong'}`}>{FILTER_LABEL[f]} ({n[f]})</button>
+      ))}
+    </div>
+  )
+}
+
 export function OrderBoard({ m, session, onDone }: { m: MarketView; session: Session | null; onDone: (msg: string) => void }) {
   const mine = m.orders.filter((o) => session && o.requester === `player:${session.account}`)
-  const others = m.orders.filter((o) => !mine.includes(o)).slice(0, 12)
+  const others = m.orders.filter((o) => !mine.includes(o))
+  const [filter, setFilter] = useState<OrderFilter | null>(null)
+  const [more, setMore] = useState(false)
+  const f = filter ?? defaultFilter(others)
+  const shown = filterOrders(others, f)
+  const list = more ? shown : shown.slice(0, PAGE)
   return (
     <>
       {session && (
@@ -153,7 +172,9 @@ export function OrderBoard({ m, session, onDone }: { m: MarketView; session: Ses
       )}
       <Panel title="MARKET · SUPPLY ORDERS" className="mt-4">
         <p className="mb-2 text-xs text-muted">What the factions are asking for, and who fills it.</p>
-        <div data-testid="market-orders">{others.length ? others.map((o) => <OrderCard key={o.id} o={o} m={m} session={null} onDone={onDone} />) : <p className="text-sm text-muted">No orders yet.</p>}</div>
+        <Filters orders={others} value={f} onChange={(x) => { setFilter(x); setMore(false) }} />
+        <div data-testid="market-orders">{list.length ? list.map((o) => <OrderCard key={o.id} o={o} m={m} session={null} onDone={onDone} />) : <p className="text-sm text-muted">No {FILTER_LABEL[f].toLowerCase()} orders.</p>}</div>
+        {shown.length > PAGE && <button type="button" onClick={() => setMore(!more)} className="mt-2 text-sm text-steel underline hover:text-fog" data-testid="orders-more">{more ? 'Show fewer' : `Show all ${shown.length}`}</button>}
       </Panel>
     </>
   )

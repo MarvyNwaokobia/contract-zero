@@ -22,8 +22,9 @@ Every file the web app ships under `public/`, where it came from, and its licenc
 
 ## Sound
 
-- **Gunshots and the wall impact** (`public/sounds/fps/*.mp3`): original, synthesised by `scripts/generate-sfx.mjs` (deterministic; rerun it to rebuild them). They replaced samples whose source could not be confirmed.
-- **Everything else** (reloads, hit markers, footsteps, radio static, ambience, alarms, explosions, refinery machinery): synthesised at runtime with the Web Audio API in `src/engine/audio/FpsAudio.ts`. No files.
+- **Gunshots and the wall impact** (`public/sounds/fps/*`, four files): original, synthesised by `scripts/generate-sfx.mjs` (deterministic; rerun it to rebuild them). They replaced samples whose source could not be confirmed.
+- **Everything else** (reloads, hit markers, footsteps, radio static, ambience, alarms, explosions, refinery machinery, the sounds of each site, near-miss, ricochets, extraction cues, the score): synthesised at runtime with the Web Audio API in `src/engine/audio/` (`FpsAudio.ts`, `soundscape*.ts`, `MusicLayers.ts`). No files.
+- **A test keeps this honest:** `src/lib/__tests__/audioLicensing.test.ts` fails if an undeclared audio file, a recorded voice or music file, or an outside audio URL appears.
 - **Voice:** the game ships no recorded voice. Radio lines are subtitles over synthesised static.
 
 ## Fonts

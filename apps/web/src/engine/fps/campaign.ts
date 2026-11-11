@@ -40,6 +40,8 @@ export interface Objective {
 }
 
 export interface Mission {
+  /** The site's real economic state at the start (lines down, deliveries). */
+  cues?: import('./lineProps').WorldCues;
   id: string;
   zone: string;   // DUSTLINE / REDYARD / BLACKSITE
   op: string;     // briefing header, e.g. "TRAINING · DUSTLINE"

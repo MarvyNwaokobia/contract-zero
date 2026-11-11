@@ -8,6 +8,7 @@ import { alarmPattern, closestApproach, distanceClass, nearMissStrength, propaga
 import { impulseResponse, INDOOR_IR, isIndoors, OUTDOOR_IR, spaceMix } from './acoustics';
 import type { LevelDef } from '../fps/levels';
 import { SoundscapeRunner } from './soundscapeRunner';
+import { idleProps, isDelivering, type WorldCues } from '../fps/lineProps';
 import type { LevelId } from '../fps/levels';
 
 /**
@@ -119,6 +120,7 @@ export class FpsAudio {
   /** The level's roofs, for telling indoors from outdoors; and two reverbs (a dense room, open ground). */
   private roofs: LevelDef['art'] | null = null;
   private level: LevelDef | null = null;
+  private cues: WorldCues | null = null;
   /** Positional sounds of the site (soundscape.ts): engines, hums, steam, a PA. */
   soundscape: SoundscapeRunner | null = null;
   private indoors = false;
@@ -247,7 +249,7 @@ export class FpsAudio {
       this.applySpace();
       // the sounds of the site, on the Environment channel
       this.soundscape = new SoundscapeRunner(ctx, this.envBus, (s) => this.noise(s), (key, pri, ms) => this.allow(key, 'environment', pri, ms));
-      this.soundscape.setLevel(this.level);
+      this.soundscape.setLevel(this.level, this.scapeState());
       this.applyMix();
       // The score only runs while it can be heard: a muted music slider costs nothing.
       this.syncMusic();
@@ -298,13 +300,19 @@ export class FpsAudio {
   }
 
   /** The level being played: indoor and outdoor acoustics, and the sounds of the site. Null (training, endless) is all outdoors and silent of emitters. */
-  setLevel(level: LevelDef | null): void {
+  /** What the economy says is running at the site: idle lines are silent, a landing delivery runs the engines louder. */
+  private scapeState() {
+    return this.level ? { idle: idleProps(this.level, this.cues), delivering: isDelivering(this.cues) } : {};
+  }
+
+  setLevel(level: LevelDef | null, cues: WorldCues | null = null): void {
     this.level = level;
+    this.cues = cues;
     this.roofs = level ? level.art : null;
     const inside = isIndoors(this.roofs, this.lx, this.lz, 0.8);
     if (inside !== this.indoors) this.indoors = inside;
     this.applySpace();
-    this.soundscape?.setLevel(level);
+    this.soundscape?.setLevel(level, this.scapeState());
   }
 
   /** Fade the reverb to the space the listener is in. */

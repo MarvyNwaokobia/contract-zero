@@ -22,10 +22,18 @@ function Level() {
   const kind = (q.get('kind') ?? 'raid') as OpKind;
   const gun = (q.get('gun') ?? 'assault_rifle') as GunId;
   const site = PRACTICE_SITES.find((s) => s.id === siteId) ?? PRACTICE_SITES[0];
+  // Dev only: ?linesDown=fuel,ammo and ?delivering=1 stand in for what the server would send (cues).
+  const linesParam = q.get('linesDown') ?? '';
+  const delivering = q.get('delivering') === '1';
   const mission = useMemo(() => buildOperationMission({
     id: `dev-${site.id}-${seed}`, kind, issuer: 'Vex Exchange', target: 'vanguard', cargo: { resource: 'ammo', units: 60 },
     defense, seed, site, conditions: conditionsFor(phase),
-  }, gun), [site, defense, seed, kind, phase, gun]);
+    cues: linesParam || delivering ? {
+      tick: 0,
+      lines_down: linesParam.split(',').filter((r): r is 'ammo' | 'med' | 'fuel' => r === 'ammo' || r === 'med' || r === 'fuel').map((resource) => ({ resource, line: `${resource} line`, until: 60 })),
+      deliveries: delivering ? [{ resource: 'fuel', units: 60, arrives_at: 0, state: 'arriving' }] : [],
+    } : undefined,
+  }, gun), [site, defense, seed, kind, phase, gun, linesParam, delivering]);
   return (
     <div style={{ position: 'fixed', inset: 0 }}>
       <ContractZeroScene contract={{ mission, onExtracted: () => {}, onKilled: () => {} }} />

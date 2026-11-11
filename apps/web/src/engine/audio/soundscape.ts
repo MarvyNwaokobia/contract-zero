@@ -9,6 +9,7 @@
 // turns it into WebAudio is `SoundscapeRunner` below.
 
 import type { Art, Box, LevelDef } from '../fps/levels'
+import type { IdleProps } from '../fps/lineProps'
 import { isIndoors } from './acoustics'
 import { spatialize } from './spatial'
 
@@ -16,7 +17,11 @@ export type EmitterKind =
   | 'engine' | 'server' | 'lamp' | 'stack' | 'pump' | 'tank'       // continuous: held while you are near
   | 'steam' | 'camera' | 'radar' | 'clank' | 'chime' | 'boom'     // periodic: a one-shot every so often
 
-export interface Emitter { id: string; kind: EmitterKind; x: number; z: number }
+export interface Emitter {
+  id: string; kind: EmitterKind; x: number; z: number
+  /** Loudness multiplier (default 1): a truck unloading a delivery runs louder. */
+  boost?: number
+}
 
 export interface EmitterSpec {
   continuous: boolean
@@ -51,17 +56,25 @@ const ART_KIND: Partial<Record<Art['kind'], EmitterKind>> = { lamp: 'lamp', ligh
 /** At most this many of one kind, so a level with many lamps does not become a field of hums. */
 const CAP_PER_KIND = 6
 
-/** What a level sounds like, from what is in it. */
-export function emittersFor(level: LevelDef): Emitter[] {
+export interface SoundscapeState {
+  /** Props whose line is down make no sound. */
+  idle?: Pick<IdleProps, 'art' | 'boxes'>
+  /** A delivery is landing: the engines run louder. */
+  delivering?: boolean
+}
+
+/** What a level sounds like, from what is in it, and what the economy says is running. */
+export function emittersFor(level: LevelDef, state: SoundscapeState = {}): Emitter[] {
   const out: Emitter[] = []
   const count: Partial<Record<EmitterKind, number>> = {}
   const add = (kind: EmitterKind, x: number, z: number) => {
     if ((count[kind] ?? 0) >= CAP_PER_KIND) return
     count[kind] = (count[kind] ?? 0) + 1
-    out.push({ id: `${kind}-${count[kind]}`, kind, x, z })
+    out.push({ id: `${kind}-${count[kind]}`, kind, x, z, ...(kind === 'engine' && state.delivering ? { boost: 1.6 } : {}) })
   }
-  for (const b of [...level.walls, ...level.cover]) { const k = BOX_KIND[b.kind]; if (k) add(k, b.x, b.z) }
-  for (const a of level.art) { const k = ART_KIND[a.kind]; if (k) add(k, a.x, a.z) }
+  // A line that is down makes no sound: its emitters are simply not made (the ones still running are numbered afresh).
+  for (const b of [...level.walls, ...level.cover]) { const k = BOX_KIND[b.kind]; if (k && !state.idle?.boxes.has(b)) add(k, b.x, b.z) }
+  for (const a of level.art) { const k = ART_KIND[a.kind]; if (k && !state.idle?.art.has(a)) add(k, a.x, a.z) }
   // Site-wide events that do not come from one object:
   const b = level.bounds
   const cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2
@@ -124,7 +137,7 @@ export function mixFor(level: LevelDef, e: Emitter, lx: number, lz: number, yaw:
   // fade to nothing at the edge of its range so voices never pop in or out
   const edge = d >= range ? 0 : Math.min(1, (range - d) / (range * 0.25))
   const occ = occlusion(level, lx, lz, e.x, e.z)
-  return { gain: SPEC[e.kind].gain * sp.gain * occ.gain * edge, pan: sp.pan, lowpass: Math.min(sp.lowpass, occ.lowpass), blocked: occ.blocked }
+  return { gain: SPEC[e.kind].gain * (e.boost ?? 1) * sp.gain * occ.gain * edge, pan: sp.pan, lowpass: Math.min(sp.lowpass, occ.lowpass), blocked: occ.blocked }
 }
 
 /** When the next one-shot of a periodic kind is due, given a uniform random in [0,1). */

@@ -46,6 +46,9 @@ export interface GuardPlan {
 
 export type OpKind = 'raid' | 'sabotage' | 'recovery';
 
+import type { WorldCues } from './lineProps';
+export type { WorldCues } from './lineProps';
+
 export interface ConvoyContract {
   /** What the operation is (default raid). */
   kind?: OpKind;
@@ -71,6 +74,8 @@ export interface ConvoyContract {
   conditions?: SiteConditions;
   /** The physical objects (the server's `field_manifest`). Absent: built locally. */
   field?: FieldManifest;
+  /** What the site's economy is doing when the mission starts: lines down, deliveries landing. Absent: nothing is shown. */
+  cues?: WorldCues;
 }
 
 export interface SiteRef {
@@ -226,6 +231,7 @@ function shell(c: ConvoyContract, st: Setting, gun: GunId, kind: OpKind) {
   return {
     zone: st.theme,
     level: st.lv.id,
+    cues: c.cues,
     gun,
     start: st.lv.start,
     walls: [...st.lv.walls],

@@ -381,3 +381,17 @@ describe('no room tone off a site', () => {
     expect(gain(a.ambBus).value).toBe(0)
   })
 })
+
+describe('the audio engine follows the economy\u2019s cues', () => {
+  it('a mission started with a line down has no sound from that line; clearing it brings it back', () => {
+    const cinder = LEVELS.cinder_yard
+    const down: import('../../fps/lineProps').WorldCues = { tick: 1, lines_down: [{ resource: 'fuel', line: 'fractionation unit', until: 50 }], deliveries: [] }
+    audio.setLevel(cinder, down)
+    const kinds = () => new Set(audio.soundscape!.list.map((e) => e.kind))
+    expect(kinds().has('pump')).toBe(false)
+    expect(kinds().has('stack')).toBe(false)
+    audio.setLevel(cinder, null)
+    expect(kinds().has('pump')).toBe(true)
+    expect(kinds().has('stack')).toBe(true)
+  })
+})

@@ -13,6 +13,7 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { Art, Box, LevelDef } from '../fps/levels';
 import { usePbr } from './usePbr';
+import { idleProps, isDelivering, type WorldCues } from '../fps/lineProps';
 
 const HANGAR = '/textures/hangar';
 
@@ -141,12 +142,13 @@ function Blinker({ x, y, z, color }: { x: number; y: number; z: number; color: s
 }
 
 /** A refinery flare stack: a tall steel stack and a flame that never quite settles. */
-function FlareStack({ x, z, h, calm = false }: { x: number; z: number; h: number; calm?: boolean }) {
+function FlareStack({ x, z, h, calm = false, out = false }: { x: number; z: number; h: number; calm?: boolean; /** The line it burns for is down: no flame, no glow. */ out?: boolean }) {
   const flame = useRef<THREE.Mesh>(null);
   const light = useRef<THREE.PointLight>(null);
   useFrame((st) => {
     const t = st.clock.elapsedTime;
     const k = calm ? 1 : 1 + Math.sin(t * 9) * 0.12 + Math.sin(t * 23) * 0.06;
+    if (out) { if (flame.current) flame.current.visible = false; if (light.current) light.current.intensity = 0; return; }
     if (flame.current) { flame.current.scale.set(k, 1.2 * k + Math.sin(t * 5) * 0.15, k); flame.current.rotation.y = t * 0.8; }
     if (light.current) light.current.intensity = 34 * k;
   });
@@ -191,7 +193,36 @@ function Steam({ x, z, minimal }: { x: number; z: number; minimal: boolean }) {
   );
 }
 
-export function LevelArt({ level, minimal = false, lit = true, night: nightProp, calm = false }: { level: LevelDef; minimal?: boolean; lit?: boolean; night?: boolean; calm?: boolean }) {
+/** Where a production line is down: a hazard board on a post and a slow red lamp, so a ruined line reads as ruined. */
+function OfflineMarker({ x, z }: { x: number; z: number }) {
+  const lamp = useRef<THREE.MeshBasicMaterial>(null);
+  useFrame((st) => { if (lamp.current) lamp.current.opacity = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(st.clock.elapsedTime * 2.2)); });
+  return (
+    <group position={[x, 0, z]} data-offline-marker>
+      <mesh position={[0, 1.2, 0]} castShadow><cylinderGeometry args={[0.06, 0.06, 2.4, 8]} /><meshStandardMaterial color="#3a3d41" metalness={0.6} roughness={0.5} /></mesh>
+      <mesh position={[0, 2.0, 0.06]}><boxGeometry args={[1.5, 0.9, 0.08]} /><meshStandardMaterial color="#d9d4c6" roughness={0.8} /></mesh>
+      {[-0.55, -0.18, 0.18, 0.55].map((px) => <mesh key={px} position={[px, 2.0, 0.11]} rotation={[0, 0, -0.6]}><boxGeometry args={[0.16, 1.0, 0.03]} /><meshStandardMaterial color="#c4361f" /></mesh>)}
+      <mesh position={[0, 2.7, 0]}><sphereGeometry args={[0.16, 10, 8]} /><meshBasicMaterial ref={lamp} color="#ff3b30" transparent opacity={0.9} /></mesh>
+    </group>
+  );
+}
+
+/** A truck that is unloading a delivery that has really arrived: a slow amber beacon on its roof. */
+function DeliveryBeacon({ x, z, y }: { x: number; z: number; y: number }) {
+  const m = useRef<THREE.MeshBasicMaterial>(null);
+  useFrame((st) => { if (m.current) m.current.opacity = 0.25 + 0.75 * Math.max(0, Math.sin(st.clock.elapsedTime * 4.5)); });
+  return (
+    <group position={[x, y, z]} data-delivery-beacon>
+      <mesh><cylinderGeometry args={[0.14, 0.18, 0.18, 10]} /><meshStandardMaterial color="#2b2d30" /></mesh>
+      <mesh position={[0, 0.16, 0]}><sphereGeometry args={[0.16, 10, 8]} /><meshBasicMaterial ref={m} color="#ffb020" transparent opacity={0.9} /></mesh>
+    </group>
+  );
+}
+
+export function LevelArt({ level, minimal = false, lit = true, night: nightProp, calm = false, cues }: { level: LevelDef; minimal?: boolean; lit?: boolean; night?: boolean; calm?: boolean; /** What the site's economy is doing (lines down, deliveries). */ cues?: WorldCues | null }) {
+  // What the economy says is down or arriving: shown, never invented.
+  const idle = useMemo(() => idleProps(level, cues), [level, cues]);
+  const delivering = isDelivering(cues);
   // Night look (glowing windows, cool lamps) follows the hour, not the map.
   const night = nightProp ?? level.id === 'blacksite';
   const corrugated = usePbr('corrugated_iron_02', [1, 1], HANGAR);
@@ -422,8 +453,10 @@ export function LevelArt({ level, minimal = false, lit = true, night: nightProp,
         : <Instanced key={k} items={items} material={(mats as Record<string, THREE.Material>)[k] ?? mats.concrete} cast={cast && !NO_SHADOW.includes(k)} />,
       )}
       {beacons.map((b, i) => <Blinker key={i} x={b.x} y={b.h ?? 5} z={b.z} color={b.color ?? '#ff3b30'} />)}
-      {level.art.filter((a) => a.kind === 'stack').map((a, i) => <FlareStack key={`stack${i}`} x={a.x} z={a.z} h={a.h ?? 20} calm={calm} />)}
-      {level.art.filter((a) => a.kind === 'steam').map((a, i) => <Steam key={`steam${i}`} x={a.x} z={a.z} minimal={minimal} />)}
+      {level.art.filter((a) => a.kind === 'stack').map((a, i) => <FlareStack key={`stack${i}`} x={a.x} z={a.z} h={a.h ?? 20} calm={calm} out={idle.art.has(a)} />)}
+      {level.art.filter((a) => a.kind === 'steam' && !idle.art.has(a)).map((a, i) => <Steam key={`steam${i}`} x={a.x} z={a.z} minimal={minimal} />)}
+      {idle.lines.map((l) => <OfflineMarker key={`${l.resource}-${l.line}`} x={l.anchor[0]} z={l.anchor[1]} />)}
+      {delivering && [...level.walls, ...level.cover].filter((b) => b.kind === 'truck' && !idle.boxes.has(b)).map((b, i) => <DeliveryBeacon key={`dlv${i}`} x={b.x} z={b.z} y={(b.h ?? 2.6) + 0.1} />)}
       {floods.map((f, i) => (
         <group key={i}>
           <mesh position={[f.x, f.h ?? 7.4, f.z]}><boxGeometry args={[0.7, 0.5, 0.5]} /><primitive object={mats.lampHead} attach="material" /></mesh>

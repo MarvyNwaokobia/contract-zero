@@ -25,6 +25,7 @@ import { STARTER_GUN_ID, getGun, type GunId } from '../combat/GunStats';
 import type { AmmoId, AttachmentId, AttachmentSlot } from '../combat/Loadout';
 import { ambienceKey, type FpsAudio } from '../audio';
 import { acquireAudio, releaseAudio } from '../audio/shared';
+import { worldClock } from '../fps/lineProps';
 import { computeEdgeArrow } from '../verb/threatArrow';
 import { useGunPrototypes, ALL_GUN_IDS, GUN_LENGTH } from './gunModels';
 import { OperatorRig, type OperatorApi } from './OperatorRig';
@@ -1467,7 +1468,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
   // remounts per op, so this fires whenever the zone changes).
   useEffect(() => { audio.setZone(ambienceKey(mission.zone, mission.level)); }, [audio, mission.zone, mission.level]);
   // The level's roofs: indoors and outdoors sound different (reverb follows the listener).
-  useEffect(() => { audio.setLevel(LEVEL); return () => audio.setLevel(null); }, [audio, LEVEL]);
+  useEffect(() => { audio.setLevel(LEVEL, mission.cues ?? null); return () => audio.setLevel(null); }, [audio, LEVEL, mission.cues]);
   // The refinery runs while you fight in it.
   useEffect(() => { audio.setMachinery(mission.level === 'cinder_yard'); return () => audio.setMachinery(false); }, [audio, mission.level]);
 
@@ -2866,6 +2867,18 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
     fieldToast.current = { text, color, until: performance.now() + 2600 };
   }
 
+  // What the site's economy is doing, said once at the start: a line that is down, a delivery landing.
+  useEffect(() => {
+    const cues = mission.cues;
+    if (!cues) return;
+    const msgs = [
+      ...cues.lines_down.map((l) => `${l.line.toUpperCase()} IS DOWN · BACK ${worldClock(l.until)}`),
+      ...(cues.deliveries.length ? ['A SHIPMENT IS LANDING HERE'] : []),
+    ];
+    const timers = msgs.map((m, i) => setTimeout(() => toast(m, '#ff8a5a'), 2500 + i * 3200));
+    return () => timers.forEach(clearTimeout);
+  }, [mission.cues]);
+
   /** Nothing solid between two points (walls, crates, vehicles). */
   function losClear(a: [number, number, number], b: [number, number, number]): boolean {
     const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
@@ -3701,7 +3714,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
           off the FRONT of this list, which shifts every later index and would make
           React re-render every wall in the world on each room advance — a hitch per
           doorway. Keyed this way, the walls that didn't change keep their identity. */}
-      {LEVEL && <LevelArt level={LEVEL} minimal={minimal} lit={mission.zone !== 'DUSTLINE'} night={mission.conditions ? mission.conditions.phase === 'night' : undefined} calm={settingsRef?.current.access.reduceFlashes} />}
+      {LEVEL && <LevelArt level={LEVEL} cues={mission.cues} minimal={minimal} lit={mission.zone !== 'DUSTLINE'} night={mission.conditions ? mission.conditions.phase === 'night' : undefined} calm={settingsRef?.current.access.reduceFlashes} />}
       {!LEVEL && LEVEL_WALLS.map((c, i) => (
         <group key={`w${c.x}_${c.z}_${c.w}_${c.d}`}>
           {/* Every wall SHARES one unit cube and is scaled to size. Authoring a fresh

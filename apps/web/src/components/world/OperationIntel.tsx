@@ -12,6 +12,7 @@ import { SiteMap } from './SiteMap'
 import { useSettings } from '@/lib/settings'
 import { HowToPlayButton } from '@/components/help/HowToPlay'
 import { bindLabel } from '@/lib/keybinds'
+import { worldClock } from '@/engine/fps/lineProps'
 
 const PHASE_LABEL = { day: 'Day', dusk: 'Dusk', night: 'Night' } as const
 
@@ -59,6 +60,16 @@ export function OperationIntel({ contract, kind, reward, practice = false, targe
             <div>{cond.nvg ? 'Night vision issued (N)' : 'No night vision needed'}{cond.reinforce_bp !== 10_000 && ` · relief ${cond.reinforce_bp < 10_000 ? 'faster' : 'slower'} than usual`}</div>
           </div>
         </section>
+
+        {contract.cues && (contract.cues.lines_down.length > 0 || contract.cues.deliveries.length > 0) && (
+          <section className="cz-panel p-4" data-testid="intel-site-status">
+            <div className="cz-label !text-[10px]">Site status</div>
+            <ul className="mt-1 grid gap-0.5 text-sm">
+              {contract.cues.lines_down.map((l) => <li key={l.line} className="text-hostile">The {l.line} is down until {worldClock(l.until)}: its machinery is idle and its sounds are silent.</li>)}
+              {contract.cues.deliveries.length > 0 && <li className="text-steel">A shipment is {contract.cues.deliveries[0].state === 'arrived' ? 'just in' : 'landing'}: trucks are unloading in the yard.</li>}
+            </ul>
+          </section>
+        )}
 
         <section className="cz-panel p-4">
           <div className="cz-label !text-[10px]">Objectives</div>

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { emittersFor, MAX_CONTINUOUS, mixFor, nearestContinuous, nextDelay, occlusion, segmentHitsBox, SPEC, type EmitterKind } from '../soundscape'
 import { LEVELS } from '../../fps/levels'
+import { idleProps, type WorldCues } from '../../fps/lineProps'
 
 const kinds = (id: keyof typeof LEVELS) => new Set(emittersFor(LEVELS[id]).map((e) => e.kind))
 
@@ -117,5 +118,36 @@ describe('fading and scheduling', () => {
   })
   it('a bed is quiet: no emitter is louder at the source than a combat sound', () => {
     for (const s of Object.values(SPEC)) expect(s.gain).toBeLessThanOrEqual(0.6)
+  })
+})
+
+describe('the economy changes what a site sounds like', () => {
+  const fuelDown: WorldCues = { tick: 1, lines_down: [{ resource: 'fuel', line: 'fractionation unit', until: 50 }], deliveries: [] }
+  const cinder = LEVELS.cinder_yard
+  const kindsOf = (es: { kind: string }[]) => new Set(es.map((e) => e.kind))
+
+  it('a line that is down goes silent: no pumps, steam vents or stack roar', () => {
+    const running = emittersFor(cinder)
+    const down = emittersFor(cinder, { idle: idleProps(cinder, fuelDown) })
+    for (const k of ['pump', 'steam', 'stack']) { expect(kindsOf(running).has(k), k).toBe(true); expect(kindsOf(down).has(k), k).toBe(false) }
+    // what is not part of that line keeps running
+    for (const k of ['tank', 'lamp', 'clank']) expect(kindsOf(down).has(k), k).toBe(true)
+  })
+  it('with no cues a site sounds exactly as it always did', () => {
+    expect(emittersFor(cinder, { idle: idleProps(cinder, null) })).toEqual(emittersFor(cinder))
+    expect(emittersFor(cinder, { delivering: false })).toEqual(emittersFor(cinder))
+  })
+  it('a landing delivery runs the engines louder, and only the engines', () => {
+    const l = LEVELS.dustline_depot
+    const quiet = emittersFor(l), busy = emittersFor(l, { delivering: true })
+    expect(busy.filter((e) => e.kind === 'engine').every((e) => (e.boost ?? 1) > 1)).toBe(true)
+    expect(busy.filter((e) => e.kind !== 'engine').every((e) => e.boost === undefined)).toBe(true)
+    const e = busy.find((x) => x.kind === 'engine')!, q = quiet.find((x) => x.kind === 'engine')!
+    expect(mixFor(l, e, e.x + 1, e.z, 0).gain).toBeGreaterThan(mixFor(l, q, q.x + 1, q.z, 0).gain)
+  })
+  it('an idle truck is silent even while a delivery is landing (it is not running)', () => {
+    const l = LEVELS.dustline_depot
+    const idle = idleProps(l, { tick: 1, lines_down: [{ resource: 'fuel', line: 'fuel depot', until: 9 }], deliveries: [] })
+    expect(emittersFor(l, { idle, delivering: true }).some((e) => e.kind === 'engine')).toBe(false)
   })
 })

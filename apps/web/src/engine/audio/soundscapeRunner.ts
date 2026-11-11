@@ -4,7 +4,7 @@
 
 import type { LevelDef } from '../fps/levels'
 import { propagationDelay } from './combat'
-import { emittersFor, mixFor, nearestContinuous, nextDelay, SPEC, type Emitter, type EmitterKind } from './soundscape'
+import { emittersFor, mixFor, nearestContinuous, nextDelay, SPEC, type Emitter, type EmitterKind, type SoundscapeState } from './soundscape'
 
 type Dest = AudioNode
 interface Voice { stop: () => void; gain: GainNode; pan: StereoPannerNode; lp: BiquadFilterNode; dying?: boolean }
@@ -143,10 +143,10 @@ export class SoundscapeRunner {
   /** Continuous voices held right now. */
   activeCount(): number { return [...this.voices.values()].filter((v) => !v.dying).length }
 
-  setLevel(level: LevelDef | null): void {
+  setLevel(level: LevelDef | null, state: SoundscapeState = {}): void {
     for (const id of [...this.voices.keys()]) this.release(id, 0.05)
     this.level = level
-    this.emitters = level ? emittersFor(level) : []
+    this.emitters = level ? emittersFor(level, state) : []
     this.nextAt.clear()
     for (const k of new Set(this.emitters.filter((e) => !SPEC[e.kind].continuous).map((e) => e.kind))) this.nextAt.set(k, this.ctx.currentTime + nextDelay(k, Math.random()))
   }

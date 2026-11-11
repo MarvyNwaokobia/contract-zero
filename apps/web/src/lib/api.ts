@@ -95,6 +95,8 @@ export interface WorldView {
   zone: string;
   clock?: WorldClock;
   sites?: SiteStatus[];
+  /** Recent raids and operations, newest first; `status.state === 'active'` means a player is deployed. */
+  raids?: { id: number; player: string; started_at: number; plan: { target: string; kind: OpKind; resource: ResourceName; site: string }; status: { state: 'active' | 'extracted' | 'failed' } }[];
   actors: ActorView[];
   market: { insolvent: boolean; strategy: { margin_bp: number; spread_bp: number } };
   prices: PriceView[];
@@ -276,7 +278,7 @@ export interface WarActor {
   grudges: { player: string; raids: number; sabotage: number; recoveries: number; units_lost: number; last_tick: number }[]
   rivals: { sponsor: string; sponsor_name: string; bounties_paid: number; last_tick: number | null }[]
 }
-export interface WarConvoy { id: number; owner: string; owner_name: string; resource: ResourceName; units: number; defense: number; dispatched_at: number; arrives_at: number; progress: number; status: { state: string; by?: string } }
+export interface WarConvoy { id: number; owner: string; owner_name: string; resource: ResourceName; units: number; defense: number; dispatched_at: number; arrives_at: number; progress: number; status: import('@/lib/world/convoy').ConvoyStatus }
 export interface WarContract { id: number; kind: OpKind; sponsor: string; sponsor_name: string; target: string; target_name: string; resource: ResourceName; amount: number; expires_at: number }
 export interface WarPrice { resource: ResourceName; ask: number; bid: number; mid: number; stock: number; target: number }
 export interface WarRoomView {

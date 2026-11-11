@@ -12,78 +12,15 @@ import { Panel, Shell, Stat } from '@/components/ui/Shell'
 import { Procurement } from '@/components/market/Procurement'
 import { inboundFor, MerchantSummary, ReadinessSummary } from '@/components/world/Readiness'
 import { Operations } from '@/components/world/Operations'
+import { WarTableSection } from '@/components/world/table/WarTableSection'
 import { TradingPartners, useMarket } from '@/components/market/SupplyOrders'
-import { api, RESOURCE_LABEL, type CausalChain, type MarketMerchant, type MarketOrder, type ChainTx, type ResourceName, type SimulationView, type WarActor, type WarConvoy, type WarContract, type WarRoomView } from '@/lib/api'
+import { api, RESOURCE_LABEL, type CausalChain, type MarketMerchant, type MarketOrder, type ChainTx, type ResourceName, type SimulationView, type WarActor, type WarRoomView } from '@/lib/api'
 
 const RES: ResourceName[] = ['ammo', 'med', 'fuel']
 const RES_COLOR: Record<ResourceName, string> = { ammo: 'var(--color-amber)', med: 'var(--color-friendly)', fuel: 'var(--color-steel)' }
 const ACTOR_COLOR: Record<string, string> = { vanguard: 'var(--color-steel)', ashen: 'var(--color-hostile)', vex: 'var(--color-amber)' }
 const color = (id: string) => ACTOR_COLOR[id] ?? 'var(--color-muted)'
 const clock = (tick: number) => `D${Math.floor(tick / 24)} ${String(tick % 24).padStart(2, '0')}:00`
-
-// ── regional map ──
-
-const SITES: Record<string, { x: number; y: number; label: string; sub: string }> = {
-  vanguard: { x: 150, y: 210, label: 'Dustline Depot', sub: 'Vanguard' },
-  ashen: { x: 610, y: 90, label: 'Ashen Refinery', sub: 'Ashen Compact' },
-  vex: { x: 420, y: 230, label: 'Vex Exchange', sub: 'Merchant' },
-  blacksite: { x: 230, y: 70, label: 'Blacksite', sub: 'Vanguard, night ops' },
-  outside: { x: 700, y: 300, label: 'Outer markets', sub: 'imports / exports' },
-}
-const ROUTES: [string, string][] = [['vanguard', 'vex'], ['ashen', 'vex'], ['outside', 'vex'], ['vanguard', 'blacksite']]
-
-function routeFor(c: WarConvoy): [string, string] {
-  // Merchant caravans come in from outside; a faction's shipments come home to its depot.
-  return c.owner === 'vex' ? ['outside', 'vex'] : ['vex', c.owner in SITES ? c.owner : 'vanguard']
-}
-
-function RegionMap({ v }: { v: WarRoomView }) {
-  const actors = Object.fromEntries(v.world.actors.map((a) => [a.id, a]))
-  const targeted = new Map<string, WarContract[]>()
-  for (const c of v.world.contracts) targeted.set(c.target, [...(targeted.get(c.target) ?? []), c])
-  return (
-    <svg viewBox="0 0 760 330" className="h-auto w-full" role="img" aria-label="Regional map: depots, the exchange, supply routes and convoys">
-      <defs>
-        <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="var(--color-line)" strokeWidth="0.6" /></pattern>
-      </defs>
-      <rect width="760" height="330" fill="url(#grid)" opacity="0.6" />
-      {ROUTES.map(([a, b]) => (
-        <line key={a + b} x1={SITES[a].x} y1={SITES[a].y} x2={SITES[b].x} y2={SITES[b].y} stroke="var(--color-line-strong)" strokeWidth="2" strokeDasharray="6 6" />
-      ))}
-      {v.world.convoys.filter((c) => c.status.state === 'in_transit' || c.status.state === 'seized').map((c) => {
-        const [from, to] = routeFor(c)
-        const p = c.progress
-        const x = SITES[from].x + (SITES[to].x - SITES[from].x) * p
-        const y = SITES[from].y + (SITES[to].y - SITES[from].y) * p
-        const seized = c.status.state === 'seized'
-        return (
-          <g key={c.id}>
-            <circle cx={x} cy={y} r={seized ? 9 : 7} fill={seized ? 'var(--color-hostile)' : RES_COLOR[c.resource]} stroke="var(--color-ink)" strokeWidth="2">
-              <title>{`${c.owner_name} caravan #${c.id}: ${c.units} ${c.resource}, escort ${c.defense}${seized ? ` (seized by ${c.status.by})` : `, arrives ${clock(c.arrives_at)}`}`}</title>
-            </circle>
-            <text x={x} y={y - 12} textAnchor="middle" className="fill-fog font-display text-[11px] font-semibold">{c.units} {c.resource}{seized ? ' · SEIZED' : ''}</text>
-          </g>
-        )
-      })}
-      {Object.entries(SITES).map(([id, s]) => {
-        const a = actors[id === 'blacksite' ? '' : id]
-        const hits = targeted.get(id) ?? []
-        const down = a?.disrupted ?? []
-        return (
-          <g key={id}>
-            <rect x={s.x - 9} y={s.y - 9} width="18" height="18" transform={`rotate(45 ${s.x} ${s.y})`} fill="var(--color-panel-2)" stroke={id in ACTOR_COLOR ? color(id) : 'var(--color-dim)'} strokeWidth="2.5" />
-            {hits.length > 0 && <circle cx={s.x} cy={s.y} r="20" fill="none" stroke="var(--color-hostile)" strokeWidth="1.5" strokeDasharray="3 3"><title>{hits.map((h) => `${h.kind} contract: ${h.amount} cr from ${h.sponsor_name}`).join('\n')}</title></circle>}
-            <text x={s.x} y={s.y + 30} textAnchor="middle" className="fill-fog font-display text-[13px] font-bold uppercase tracking-wider">{s.label}</text>
-            <text x={s.x} y={s.y + 44} textAnchor="middle" className="fill-muted text-[11px]">
-              {s.sub}{a && a.kind === 'faction' ? ` · defense ${a.defense}` : ''}{hits.length ? ` · ${hits.length} contract${hits.length > 1 ? 's' : ''}` : ''}
-            </text>
-            {down.map((d, i) => <text key={d.resource} x={s.x} y={s.y + 58 + i * 13} textAnchor="middle" className="fill-hostile text-[11px] font-semibold">{d.resource} line down until {clock(d.until)}</text>)}
-          </g>
-        )
-      })}
-    </svg>
-  )
-}
 
 // ── charts ──
 
@@ -345,10 +282,9 @@ export default function WarRoom() {
             {d.world.merchant_insolvent && <span className="text-hostile">Vex is out of credits</span>}
           </div>
 
+          <WarTableSection war={d} market={market.data} />
+
           <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
-            <Panel title="Region">
-              <RegionMap v={d} />
-            </Panel>
             <Panel title="Vex Exchange prices">
               <div className="grid gap-3">
                 {d.world.prices.map((p) => (

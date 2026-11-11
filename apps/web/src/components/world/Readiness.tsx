@@ -5,6 +5,7 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { api, type MarketMerchant, type WarActor, type MarketOrder, type WarConvoy } from '@/lib/api'
+import { convoyState } from '@/lib/world/convoy'
 import { describeMerchant, MERCHANT_LABEL, type MerchantState } from '@/lib/presenter/merchant'
 import { describeFaction, READINESS_LABEL, type Inbound, type Readiness, type Severity } from '@/lib/presenter/economy'
 
@@ -21,7 +22,7 @@ const SEV_WORD: Record<Severity, string> = { ok: 'OK', warn: 'Warning', critical
 export function inboundFor(actor: string, orders: MarketOrder[] | undefined, convoys: WarConvoy[]): Inbound[] {
   const out: Inbound[] = []
   for (const o of orders ?? []) if (o.requester === actor && o.side === 'buy' && o.status.status === 'open') out.push({ resource: o.resource, kind: 'order' })
-  for (const c of convoys) if (c.owner === actor && c.status.state === 'in_transit') out.push({ resource: c.resource, kind: 'convoy' })
+  for (const c of convoys) if (c.owner === actor && convoyState(c.status).state === 'in_transit') out.push({ resource: c.resource, kind: 'convoy' })
   return out
 }
 

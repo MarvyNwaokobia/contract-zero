@@ -11,6 +11,8 @@ import { ADS_SENS_RANGE, FOV_RANGE, HUD_SCALE_RANGE, SENS_RANGE, updateSettings,
 const C = { accent: '#37d0e0', dim: '#6f7d8c', text: '#e9edf2', line: 'rgba(255,255,255,.08)' }
 type Tab = 'view' | 'audio' | 'controls' | 'comfort'
 
+const AUDIO_LABEL: Record<keyof AudioMix, string> = { master: 'MASTER', music: 'MUSIC', effects: 'COMBAT', voice: 'RADIO', ambience: 'ENVIRONMENT', interactions: 'INTERACTIONS', ui: 'INTERFACE' }
+
 export function PauseSettings({ s, onQuality, touch }: { s: Settings; onQuality: (q: Quality) => void; touch: boolean }) {
   const [tab, setTab] = useState<Tab>('view')
   const set = (f: (x: Settings) => Settings) => updateSettings(f)
@@ -46,8 +48,8 @@ export function PauseSettings({ s, onQuality, touch }: { s: Settings; onQuality:
           </Line>
           <Check label="FRAME-RATE READOUT" id="p-perf" v={s.interface.perfOverlay} on={(v) => set((x) => ({ ...x, interface: { ...x.interface, perfOverlay: v } }))} />
         </>}
-        {tab === 'audio' && (['master', 'music', 'effects', 'voice', 'ambience'] as (keyof AudioMix)[]).map((k) => (
-          <Range key={k} label={k === 'voice' ? 'VOICE / RADIO' : k.toUpperCase()} id={`p-vol-${k}`} v={s.audio[k]} min={0} max={1} step={0.05} fmt={pct} on={(v) => set((x) => ({ ...x, audio: { ...x.audio, [k]: v } }))} />
+        {tab === 'audio' && (['master', 'music', 'effects', 'voice', 'ambience', 'interactions', 'ui'] as (keyof AudioMix)[]).map((k) => (
+          <Range key={k} label={AUDIO_LABEL[k]} id={`p-vol-${k}`} v={s.audio[k]} min={0} max={1} step={0.05} fmt={pct} on={(v) => set((x) => ({ ...x, audio: { ...x.audio, [k]: v } }))} />
         ))}
         {tab === 'controls' && <>
           <Range label={touch ? 'AIM SPEED' : 'MOUSE SPEED'} id="p-sens" v={s.lookSens} min={SENS_RANGE[0]} max={SENS_RANGE[1]} step={0.05} fmt={(v) => `${v.toFixed(2)}×`} on={(v) => set((x) => ({ ...x, lookSens: v }))} />

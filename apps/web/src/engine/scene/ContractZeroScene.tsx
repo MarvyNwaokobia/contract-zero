@@ -1559,6 +1559,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
     };
     // audition any presence line (also lets us verify which ids have a recording)
     w.__czVo = (id: string, speaker: Speaker) => audio.vo(id, speaker);
+    w.__czAudio = audio; // probes: levels(), stats(), and driving sounds from a headless run
     w.__czSetXp = (n: number) => { careerXp.current = n; try { window.localStorage.setItem(XP_KEY, String(n)); } catch { /* ignore */ } };
     // headless: wound the live boss to a fraction of its health, to drive phases
     w.__czHurtBoss = (frac: number) => {
@@ -1602,7 +1603,7 @@ function FpsWorld({ hud, controls, audio, lowSpec, lightFx, minimal, mission, on
     return () => {
       delete w.__czState; delete w.__czKillAll; delete w.__czKillRoom; delete w.__czKillPlayer; delete w.__czAim; delete w.__czAudio;
       delete w.__czMission; delete w.__czEndless; delete w.__czWarp; delete w.__czSkipBriefing;
-      delete w.__czXp; delete w.__czSetXp; delete w.__czStory; delete w.__czVo; delete w.__czRig; delete w.__czPlayer; delete w.__czColliders; delete w.__czCam; delete w.__czStagger; delete w.__czHurtBoss; delete w.__czWakeRoom; delete w.__czSwitch; delete w.__czFire; delete w.__czToggle;
+      delete w.__czXp; delete w.__czSetXp; delete w.__czStory; delete w.__czVo; delete w.__czAudio; delete w.__czRig; delete w.__czPlayer; delete w.__czColliders; delete w.__czCam; delete w.__czStagger; delete w.__czHurtBoss; delete w.__czWakeRoom; delete w.__czSwitch; delete w.__czFire; delete w.__czToggle;
       delete w.__czRevive; delete w.__czResupply; delete w.__czWaveSkip; delete w.__czPerf; delete w.__czField; delete w.__czPath; delete w.__czRender; delete w.__czDrawStats;
     };
   }, [sim, audio]);
@@ -4378,6 +4379,9 @@ export function ContractZeroScene({ contract, onOpStart, onOpCleared, onOpFailed
   useEffect(() => { controls.current.lookSens = settings.lookSens; }, [settings.lookSens]);
   // The player's mix, and silence while the tab is in the background (if chosen).
   useEffect(() => { audio.setMix(settings.audio); }, [audio, settings.audio]);
+  // The pause menu stops the audio clock; closing it carries on. (Held by reason, so a key press
+  // while paused cannot restart it.)
+  useEffect(() => { if (paused) audio.suspend('pause'); else audio.resume('pause'); return () => audio.resume('pause'); }, [audio, paused]);
   useEffect(() => {
     const apply = () => audio.setBackgroundMuted(settingsRef.current.muteInBackground && document.hidden);
     apply();

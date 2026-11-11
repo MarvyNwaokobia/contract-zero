@@ -33,7 +33,8 @@ describe('settings', () => {
     const s = normalize(v2)
     expect(s.version).toBe(3)
     expect(s).toMatchObject({ quality: 'medium', fov: 70, muteInBackground: false, lookSens: 1.8 })
-    expect(s.audio).toEqual({ master: 0.5, music: DEFAULTS.audio.music, effects: 0.4, voice: 0.3, ambience: 0.2, ui: 0.1 })
+    // the Interactions channel did not exist in v2: it arrives at its default, everything saved is kept
+    expect(s.audio).toEqual({ master: 0.5, music: DEFAULTS.audio.music, effects: 0.4, voice: 0.3, ambience: 0.2, ui: 0.1, interactions: DEFAULTS.audio.interactions })
     expect(s.access).toMatchObject({ reduceMotion: true, reduceFlashes: true, toggleInteract: true, palette: 'standard' })
     expect(s.controls).toEqual(DEFAULTS.controls)
   })

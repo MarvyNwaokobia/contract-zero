@@ -2,6 +2,7 @@ import type { Speaker } from '../story/presence';
 import { spatialize } from './spatial';
 import type { GunShotAudio } from '../combat/GunFeel';
 import { MusicLayers } from './MusicLayers';
+import { VoiceBudget, type Channel } from './voices';
 import type { LevelId } from '../fps/levels';
 
 /**
@@ -90,8 +91,10 @@ export interface FpsAudioStats {
   zone: string;    // the ambience bed currently loaded
 }
 
-/** The player's volume mix, 0…1 per channel. */
-export interface Mix { master: number; music: number; effects: number; voice: number; ambience: number; ui: number }
+/** The player's volume mix, 0…1 per channel. `effects` is the Combat channel (its saved key predates
+ *  the split); `ambience` is Environment; `voice` is Radio and dialogue; `interactions` covers reloads,
+ *  pickups and footsteps. */
+export interface Mix { master: number; music: number; effects: number; voice: number; ambience: number; ui: number; interactions: number }
 
 export class FpsAudio {
   private ctx: Ctx | null = null;
@@ -100,10 +103,24 @@ export class FpsAudio {
   private gunBus!: GainNode;
   private impactBus!: GainNode;
   private uiBus!: GainNode;
+  /** Reloads, pickups, footsteps. */
+  private interactBus!: GainNode;
+  /** Ducking stages: a bus's level is its mix gain; a duck is a temporary dip on top, so the two never fight. */
+  private combatDuck!: GainNode;
+  private ambDuck!: GainNode;
+  private musicDuck!: GainNode;
+  private interactDuck!: GainNode;
+  private meters: Record<string, AnalyserNode> | null = null;
+  /** How many sounds may play at once, and which give way first (voices.ts). */
+  private budget = new VoiceBudget({
+    max: 28,
+    perChannel: { interactions: 6, ui: 6 },
+    cooldownMs: { impact: 28, 'enemy-shot': 45, footstep: 140, explosion: 250, hitmarker: 40, clack: 35, heartbeat: 400 },
+  });
   private ambBus!: GainNode;
   private ambBaseVol = 0.05;
   /** The player's mix (Settings → Audio) and whether the tab is in the background. */
-  private mix: Mix = { master: 0.9, music: 0.5, effects: 1, voice: 1, ambience: 0.8, ui: 0.8 };
+  private mix: Mix = { master: 0.9, music: 0.5, effects: 1, voice: 1, ambience: 0.8, ui: 0.8, interactions: 1 };
   /** The adaptive score (MusicLayers) on its own bus, under the music slider. */
   private musicBus!: GainNode;
   private music: MusicLayers | null = null;
@@ -174,7 +191,20 @@ export class FpsAudio {
       this.voiceBus = ctx.createGain();
       this.musicBus = ctx.createGain();
       this.musicBus.gain.value = 0;
-      for (const b of [this.gunBus, this.impactBus, this.uiBus, this.ambBus, this.voiceBus, this.musicBus]) b.connect(this.master);
+      this.interactBus = ctx.createGain();
+      this.combatDuck = ctx.createGain();
+      this.ambDuck = ctx.createGain();
+      this.musicDuck = ctx.createGain();
+      this.interactDuck = ctx.createGain();
+      // bus -> (duck stage) -> master. UI and radio are never ducked.
+      this.gunBus.connect(this.combatDuck);
+      this.impactBus.connect(this.combatDuck);
+      this.combatDuck.connect(this.master);
+      this.ambBus.connect(this.ambDuck); this.ambDuck.connect(this.master);
+      this.musicBus.connect(this.musicDuck); this.musicDuck.connect(this.master);
+      this.interactBus.connect(this.interactDuck); this.interactDuck.connect(this.master);
+      this.uiBus.connect(this.master);
+      this.voiceBus.connect(this.master);
       this.applyMix();
       // The score only runs while it can be heard: a muted music slider costs nothing.
       this.syncMusic();
@@ -183,7 +213,7 @@ export class FpsAudio {
       void this.loadSamples();
       this.stats_.unlocked = true;
     }
-    this.ctx?.resume?.().catch(() => {});
+    if (!this.isHeld()) this.ctx?.resume?.().catch(() => {});
   }
 
   private async loadSamples(): Promise<void> {
@@ -202,6 +232,11 @@ export class FpsAudio {
   }
 
   /** True once a user gesture has built the graph (autoplay is allowed). */
+  /** Ask the voice budget before building a sound. False means skip it. */
+  private allow(key: string, channel: Channel, priority: number, durationMs: number): boolean {
+    return this.budget.request({ key, channel, priority, durationMs }, typeof performance !== 'undefined' ? performance.now() : Date.now()).ok;
+  }
+
   isUnlocked(): boolean {
     return this.stats_.unlocked;
   }
@@ -212,8 +247,9 @@ export class FpsAudio {
     this.lyaw = yaw;
   }
 
-  stats(): FpsAudioStats & { mix: Mix; backgroundMuted: boolean; masterGain: number | null; music: { playing: boolean; level: number; gain: number | null } } {
+  stats(): FpsAudioStats & { mix: Mix; backgroundMuted: boolean; masterGain: number | null; music: { playing: boolean; level: number; gain: number | null }; voices: { granted: number; refused: Record<string, number> } } {
     return {
+      voices: { granted: this.budget.granted, refused: { ...this.budget.refused } },
       ...this.stats_, mix: { ...this.mix }, backgroundMuted: this.backgroundMuted, masterGain: this.master ? this.master.gain.value : null,
       music: { playing: !!this.music, level: this.musicLevel, gain: this.musicBus ? this.musicBus.gain.value : null },
     };
@@ -255,6 +291,7 @@ export class FpsAudio {
   // profile, so a pistol snaps, an SMG spits fast and thin, the marksman BOOMS,
   // and the legendary punches — all distinct, no extra downloads.
   shot(profile: GunShotAudio): void {
+    if (!this.allow('shot', 'combat', 100, 300)) return;
     const ctx = this.ctx;
     if (!ctx) return;
     if (this.rifle.length === 0) { this.synthShot(profile); return; } // ~1 frame until decoded
@@ -318,6 +355,7 @@ export class FpsAudio {
 
   // ── A round landing: spatialised at its world point (flesh vs wall) ──
   impact(kind: 'flesh' | 'wall', at: [number, number, number]): void {
+    if (!this.allow('impact', 'combat', 40, 400)) return;
     const ctx = this.ctx;
     if (!ctx) return;
     const sp = spatialize(this.lx, this.lz, this.lyaw, at[0], at[2]);
@@ -380,6 +418,7 @@ export class FpsAudio {
 
   /** Crisp, centred confirmation your shot connected (audio-first kill-confirm). */
   hitmarker(killed: boolean): void {
+    if (!this.allow('hitmarker', 'ui', 70, 120)) return;
     this.tick(killed ? 3400 : 2400, 0.12, 0);
     if (killed) this.tick(1600, 0.14, 0.05);
   }
@@ -387,7 +426,7 @@ export class FpsAudio {
   /** A meaty mechanical knock (mag/bolt) — noise through a low bandpass with body. */
   private clack(freq: number, vol: number, delay: number, dur = 0.08): void {
     const ctx = this.ctx;
-    if (!ctx) return;
+    if (!ctx || !this.allow('clack', 'interactions', 30, 200)) return;
     const now = ctx.currentTime + delay;
     const src = ctx.createBufferSource();
     src.buffer = this.noise(dur + 0.02);
@@ -398,14 +437,14 @@ export class FpsAudio {
     const g = ctx.createGain();
     g.gain.setValueAtTime(vol, now);
     g.gain.exponentialRampToValueAtTime(0.001, now + dur);
-    src.connect(bp).connect(g).connect(this.uiBus);
+    src.connect(bp).connect(g).connect(this.interactBus);
     src.start(now);
     src.stop(now + dur + 0.02);
   }
 
   /** Reload BEGIN: mag-release click, then the magazine sliding/dropping out. */
   reloadStart(): void {
-    this.tick(2200, 0.10, 0);          // release button
+    this.tick(2200, 0.10, 0, this.interactBus);         // release button
     this.clack(430, 0.15, 0.07, 0.10); // mag unseats
     this.clack(300, 0.11, 0.17, 0.13); // mag drops clear
     this.stats_.reloads++;
@@ -419,7 +458,7 @@ export class FpsAudio {
   }
 
   reloadEnd(): void {
-    this.tick(1200, 0.15, 0);
+    this.tick(1200, 0.15, 0, this.interactBus);
     const ctx = this.ctx;
     if (!ctx) return;
     const now = ctx.currentTime + 0.03;
@@ -429,7 +468,7 @@ export class FpsAudio {
     const g = ctx.createGain();
     g.gain.setValueAtTime(0.12, now);
     g.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
-    osc.connect(g).connect(this.uiBus);
+    osc.connect(g).connect(this.interactBus);
     osc.start(now);
     osc.stop(now + 0.1);
   }
@@ -442,6 +481,7 @@ export class FpsAudio {
 
   /** Extraction countdown pip; `hi` on the last seconds. */
   beep(hi = false): void {
+    if (!this.allow('beep', 'ui', 50, 120)) return;
     const ctx = this.ctx;
     if (!ctx) return;
     const now = ctx.currentTime;
@@ -458,6 +498,7 @@ export class FpsAudio {
 
   /** A demolition charge: a low boom with a long noisy tail, spatialised. */
   explosion(at: [number, number, number]): void {
+    if (!this.allow('explosion', 'combat', 80, 2500)) return;
     const ctx = this.ctx;
     if (!ctx) return;
     const sp = spatialize(this.lx, this.lz, this.lyaw, at[0], at[2]);
@@ -494,6 +535,7 @@ export class FpsAudio {
 
   /** A site alarm: a rising two-tone wail for a few seconds. */
   alarm(secs = 4): void {
+    if (!this.allow('alarm', 'combat', 70, 1000)) return;
     const ctx = this.ctx;
     if (!ctx) return;
     const now = ctx.currentTime;
@@ -512,14 +554,14 @@ export class FpsAudio {
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
     lp.frequency.value = 1800;
-    osc.connect(lp).connect(g).connect(this.uiBus);
+    osc.connect(lp).connect(g).connect(this.gunBus);
     osc.start(now);
     osc.stop(now + secs);
   }
 
   /** Dry hammer click on an empty magazine. */
   empty(): void {
-    this.tick(1500, 0.09, 0);
+    this.tick(1500, 0.09, 0, this.interactBus);
   }
 
   /**
@@ -533,7 +575,7 @@ export class FpsAudio {
     // never let a missing context swallow a line.
     if (this.ctx) {
       this.radioSignature(speaker);
-      this.duck(0.8, 1.8);
+      this.radioDuck(1.8);
     }
     // A contract's own lines are written per mission and never have a recording.
     if (id.startsWith('dyn-')) return;
@@ -621,6 +663,7 @@ export class FpsAudio {
 
   /** Own footstep — quiet, centred, low. Scene calls this on a cadence when moving. */
   footstep(vol = 0.09): void {
+    if (!this.allow('footstep', 'interactions', 20, 120)) return;
     const ctx = this.ctx;
     if (!ctx) return;
     const now = ctx.currentTime;
@@ -632,7 +675,7 @@ export class FpsAudio {
     const g = ctx.createGain();
     g.gain.setValueAtTime(vol, now);
     g.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
-    src.connect(lp).connect(g).connect(this.impactBus);
+    src.connect(lp).connect(g).connect(this.interactBus);
     src.start(now);
     src.stop(now + 0.08);
     this.stats_.footsteps++;
@@ -641,6 +684,7 @@ export class FpsAudio {
   /** An ENEMY's shot — the same real rifle crack, but spatialised from their
    *  position so you can hear where the fire is coming from (slice 3). */
   enemyShot(at: [number, number, number]): void {
+    if (!this.allow('enemy-shot', 'combat', 50, 500)) return;
     const ctx = this.ctx;
     if (!ctx || this.rifle.length === 0) return;
     const sp = spatialize(this.lx, this.lz, this.lyaw, at[0], at[2]);
@@ -664,6 +708,7 @@ export class FpsAudio {
 
   /** You got hit — a low body thud + a sharp sting, centred. */
   hurt(): void {
+    if (!this.allow('hurt', 'combat', 95, 250)) return;
     const ctx = this.ctx;
     if (!ctx) return;
     const now = ctx.currentTime;
@@ -674,7 +719,7 @@ export class FpsAudio {
     const g = ctx.createGain();
     g.gain.setValueAtTime(0.5, now);
     g.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
-    osc.connect(g).connect(this.uiBus);
+    osc.connect(g).connect(this.gunBus);
     osc.start(now);
     osc.stop(now + 0.22);
     const n = ctx.createBufferSource();
@@ -685,13 +730,14 @@ export class FpsAudio {
     const ng = ctx.createGain();
     ng.gain.setValueAtTime(0.3, now);
     ng.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
-    n.connect(hp).connect(ng).connect(this.uiBus);
+    n.connect(hp).connect(ng).connect(this.gunBus);
     n.start(now);
     n.stop(now + 0.09);
   }
 
   /** Low-HP heartbeat (lub-dub). The scene calls this on a cadence when hurt. */
   heartbeat(): void {
+    if (!this.allow('heartbeat', 'combat', 60, 450)) return;
     const ctx = this.ctx;
     if (!ctx) return;
     const now = ctx.currentTime;
@@ -704,7 +750,7 @@ export class FpsAudio {
       g.gain.setValueAtTime(0.0001, now + t);
       g.gain.exponentialRampToValueAtTime(vol, now + t + 0.02);
       g.gain.exponentialRampToValueAtTime(0.001, now + t + 0.16);
-      o.connect(g).connect(this.uiBus);
+      o.connect(g).connect(this.gunBus);
       o.start(now + t);
       o.stop(now + t + 0.2);
     };
@@ -763,6 +809,50 @@ export class FpsAudio {
   setBackgroundMuted(muted: boolean): void {
     this.backgroundMuted = muted;
     this.applyMix();
+    // A hidden, muted tab does no audio work at all.
+    if (muted) this.suspend('background'); else this.resume('background');
+  }
+
+  /** Reasons the graph is held. It runs only when there are none, so a key press while the pause
+   *  menu is open cannot restart it, and showing the tab cannot un-pause it. */
+  private holds = new Set<string>();
+
+  /** Stop the whole graph's clock (the pause menu, a hidden tab). Sounds freeze where they are. */
+  suspend(reason = 'app'): void {
+    this.holds.add(reason);
+    void this.ctx?.suspend?.();
+  }
+
+  /** Release one reason; the graph runs again once none remain. A no-op before the first gesture. */
+  resume(reason = 'app'): void {
+    this.holds.delete(reason);
+    if (this.holds.size === 0) void this.ctx?.resume?.();
+  }
+
+  /** Whether anything is holding the graph stopped. */
+  isHeld(): boolean {
+    return this.holds.size > 0;
+  }
+
+  /** The level (RMS, 0..1) of each channel as the listener hears it, after ducking. The analysers
+   *  are built on first use, so normal play pays nothing. For probes and the dev bench. */
+  levels(): Record<string, number> {
+    const ctx = this.ctx;
+    if (!ctx) return {};
+    if (!this.meters) {
+      const tap = (name: string, node: AudioNode) => { const a = ctx.createAnalyser(); a.fftSize = 1024; node.connect(a); return [name, a] as const; };
+      this.meters = Object.fromEntries([
+        tap('combat', this.combatDuck), tap('environment', this.ambDuck), tap('music', this.musicDuck), tap('interactions', this.interactDuck),
+        tap('ui', this.uiBus), tap('radio', this.voiceBus), tap('master', this.master),
+      ]);
+    }
+    const buf = new Float32Array(1024);
+    return Object.fromEntries(Object.entries(this.meters).map(([k, a]) => {
+      a.getFloatTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+      return [k, Math.sqrt(sum / buf.length)];
+    }));
   }
 
   private applyMix(): void {
@@ -774,6 +864,7 @@ export class FpsAudio {
     set(this.gunBus, 0.9 * this.mix.effects);
     set(this.impactBus, 0.9 * this.mix.effects);
     set(this.uiBus, this.mix.ui);
+    set(this.interactBus, this.mix.interactions);
     set(this.voiceBus, this.mix.voice);
     set(this.ambBus, this.ambTarget);
     // MusicLayers is mixed hot (it was written to sit alone); 0.6 seats it under the fight.
@@ -863,18 +954,32 @@ export class FpsAudio {
     this.setDrone(cfg.drone);
   }
 
-  /** Duck the ambience under a loud event, then let it swell back. */
-  private duck(amount: number, seconds: number): void {
+  /** Dip a duck stage to (1 - amount) and let it swell back over `seconds`. */
+  private dip(node: GainNode | undefined, amount: number, seconds: number): void {
     const ctx = this.ctx;
-    if (!ctx) return;
-    const g = this.ambBus.gain;
+    if (!ctx || !node) return;
     const now = ctx.currentTime;
+    const g = node.gain;
     g.cancelScheduledValues(now);
-    g.setValueAtTime(Math.max(0, this.ambTarget * (1 - amount)), now);
-    g.linearRampToValueAtTime(this.ambTarget, now + seconds + 0.25);
+    g.setValueAtTime(Math.max(0, 1 - amount), now);
+    g.linearRampToValueAtTime(1, now + seconds + 0.25);
   }
 
-  private tick(freq: number, vol: number, delay: number): void {
+  /** Duck the ambience under a loud event, then let it swell back. */
+  private duck(amount: number, seconds: number): void {
+    this.dip(this.ambDuck, amount, seconds);
+  }
+
+  /** A radio line owns the mix: music, combat and handling dip rather than vanish, and the room
+   *  tone eases back, so the voice is clear and the world is still there. */
+  private radioDuck(seconds: number): void {
+    this.dip(this.musicDuck, 0.55, seconds);
+    this.dip(this.combatDuck, 0.35, seconds);
+    this.dip(this.interactDuck, 0.3, seconds);
+    this.duck(0.5, seconds);
+  }
+
+  private tick(freq: number, vol: number, delay: number, bus?: GainNode): void {
     const ctx = this.ctx;
     if (!ctx) return;
     const now = ctx.currentTime + delay;
@@ -887,7 +992,7 @@ export class FpsAudio {
     const g = ctx.createGain();
     g.gain.setValueAtTime(vol, now);
     g.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
-    src.connect(bp).connect(g).connect(this.uiBus);
+    src.connect(bp).connect(g).connect(bus ?? this.uiBus);
     src.start(now);
     src.stop(now + 0.05);
   }

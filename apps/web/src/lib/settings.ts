@@ -22,7 +22,8 @@ export type CrosshairStyle = 'cross' | 'dot' | 'circle' | 'cross-dot'
 export type Palette = 'standard' | 'redgreen' | 'tritan'
 export type AimAssist = 'touch' | 'always' | 'off'
 
-export interface AudioMix { master: number; music: number; effects: number; voice: number; ambience: number; ui: number }
+/** The seven channels. Saved keys predate the split: `effects` is Combat, `ambience` is Environment, `voice` is Radio and dialogue. */
+export interface AudioMix { master: number; music: number; effects: number; voice: number; ambience: number; ui: number; interactions: number }
 
 export interface Graphics {
   /** Share of the preset's resolution actually rendered (lower = faster, softer). */
@@ -131,7 +132,7 @@ export const DEFAULTS: Settings = {
   quality: 'auto',
   fov: 55,
   graphics: DEFAULT_GRAPHICS,
-  audio: { master: 0.9, music: 0.5, effects: 1, voice: 1, ambience: 0.8, ui: 0.8 },
+  audio: { master: 0.9, music: 0.5, effects: 1, voice: 1, ambience: 0.8, ui: 0.8, interactions: 1 },
   muteInBackground: true,
   subtitles: { on: true, size: 'm', background: 0.45, speakerColors: true },
   lookSens: 1,
@@ -169,6 +170,7 @@ export function normalize(raw: unknown, legacy: { quality?: string | null; sens?
     audio: {
       master: unit(a.master, DEFAULTS.audio.master), music: unit(a.music, DEFAULTS.audio.music), effects: unit(a.effects, DEFAULTS.audio.effects),
       voice: unit(a.voice, DEFAULTS.audio.voice), ambience: unit(a.ambience, DEFAULTS.audio.ambience), ui: unit(a.ui, DEFAULTS.audio.ui),
+      interactions: unit(a.interactions, DEFAULTS.audio.interactions),
     },
     muteInBackground: bool(s.muteInBackground, DEFAULTS.muteInBackground),
     subtitles: {

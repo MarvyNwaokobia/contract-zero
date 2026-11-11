@@ -25,7 +25,7 @@ import { FpsAudio } from '@/engine/audio'
 type Cat = 'display' | 'audio' | 'controls' | 'keys' | 'interface' | 'access' | 'account'
 const CATS: { id: Cat; code: string; label: string; blurb: string; icon: ReactNode }[] = [
   { id: 'display', code: '01', label: 'Display', blurb: 'Quality, resolution, frame rate and effects. Staged: apply to take effect.', icon: <><rect x="3" y="4" width="18" height="12" /><path d="M8 20h8M12 16v4" /></> },
-  { id: 'audio', code: '02', label: 'Audio', blurb: 'Six channels, each live. Test plays a sample through that channel.', icon: <path d="M4 10v4h4l5 4V6L8 10zM16 9a4 4 0 0 1 0 6M19 6a8 8 0 0 1 0 12" /> },
+  { id: 'audio', code: '02', label: 'Audio', blurb: 'Seven channels, each live. Test plays a sample through that channel.', icon: <path d="M4 10v4h4l5 4V6L8 10zM16 9a4 4 0 0 1 0 6M19 6a8 8 0 0 1 0 12" /> },
   { id: 'controls', code: '03', label: 'Controls', blurb: 'Look speed, aiming and whether keys are held or pressed once.', icon: <><rect x="6" y="3" width="12" height="18" rx="6" /><path d="M12 7v4" /></> },
   { id: 'keys', code: '04', label: 'Key bindings', blurb: 'Every keyboard action, two keys each, with conflicts handled.', icon: <><rect x="2" y="6" width="20" height="12" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" /></> },
   { id: 'interface', code: '05', label: 'Interface', blurb: 'Crosshair, HUD size, markers and feedback.', icon: <><circle cx="12" cy="12" r="7" /><path d="M12 2v5M12 17v5M2 12h5M17 12h5" /></> },
@@ -322,10 +322,11 @@ function PerfInfo({ plan, preset }: { plan: ReturnType<typeof renderPlan>; prese
 const MIX: { key: keyof AudioMix; label: string; hint: string }[] = [
   { key: 'master', label: 'Master', hint: 'Everything' },
   { key: 'music', label: 'Music', hint: 'The score: a drone, a pulse when you’re spotted, the theme under fire' },
-  { key: 'effects', label: 'Effects', hint: 'Gunfire, impacts, explosions' },
-  { key: 'voice', label: 'Voice and radio', hint: 'Briefings and radio chatter' },
-  { key: 'ambience', label: 'Ambience', hint: 'Wind, room tone, refinery machinery' },
-  { key: 'ui', label: 'Interface', hint: 'Pickups, beeps, reload clicks, countdowns' },
+  { key: 'effects', label: 'Combat', hint: 'Gunfire, impacts, explosions, alarms, damage and heartbeat' },
+  { key: 'voice', label: 'Radio and dialogue', hint: 'Briefings and radio chatter' },
+  { key: 'ambience', label: 'Environment', hint: 'Wind, room tone, machinery, the sounds of the site' },
+  { key: 'interactions', label: 'Interactions', hint: 'Reloads, pickups, footsteps, handling' },
+  { key: 'ui', label: 'Interface', hint: 'Hit markers, countdown beeps, menu feedback' },
 ]
 
 function Audio({ s, set }: { s: Settings; set: SetFn }) {
@@ -348,7 +349,8 @@ function Audio({ s, set }: { s: Settings; set: SetFn }) {
     a.setMix({ ...s.audio, music: 0 })
     if (k === 'effects' || k === 'master') a.explosion([0, 1, -6])
     else if (k === 'voice') a.vo('dyn-settings-test', 'handler')
-    else if (k === 'ambience') a.alarm(1.5)
+    else if (k === 'ambience') a.setZone('CINDER_YARD')
+    else if (k === 'interactions') { a.reloadStart(); setTimeout(() => a.reloadDone(), 450) }
     else a.beep(true)
   }
   return (

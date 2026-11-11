@@ -13,6 +13,7 @@ import type { FacilityIntel } from '@/lib/world/intel'
 import type { MarketMerchant } from '@/lib/api'
 import { RESOURCE_LABEL } from '@/lib/api'
 import { convoyState } from '@/lib/world/convoy'
+import { attribution, personaFor } from '@/lib/personas'
 import { inboundFor, MerchantSummary, ReadinessSummary } from '@/components/world/Readiness'
 import { BeforeAfter } from '@/components/world/BeforeAfter'
 import { FactionInsignia } from '@/components/ui/FactionInsignia'
@@ -129,6 +130,7 @@ export function FacilityPanel({ intel, merchant, tick }: { intel: FacilityIntel;
       </Block>}
 
       <Block title={isFaction ? 'Commander' : 'Latest decision'}>
+        {(() => { const p = personaFor(f.owner); return p ? <p className="mb-1 text-xs text-muted" data-testid="persona"><span className="font-display font-bold uppercase tracking-wider text-fog">{attribution(p)}</span> <span className="text-dim">· call sign {p.callSign}. Speaks for {owner?.name ?? f.owner}; the economy engine makes the decision.</span></p> : null })()}
         {intel.latestDecision ? (
           <p className="text-sm"><span className="text-dim">{worldClock(intel.latestDecision.tick)} · </span><span className="text-fog">{intel.latestDecision.payload.rationale ?? intel.latestDecision.payload.trigger ?? 'acted'}</span>{intel.latestDecision.payload.validation === 'rejected' && <span className="text-hostile"> (rejected by the engine)</span>}</p>
         ) : <p className="text-sm text-muted">No decision logged yet.</p>}

@@ -114,7 +114,7 @@ Deliberately **not** claimed: that fuel idles factory machinery, that low credit
 | **Vex Exchange** | Informal, opportunistic, wartime-market banter | Tarp, chalk-marked crates, amber lamps | Mixed salvage, handwritten tags |
 | **Halcyon Logistics** | Polished procurement language | Clean white-grey, thin blue accent | Uniform palletised freight |
 
-Character names and portraits are **not yet created**. When added they must be recorded here and reused; dialogue may explain a decision but never make one (the engine's validated action is the decision).
+Cast, names, call signs and voice direction are recorded in [PERSONAS.md](PERSONAS.md) and defined in `apps/web/src/lib/personas.ts` (a test keeps the data and the doc in step). Rule: the economy decides, a persona only explains; names are interface attribution and are never put into generated radio text. Shown on the War Table's Commander block (checked live for all four powers). Portraits are not drawn, and Halcyon's radio voice is not wired.
 
 ## 3. Delivery status
 

@@ -6,12 +6,13 @@ import { Rajdhani } from 'next/font/google'
 import { useSearchParams } from 'next/navigation'
 import { Suspense, useMemo, useState } from 'react'
 import { Briefing, Debrief } from '@/components/story/Briefing'
+import { GunStatBars } from '@/components/armory/GunStatBars'
 import { ScreenTip } from '@/components/help/ScreenTip'
 import { ConsequenceTip } from '@/components/help/ConsequenceTip'
 import type { MissionStory } from '@/engine/story/presence'
 import { Panel, Shell, Stat } from '@/components/ui/Shell'
 import { buildOperationMission } from '@/engine/fps/convoy'
-import { GUN_CATALOG, gunDps, type GunId } from '@/engine/combat/GunStats'
+import { GUN_CATALOG, type GunId } from '@/engine/combat/GunStats'
 import type { ContractRunStats } from '@/engine/scene/ContractZeroScene'
 import { useQuery } from '@tanstack/react-query'
 import { useSession } from '@/lib/useSession'
@@ -292,59 +293,52 @@ function Deploy() {
     return <Shell title="Deploy"><Panel><p className="text-muted">Reporting to command…</p></Panel></Shell>
   }
 
+  const gp = phase.start.mission.guards
+  const guardsIn = gp ? gp.hall.rifles + gp.hall.sidearms + gp.yard.rifles + gp.yard.sidearms : null
+  const owned = new Map((armory.data ?? []).map((a) => [a.id, a]))
+  const chosen = GUN_CATALOG[gun]
+  const Card = ({ id, tag, tagTone, disabled = false }: { id: GunId; tag: string; tagTone: string; disabled?: boolean }) => (
+    <button
+      onClick={() => !disabled && setGun(id)} disabled={disabled} aria-pressed={gun === id} data-testid={owned.has(id) ? `gear-${id}` : `issue-${id}`}
+      className={`border px-4 py-3 text-left ${gun === id ? 'border-amber bg-amber/10' : disabled ? 'border-line/60 opacity-60' : 'border-line hover:bg-panel-2'}`}
+    >
+      <div className="mb-1.5 flex items-baseline justify-between gap-2"><span className="font-display font-bold uppercase tracking-wider text-fog">{GUN_CATALOG[id]?.name ?? id}</span><span className={`text-[11px] font-semibold uppercase tracking-wider ${tagTone}`}>{tag}</span></div>
+      <GunStatBars gun={id} compact />
+    </button>
+  )
   return (
-    <Shell title="Armory · Loadout" back={{ href: '/contracts', label: 'Contract Board' }}>
-      <Panel title={`${(phase.start.mission.site?.name ?? target).toUpperCase()} · ${phase.start.mission.site?.facility?.toUpperCase() ?? RESOURCE_LABEL[resource].toUpperCase()}`}>
-        <div className="grid gap-4 md:grid-cols-[1fr_280px]">
-          <div className="grid gap-2">
-            {ISSUE.map((id) => {
-              const g = GUN_CATALOG[id]
-              return (
-                <button
-                  key={id}
-                  onClick={() => setGun(id)}
-                  className={`border px-4 py-3 text-left ${gun === id ? 'border-amber bg-amber/10' : 'border-line hover:bg-panel-2'}`}
-                >
-                  <div className="font-semibold text-slate-100">{g.name}</div>
-                  <div className="text-xs text-slate-500">damage {g.damage} · {g.fireRate} rpm · mag {g.magazine} · {Math.round(gunDps(g))} dps</div>
-                </button>
-              )
-            })}
-            <div className="cz-label mt-2 !text-[10px]">Owned gear</div>
-            {(armory.data ?? []).map((a) => {
-              const id = a.id as GunId
-              const g = GUN_CATALOG[id]
-              const owned = a.owned > 0
-              return (
-                <button
-                  key={a.id}
-                  onClick={() => owned && setGun(id)}
-                  disabled={!owned}
-                  data-testid={`gear-${a.id}`}
-                  className={`border px-4 py-3 text-left ${gun === id ? 'border-amber bg-amber/10' : owned ? 'border-line hover:bg-panel-2' : 'border-line/60 opacity-60'}`}
-                >
-                  <div className="flex items-baseline justify-between gap-2">
-                    <span className="font-semibold text-slate-100">{a.title}</span>
-                    {owned ? <span className="text-xs font-semibold uppercase tracking-wider text-friendly">Owned{a.owned > 1 ? ` ×${a.owned}` : ''}</span> : <span className="text-xs text-muted">{a.price.toLocaleString()} cr at the Exchange</span>}
-                  </div>
-                  {g && <div className="text-xs text-slate-500">damage {g.damage} · {g.fireRate} rpm · mag {g.magazine} · {Math.round(gunDps(g))} dps</div>}
-                </button>
-              )
-            })}
-            <button className="cz-btn cz-btn-ghost self-start px-3 py-1 text-xs" data-testid="inspect-loadout" onClick={() => {
-              const a = (armory.data ?? []).find((x) => x.id === gun)
-              setInspect({ type: 'weapon', gun, status: a ? (a.owned > 0 ? 'owned' : 'locked') : 'standard', owned: a?.owned, price: a?.price ?? null })
-            }}>Inspect the selected weapon</button>
-            {inspect && <ItemInspector item={inspect} onClose={() => setInspect(null)} />}
-            <p className="text-xs text-slate-500">SMG and assault rifle are standard issue. Owned guns are tokens in your account; <Link href="/exchange" className="text-amber-hi hover:underline">Vex&apos;s armory</Link> sells them.</p>
-          </div>
-          <div className="h-56 border border-line" style={{ background: 'radial-gradient(ellipse at 50% 55%, #23272e 0%, #0e1013 70%)' }}><GunTurntable gunId={gun} className="h-full w-full" /></div>
+    <Shell title="Armory · Loadout" back={{ href: '/contracts', label: 'Contract Board' }} wide>
+      <div className="grid gap-4 lg:grid-cols-[1fr_26rem]" data-testid="loadout">
+        <div className="grid content-start gap-2">
+          <div className="cz-label !text-[10px]">Standard issue</div>
+          {ISSUE.map((id) => <Card key={id} id={id} tag="Issued" tagTone="text-steel" />)}
+          <div className="cz-label mt-2 !text-[10px]">Owned gear · tokens in your account</div>
+          {(armory.data ?? []).map((a) => {
+            const have = a.owned > 0
+            return <Card key={a.id} id={a.id as GunId} disabled={!have} tag={have ? `Owned${a.owned > 1 ? ` ×${a.owned}` : ''}` : `${a.price ?? ''} cr at Vex`} tagTone={have ? 'text-friendly' : 'text-muted'} />
+          })}
+          {armory.data?.length === 0 && <p className="text-sm text-muted">You own no gear yet.</p>}
+          <p className="text-xs text-dim">SMG and assault rifle are standard issue. <Link href="/exchange" className="text-amber-hi hover:underline">Vex&apos;s armory</Link> sells the rest; what you buy stays yours.</p>
         </div>
-      </Panel>
+        <aside className="cz-panel p-4 lg:sticky lg:top-4 lg:self-start" aria-label="Selected weapon">
+          <div className="h-56 border border-line" style={{ background: 'radial-gradient(ellipse at 50% 55%, #23272e 0%, #0e1013 70%)' }}><GunTurntable gunId={gun} className="h-full w-full" /></div>
+          <div className="mt-3 font-display text-2xl font-bold uppercase tracking-wide text-fog" data-testid="selected-gun">{chosen?.name ?? gun}</div>
+          <div className="mt-2"><GunStatBars gun={gun} /></div>
+          <p className="mt-2 text-[11px] text-dim">Each bar is measured against the best weapon in the game, with the real figure beside it.</p>
+          <button className="cz-btn cz-btn-ghost mt-3 px-3 py-1 text-xs" data-testid="inspect-loadout" onClick={() => {
+            const a = owned.get(gun)
+            setInspect({ type: 'weapon', gun, status: a ? (a.owned > 0 ? 'owned' : 'locked') : 'standard', owned: a?.owned, price: a?.price ?? null })
+          }}>Inspect the selected weapon</button>
+          {inspect && <ItemInspector item={inspect} onClose={() => setInspect(null)} />}
+          <div className="mt-3 border-t border-line pt-3 text-xs text-muted" data-testid="loadout-recap">Going in: <span className="text-fog">{phase.start.mission.site?.name ?? target}</span>{guardsIn != null ? <> · <span className="text-fog">{guardsIn} guards</span></> : null}. A sidearm and spare magazines come with any weapon.</div>
+        </aside>
+      </div>
       {phase.kind === 'loadout' && phase.error && <p className="mt-4 text-sm text-rose-400">Could not arm: {phase.error}</p>}
-      <button onClick={arm} disabled={phase.kind === 'arming'} className="cz-btn cz-btn-primary mt-6 px-6 py-3" data-testid="deploy">
-        {phase.kind === 'arming' ? 'Checking your gear…' : 'Deploy'}
-      </button>
+      <div className="sticky bottom-0 z-20 -mx-4 mt-6 border-t border-line-strong bg-ink/95 px-4 py-3 backdrop-blur sm:mx-0" data-testid="deploy-bar">
+        <button onClick={arm} disabled={phase.kind === 'arming'} className="cz-btn cz-btn-primary px-6 py-3" data-testid="deploy">
+          {phase.kind === 'arming' ? 'Checking your gear…' : `Deploy with ${chosen?.name ?? gun}`}
+        </button>
+      </div>
     </Shell>
   )
 }

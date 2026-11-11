@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Panel, Shell, Stat } from '@/components/ui/Shell'
 import { NewSupplyOrder, OrderBoard, TradingPartners, useMarket } from '@/components/market/SupplyOrders'
+import { GunStatBars } from '@/components/armory/GunStatBars'
 import { ScreenTip } from '@/components/help/ScreenTip'
 import { AdvancedSwitch, ExchangeAdvanced } from '@/components/help/AdvancedView'
 import { IntentsPanel } from '@/components/market/IntentsPanel'
@@ -42,6 +43,7 @@ function Armory({ items, canTrade, busy, onBuy }: { items: ArmoryItem[]; canTrad
               {g.price < g.list_price && <span className="ml-2 text-xs text-muted line-through">{g.list_price.toLocaleString()}</span>}
               <span className="ml-2 text-xs text-muted">{g.stock > 0 ? `${g.stock} in the armory` : 'sold out · restocks within 12 hours'}</span>
             </div>
+            <GunStatBars gun={g.id as GunId} compact />
             <div className="text-[11px] text-dim">token <code>{g.token}</code></div>
             <div className="mt-auto flex gap-2">
               <button className="cz-btn cz-btn-primary flex-1 px-4 py-1.5 text-sm" disabled={!canTrade || busy || g.stock < 1} onClick={() => onBuy(g.id)}>
